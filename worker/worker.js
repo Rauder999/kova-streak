@@ -248,13 +248,19 @@ async function handleCallback(request, env) {
       redirect_uri: discordRedirectUri(request),
     }),
   });
-  if (!tokenRes.ok) return fail('token_exchange_failed');
+  if (!tokenRes.ok) {
+    console.error('token exchange failed:', tokenRes.status, (await tokenRes.text()).slice(0, 300));
+    return fail('token_exchange_failed');
+  }
   const tokens = await tokenRes.json();
 
   const meRes = await fetch('https://discord.com/api/v10/users/@me', {
     headers: { Authorization: `Bearer ${tokens.access_token}` },
   });
-  if (!meRes.ok) return fail('profile_failed');
+  if (!meRes.ok) {
+    console.error('profile fetch failed:', meRes.status, (await meRes.text()).slice(0, 300));
+    return fail('profile_failed');
+  }
   const me = await meRes.json();
 
   // Пускаем только участников сервера группы, если GUILD_ID задан.
@@ -262,7 +268,10 @@ async function handleCallback(request, env) {
     const gRes = await fetch('https://discord.com/api/v10/users/@me/guilds', {
       headers: { Authorization: `Bearer ${tokens.access_token}` },
     });
-    if (!gRes.ok) return fail('guild_check_failed');
+    if (!gRes.ok) {
+      console.error('guild check failed:', gRes.status, (await gRes.text()).slice(0, 300));
+      return fail('guild_check_failed');
+    }
     const guilds = await gRes.json();
     if (!Array.isArray(guilds) || !guilds.some((g) => g.id === env.GUILD_ID)) return fail('not_in_guild');
   }

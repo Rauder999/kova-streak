@@ -8,6 +8,9 @@ import {
   ensurePermission, countRunsForDate, matchPlaylist,
 } from './fs.js';
 
+// Стандартный путь стима; у друзей библиотека может жить на другом диске
+const DEFAULT_STATS_PATH = 'C:\\Program Files (x86)\\Steam\\steamapps\\common\\FPSAimTrainer\\FPSAimTrainer\\stats';
+
 const POLL_MS = 5000;          // как часто перечитываем листинг папки
 const POST_DEBOUNCE_MS = 60000; // не чаще раза в минуту шлем частичный прогресс
 const GROUP_REFRESH_MS = 60000;
@@ -224,17 +227,45 @@ export function renderToday() {
 
   if (!state.granted) {
     const gate = el('div', 'card gate-card');
-    gate.append(el('h2', null, state.handle ? 'Grant folder access' : 'Connect your stats folder'));
-    gate.append(el('p', 'lede', state.handle
-      ? 'The folder is remembered, the browser just needs one click per session to reopen it.'
-      : 'Pick FPSAimTrainer\\FPSAimTrainer\\stats once. After that the site watches it by itself.'));
-    const btn = el('button', 'primary big', state.handle ? 'Grant access' : 'Choose stats folder');
-    btn.addEventListener('click', state.handle ? regrant : connectFolder);
-    gate.append(btn);
     if (state.handle) {
+      // папка уже выбрана раньше, нужен только клик по разрешению
+      gate.append(el('h2', null, 'Grant folder access'));
+      gate.append(el('p', 'lede', 'The folder is remembered. In the browser prompt pick "Allow on every visit" and even this click disappears: next time the page will just start watching on its own.'));
+      const btn = el('button', 'primary big', 'Grant access');
+      btn.addEventListener('click', regrant);
+      gate.append(btn);
       const forget = el('button', 'ghost', 'Pick a different folder');
       forget.addEventListener('click', async () => { await forgetFolder(); state.handle = null; renderToday(); });
       gate.append(forget);
+    } else {
+      // первый раз: браузер требует выбрать папку руками, но путь можно
+      // вставить в диалог целиком, без блужданий по Program Files
+      gate.append(el('h2', null, 'Connect your stats folder'));
+      gate.append(el('p', 'lede', 'One-time setup. Copy the path, press the button, paste it into the folder field of the picker and hit Select Folder.'));
+      const row = el('div', 'path-row');
+      const code = el('code', 'mono path-text', DEFAULT_STATS_PATH);
+      const copy = el('button', null, 'Copy path');
+      copy.addEventListener('click', async () => {
+        const ok = await copyText(DEFAULT_STATS_PATH);
+        if (ok) {
+          copy.textContent = 'Copied';
+          setTimeout(() => { copy.textContent = 'Copy path'; }, 1500);
+        } else {
+          // оба механизма копирования зарезаны: выделяем путь, юзеру остается Ctrl+C
+          const range = document.createRange();
+          range.selectNodeContents(code);
+          const sel = getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+          copy.textContent = 'Press Ctrl+C';
+        }
+      });
+      row.append(code, copy);
+      gate.append(row);
+      const btn = el('button', 'primary big', 'Choose stats folder');
+      btn.addEventListener('click', connectFolder);
+      gate.append(btn);
+      gate.append(el('p', 'fine', 'Steam on another drive? Find steamapps\\common\\FPSAimTrainer\\FPSAimTrainer\\stats there. The folder is remembered afterwards.'));
     }
     root.append(gate);
     if (state.scanError) root.append(notice(state.scanError, 'error'));
@@ -309,6 +340,26 @@ function statBlock(label, value, hint) {
 
 function notice(text, kind = '') {
   return el('div', 'notice ' + kind, text);
+}
+
+// Клипборд с фолбэком: clipboard API может быть запрещен политикой,
+// execCommand старый, но не требует разрешений.
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.append(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch { /* остается ручное выделение */ }
+    ta.remove();
+    return ok;
+  }
 }
 
 // ---------- вкладка Group ----------
