@@ -8,21 +8,21 @@
   "kv_namespaces": [
     {
       "binding": "KOVA",
-      // подставить id из `wrangler kv namespace create KOVA`
-      "id": "REPLACE_WITH_KV_ID"
+      "id": "5e52796995924648888ab8412642c103"
     }
   ],
   "triggers": {
-    // 20:00 UTC = 23:00 при TZ_OFFSET_HOURS=3, дайджест уходит перед концом дня
-    "crons": ["0 20 * * *"]
+    // 05:00 UTC = 23:00 в Денвере летом (MDT), 22:00 зимой (MST)
+    "crons": ["0 5 * * *"]
   },
   "vars": {
-    "DISCORD_CLIENT_ID": "REPLACE_WITH_CLIENT_ID",
+    "DISCORD_CLIENT_ID": "1539370154792853604",
     // через запятую, кто видит вкладку Admin
-    "ADMIN_DISCORD_IDS": "REPLACE_WITH_YOUR_DISCORD_ID",
+    "ADMIN_DISCORD_IDS": "614861553790877709",
     "SITE_URL": "https://rauder999.github.io/kova-streak/",
-    // пусто = пускать всех, кто залогинился; id сервера = только его участников
-    "GUILD_ID": "",
-    "TZ_OFFSET_HOURS": "3"
+    // пускаем только участников этого сервера
+    "GUILD_ID": "1324116611849916446",
+    // день группы считается по этой таймзоне (машина Rauder, Mountain Time)
+    "TZ_NAME": "America/Denver"
   }
 }

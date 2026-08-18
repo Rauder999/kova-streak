@@ -3,7 +3,7 @@
 //
 // Биндинги и переменные (см. wrangler.jsonc и README.md):
 //   KV      KOVA
-//   vars    DISCORD_CLIENT_ID, ADMIN_DISCORD_IDS, SITE_URL, GUILD_ID, TZ_OFFSET_HOURS
+//   vars    DISCORD_CLIENT_ID, ADMIN_DISCORD_IDS, SITE_URL, GUILD_ID, TZ_NAME
 //   secrets DISCORD_CLIENT_SECRET, SESSION_SECRET, DISCORD_WEBHOOK_URL
 
 const ALLOWED_ORIGINS = [
@@ -74,12 +74,12 @@ async function verifyToken(token, secret) {
 
 // ---------- даты ----------
 
-// Локальная дата группы. Cloudflare живет в UTC, поэтому день считаем
-// со сдвигом TZ_OFFSET_HOURS (по умолчанию UTC+3).
+// Локальная дата группы. Cloudflare живет в UTC, а машина админа в Mountain
+// Time с летним временем, поэтому фиксированный сдвиг не годится: берем
+// настоящую таймзону через Intl (en-CA дает формат YYYY-MM-DD).
 function groupDate(env, at = Date.now()) {
-  const offset = Number(env.TZ_OFFSET_HOURS ?? 3);
-  const d = new Date(at + offset * 3600_000);
-  return d.toISOString().slice(0, 10);
+  const tz = env.TZ_NAME || 'America/Denver';
+  return new Date(at).toLocaleDateString('en-CA', { timeZone: tz });
 }
 
 function shiftDate(date, days) {
@@ -344,10 +344,11 @@ async function handleApi(request, env, url, cors) {
     const body = await request.json().catch(() => null);
     if (!body || !isDate(body.date)) return json({ error: 'date is required' }, 400, cors);
 
-    // Дату присылает клиент (его локальный день), но принимаем только
-    // сегодня или вчера по времени группы: за прошлые дни задним числом нельзя.
+    // Дату присылает клиент (его локальный день). Принимаем вчера, сегодня
+    // и завтра по времени группы: игрок в часовом поясе восточнее админа
+    // живет на день впереди, а задний ход дальше вчера все равно закрыт.
     const today = groupDate(env);
-    if (body.date !== today && body.date !== shiftDate(today, -1)) {
+    if (![shiftDate(today, -1), today, shiftDate(today, 1)].includes(body.date)) {
       return json({ error: 'Date out of range' }, 400, cors);
     }
 
