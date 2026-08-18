@@ -330,7 +330,27 @@ export function renderToday() {
       const btn = el('button', 'primary big', 'Choose stats folder');
       btn.addEventListener('click', connectFolder);
       gate.append(btn);
-      gate.append(el('p', 'fine', 'Steam on another drive? Find steamapps\\common\\FPSAimTrainer\\FPSAimTrainer\\stats there. Heads up: Chrome refuses any folder under C:\\Program Files, so with a default Steam install either move the game to a Steam library on another drive (Steam -> Settings -> Storage -> Move), or ask Rauder for the tiny mirror script that solves it on a single-drive PC. The folder is remembered afterwards.'));
+
+      // Chrome отказал: у большинства Steam стоит в Program Files, и браузер
+      // такие папки не открывает. Однострочник ставит живое зеркало сам.
+      const fix = el('div', 'gate-fix');
+      fix.append(el('h3', null, 'Chrome says it "contains system files"?'));
+      fix.append(el('p', null, 'That is Chrome refusing anything under C:\\Program Files, where default Steam installs live. One-time fix: press Win, type "powershell", Enter, then paste this line and press Enter:'));
+      const cmdRow = el('div', 'path-row');
+      const CMD = 'irm https://rauder999.github.io/kova-streak/mirror-setup.txt | iex';
+      cmdRow.append(el('code', 'mono path-text', CMD));
+      const cmdCopy = el('button', null, 'Copy command');
+      cmdCopy.addEventListener('click', async () => {
+        const ok = await copyText(CMD);
+        cmdCopy.textContent = ok ? 'Copied' : 'Select and copy above';
+        if (ok) setTimeout(() => { cmdCopy.textContent = 'Copy command'; }, 1500);
+      });
+      cmdRow.append(cmdCopy);
+      fix.append(cmdRow);
+      fix.append(el('p', null, 'It finds your KovaaK\'s, sets up a tiny live mirror Chrome is allowed to open (synced within a second, starts with Windows) and puts the new folder path in your clipboard. Then press "Choose stats folder" above and paste that path.'));
+      gate.append(fix);
+
+      gate.append(el('p', 'fine', 'The folder is remembered afterwards. Next visits are a single "Grant access" click, and none at all if you pick "Allow on every visit".'));
     }
     root.append(gate);
     if (state.scanError) root.append(notice(state.scanError, 'error'));

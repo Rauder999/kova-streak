@@ -217,6 +217,19 @@ main { max-width: 980px; margin: 0 auto; padding: 24px; width: 100%; }
 
 .notice button { display: block; margin-top: 10px; }
 
+.gate-fix {
+  text-align: left;
+  max-width: 640px;
+  margin: 22px auto 0;
+  padding: 14px 18px;
+  background: var(--bg-0);
+  border: 1px solid var(--line-0);
+  border-radius: var(--radius-sm);
+}
+.gate-fix h3 { font-size: 14px; margin: 0 0 6px; }
+.gate-fix p { font-size: 13px; color: var(--chrome); margin: 8px 0; }
+.gate-fix .path-row { justify-content: flex-start; margin: 10px 0; }
+
 .path-row {
   display: flex; align-items: center; justify-content: center;
   gap: 8px; flex-wrap: wrap;

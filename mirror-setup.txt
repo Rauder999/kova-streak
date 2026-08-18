@@ -1,0 +1,124 @@
+# KOVA STREAK: one-time fix for PCs where KovaaK's lives under C:\Program Files.
+# Chrome refuses to open that folder for websites, so this script creates a live
+# mirror at %USERPROFILE%\KovaaK-stats and keeps it synced within a second.
+# Run from PowerShell:  irm https://rauder999.github.io/kova-streak/mirror-setup.txt | iex
+# Undo later: remove KovaaKStatsMirror from HKCU\...\CurrentVersion\Run, kill powershell.exe.
+
+$ErrorActionPreference = 'Stop'
+
+Write-Host ''
+Write-Host '=== KOVA STREAK mirror setup ===' -ForegroundColor Magenta
+
+# --- find the stats folder: default installs, then every Steam library on the PC ---
+$statsTail = 'steamapps\common\FPSAimTrainer\FPSAimTrainer\stats'
+$candidates = @()
+foreach ($pf in @(${env:ProgramFiles(x86)}, $env:ProgramFiles)) {
+  if ($pf) { $candidates += (Join-Path $pf ('Steam\' + $statsTail)) }
+}
+foreach ($pf in @(${env:ProgramFiles(x86)}, $env:ProgramFiles)) {
+  if (-not $pf) { continue }
+  $vdf = Join-Path $pf 'Steam\steamapps\libraryfolders.vdf'
+  if (Test-Path $vdf) {
+    foreach ($m in [regex]::Matches((Get-Content $vdf -Raw), '"path"\s+"([^"]+)"')) {
+      $lib = $m.Groups[1].Value -replace '\\\\', '\'
+      $candidates += (Join-Path $lib $statsTail)
+    }
+  }
+}
+$stats = $null
+foreach ($c in ($candidates | Select-Object -Unique)) {
+  if (Test-Path $c) { $stats = $c; break }
+}
+if (-not $stats) {
+  Write-Host 'Could not find the KovaaK''s stats folder automatically.' -ForegroundColor Yellow
+  $stats = Read-Host 'Paste the full path to your ...\FPSAimTrainer\FPSAimTrainer\stats folder'
+  $stats = $stats.Trim('"').Trim()
+  if (-not (Test-Path $stats)) { Write-Host 'That path does not exist. Aborting.' -ForegroundColor Red; exit 1 }
+}
+Write-Host "Found KovaaK's stats: $stats"
+
+# --- if the folder is not under Program Files, no mirror is needed at all ---
+$underPF = $false
+foreach ($pf in @(${env:ProgramFiles(x86)}, $env:ProgramFiles)) {
+  if ($pf -and $stats.StartsWith($pf, [System.StringComparison]::OrdinalIgnoreCase)) { $underPF = $true }
+}
+if (-not $underPF) {
+  Set-Clipboard $stats
+  Write-Host ''
+  Write-Host 'Good news: this folder is NOT under Program Files, Chrome can open it directly.' -ForegroundColor Green
+  Write-Host 'The path is already in your clipboard. On the site press "Choose stats folder"'
+  Write-Host 'and paste it into the folder field:'
+  Write-Host "  $stats" -ForegroundColor Cyan
+  exit 0
+}
+
+# --- install the live mirror ---
+$mirror = Join-Path $env:USERPROFILE 'KovaaK-stats'
+$ps1 = Join-Path $env:USERPROFILE 'kovaaks-stats-mirror.ps1'
+$vbs = Join-Path $env:USERPROFILE 'kovaaks-stats-mirror.vbs'
+New-Item -ItemType Directory -Force -Path $mirror | Out-Null
+
+$watcher = @'
+# KOVA STREAK live mirror (installed by mirror-setup).
+# Chrome refuses to open folders under Program Files for websites,
+# so the tracker reads this mirror instead of the real stats folder.
+# A FileSystemWatcher wakes on any change, one robocopy delta pass syncs
+# everything; latency is about a second. Off switch: remove the
+# KovaaKStatsMirror value from HKCU\...\CurrentVersion\Run, kill powershell.
+
+$src = '__SRC__'
+$dst = '__DST__'
+
+$mutex = New-Object System.Threading.Mutex($false, 'Local\KovaaKStatsMirror')
+try { $acquired = $mutex.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $acquired = $true }
+if (-not $acquired) { exit }
+
+$log = Join-Path $env:USERPROFILE 'kovaaks-stats-mirror.log'
+"start $(Get-Date -Format s) pid=$PID src=$src" | Set-Content $log
+
+function Sync-Pass {
+    robocopy $src $dst /MIR /R:1 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+    "pass $(Get-Date -Format s) rc=$LASTEXITCODE" | Add-Content $log
+}
+
+Sync-Pass
+
+$fsw = New-Object System.IO.FileSystemWatcher $src
+$fsw.IncludeSubdirectories = $false
+
+while ($true) {
+    $change = $fsw.WaitForChanged([System.IO.WatcherChangeTypes]::All, 3600000)
+    "wake $(Get-Date -Format s) timedOut=$($change.TimedOut) name=$($change.Name)" | Add-Content $log
+    Start-Sleep -Milliseconds 300
+    Sync-Pass
+}
+'@
+$watcher = $watcher.Replace('__SRC__', $stats).Replace('__DST__', $mirror)
+[System.IO.File]::WriteAllText($ps1, $watcher, (New-Object System.Text.UTF8Encoding($false)))
+
+$launcher = "' KOVA STREAK mirror launcher (installed by mirror-setup)`r`n" +
+  "Set sh = CreateObject(""Wscript.Shell"")`r`n" +
+  "sh.Run ""powershell.exe -NoProfile -ExecutionPolicy Bypass -File """"$ps1"""""", 0, False`r`n"
+[System.IO.File]::WriteAllText($vbs, $launcher, (New-Object System.Text.UTF8Encoding($false)))
+
+# restart cleanly if an older copy is running
+Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+  Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match 'kovaaks-stats-mirror' } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+Start-Sleep -Milliseconds 500
+
+Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'KovaaKStatsMirror' -Value ('wscript.exe "' + $vbs + '"')
+Start-Process wscript.exe -ArgumentList ('"' + $vbs + '"')
+
+Write-Host ''
+Write-Host 'Syncing your stats for the first time...'
+Start-Sleep -Seconds 3
+$count = (Get-ChildItem $mirror -Filter *.csv -ErrorAction SilentlyContinue | Measure-Object).Count
+Write-Host "Mirror ready: $count stats files." -ForegroundColor Green
+Write-Host 'It stays live-synced and starts with Windows from now on.'
+Write-Host ''
+Set-Clipboard $mirror
+Write-Host 'The folder path is already in your clipboard. On the site press'
+Write-Host '"Choose stats folder" and paste it into the folder field:'
+Write-Host "  $mirror" -ForegroundColor Cyan
+Write-Host ''
