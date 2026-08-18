@@ -1,0 +1,28 @@
+{
+  "name": "kova-streak-api",
+  "main": "worker.js",
+  "compatibility_date": "2026-07-01",
+  "observability": {
+    "enabled": true
+  },
+  "kv_namespaces": [
+    {
+      "binding": "KOVA",
+      // подставить id из `wrangler kv namespace create KOVA`
+      "id": "REPLACE_WITH_KV_ID"
+    }
+  ],
+  "triggers": {
+    // 20:00 UTC = 23:00 при TZ_OFFSET_HOURS=3, дайджест уходит перед концом дня
+    "crons": ["0 20 * * *"]
+  },
+  "vars": {
+    "DISCORD_CLIENT_ID": "REPLACE_WITH_CLIENT_ID",
+    // через запятую, кто видит вкладку Admin
+    "ADMIN_DISCORD_IDS": "REPLACE_WITH_YOUR_DISCORD_ID",
+    "SITE_URL": "https://rauder999.github.io/kova-streak/",
+    // пусто = пускать всех, кто залогинился; id сервера = только его участников
+    "GUILD_ID": "",
+    "TZ_OFFSET_HOURS": "3"
+  }
+}
