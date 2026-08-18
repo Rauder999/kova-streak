@@ -293,7 +293,7 @@ export function renderToday() {
       const btn = el('button', 'primary big', 'Choose stats folder');
       btn.addEventListener('click', connectFolder);
       gate.append(btn);
-      gate.append(el('p', 'fine', 'Steam on another drive? Find steamapps\\common\\FPSAimTrainer\\FPSAimTrainer\\stats there. Heads up: Chrome refuses any folder under C:\\Program Files, so with a default Steam install move the game to a library outside Program Files first (Steam -> Settings -> Storage -> Move). The folder is remembered afterwards.'));
+      gate.append(el('p', 'fine', 'Steam on another drive? Find steamapps\\common\\FPSAimTrainer\\FPSAimTrainer\\stats there. Heads up: Chrome refuses any folder under C:\\Program Files, so with a default Steam install either move the game to a Steam library on another drive (Steam -> Settings -> Storage -> Move), or ask Rauder for the tiny mirror script that solves it on a single-drive PC. The folder is remembered afterwards.'));
     }
     root.append(gate);
     if (state.scanError) root.append(notice(state.scanError, 'error'));
