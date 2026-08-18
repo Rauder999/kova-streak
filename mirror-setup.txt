@@ -119,6 +119,12 @@ Write-Host 'It stays live-synced and starts with Windows from now on.'
 Write-Host ''
 Set-Clipboard $mirror
 Write-Host 'The folder path is already in your clipboard. On the site press'
-Write-Host '"Choose stats folder" and paste it into the folder field:'
+Write-Host '"Choose stats folder", paste it into the folder field, press Enter,'
+Write-Host 'then hit Select Folder:'
 Write-Host "  $mirror" -ForegroundColor Cyan
 Write-Host ''
+Write-Host 'If the clipboard gets overwritten, this works in the picker too:'
+Write-Host '  %USERPROFILE%\KovaaK-stats' -ForegroundColor Cyan
+Write-Host ''
+# наглядный якорь: окно проводника с зеркалом, путь виден в адресной строке
+Start-Process explorer.exe -ArgumentList ('"' + $mirror + '"')

@@ -305,7 +305,7 @@ export function renderToday() {
       } else {
         step('Get the playlist.', 'Import the week\'s playlist in KovaaK\'s (ask Rauder for the share code).');
       }
-      step('Point this site at your stats folder.', 'Copy the path below, press the button, paste it into the folder field of the picker and hit Select Folder.');
+      step('Point this site at your stats folder.', 'Copy the path below, press the button, paste it into the folder field of the picker, press Enter, then Select Folder. If Chrome refuses with a "system files" error, use the fix underneath.');
       gate.append(steps);
       const row = el('div', 'path-row');
       const code = el('code', 'mono path-text', DEFAULT_STATS_PATH);
@@ -347,7 +347,19 @@ export function renderToday() {
       });
       cmdRow.append(cmdCopy);
       fix.append(cmdRow);
-      fix.append(el('p', null, 'It finds your KovaaK\'s, sets up a tiny live mirror Chrome is allowed to open (synced within a second, starts with Windows) and puts the new folder path in your clipboard. Then press "Choose stats folder" above and paste that path.'));
+      fix.append(el('p', null, 'It finds your KovaaK\'s and sets up a tiny live mirror Chrome is allowed to open: synced within a second, starts with Windows. When it is done, press "Choose stats folder" above and paste this as the folder name (do NOT copy the Program Files path again):'));
+      const mirRow = el('div', 'path-row');
+      const MIRROR_PATH = '%USERPROFILE%\\KovaaK-stats';
+      mirRow.append(el('code', 'mono path-text', MIRROR_PATH));
+      const mirCopy = el('button', null, 'Copy mirror path');
+      mirCopy.addEventListener('click', async () => {
+        const ok = await copyText(MIRROR_PATH);
+        mirCopy.textContent = ok ? 'Copied' : 'Select and copy above';
+        if (ok) setTimeout(() => { mirCopy.textContent = 'Copy mirror path'; }, 1500);
+      });
+      mirRow.append(mirCopy);
+      fix.append(mirRow);
+      fix.append(el('p', null, 'Paste it, press Enter (the picker jumps inside the folder), then hit Select Folder.'));
       gate.append(fix);
 
       gate.append(el('p', 'fine', 'The folder is remembered afterwards. Next visits are a single "Grant access" click, and none at all if you pick "Allow on every visit".'));
