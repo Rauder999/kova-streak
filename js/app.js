@@ -37,6 +37,7 @@ let pollTimer = null;
 let groupTimer = null;
 let fsObserver = null;
 let lastTickAt = 0;
+let celebrationPending = false;
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
@@ -55,8 +56,14 @@ async function boot() {
     b.addEventListener('click', () => switchTab(b.dataset.tab));
   });
 
-  // вернулся в окно после игры: пересканировать немедленно, не ждать таймер
-  document.addEventListener('visibilitychange', () => { if (!document.hidden && pollTimer) tick(); });
+  // вернулся в окно после игры: пересканировать немедленно, не ждать таймер;
+  // и если 100% случились, пока вкладка была спрятана за игрой, встретить
+  // человека церемонией именно сейчас
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+    if (pollTimer) tick();
+    if (celebrationPending) { celebrationPending = false; startCelebration(); }
+  });
   window.addEventListener('focus', () => { if (pollTimer) tick(); });
 
   const err = authError();
@@ -92,6 +99,11 @@ async function boot() {
   switchTab(fsSupported() ? 'today' : 'group');
   refreshGroup();
   if (state.granted) startPolling();
+
+  // предпросмотр церемонии: ?celebrate=test, localStorage не трогает
+  if (new URLSearchParams(location.search).get('celebrate') === 'test') {
+    startCelebration(true);
+  }
 }
 
 function avatarFallback(uid) {
@@ -181,6 +193,7 @@ async function tick() {
     state.progress = matchPlaylist(state.playlist.scenarios, counts);
     state.progress.scanned = scanned;
     state.scanError = null;
+    if (state.progress.done) maybeCelebrate();
     $('scan-text').textContent = state.progress.done
       ? 'today is done'
       : `${state.progress.completedRuns} / ${state.progress.requiredRuns} runs`;
@@ -215,6 +228,7 @@ async function maybePost() {
     if (res && res.streak !== undefined) state.streak = res;
     if (state.tab === 'today') renderToday();
   } catch (e) {
+    if (handleApiError(e)) return;
     state.scanError = 'Could not save progress: ' + e.message;
   } finally {
     state.posting = false;
@@ -416,6 +430,91 @@ function notice(text, kind = '') {
   return el('div', 'notice ' + kind, text);
 }
 
+// ---------- церемония 100%: пентагон целей, как в KovaaK's ----------
+// Затемнение, пять "3D" шаров пятиугольником, каждый клик звучит на ноту
+// выше, после пятого финальный аккорд и карточка Day complete.
+
+const CELEBRATED_KEY = 'kova-celebrated';
+const HIT_NOTES = [392.0, 440.0, 493.88, 587.33, 659.25]; // G4 A4 B4 D5 E5
+const FINAL_CHORD = [523.25, 659.25, 783.99, 1046.5];     // C E G C
+
+let actx = null;
+function tone(freq, dur = 0.22, gainV = 0.16) {
+  try {
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    if (actx.state === 'suspended') actx.resume();
+    const t = actx.currentTime;
+    const o = actx.createOscillator();
+    const g = actx.createGain();
+    o.type = 'triangle';
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(gainV, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g).connect(actx.destination);
+    o.start(t);
+    o.stop(t + dur + 0.05);
+  } catch { /* звук опционален */ }
+}
+
+function maybeCelebrate() {
+  if (localStorage.getItem(CELEBRATED_KEY) === state.date) return;
+  if (document.hidden) { celebrationPending = true; return; }
+  startCelebration();
+}
+
+function startCelebration(test = false) {
+  if (document.querySelector('.celebrate-overlay')) return;
+  if (!test) localStorage.setItem(CELEBRATED_KEY, state.date);
+
+  const overlay = el('div', 'celebrate-overlay');
+  const finale = () => {
+    FINAL_CHORD.forEach((f, i) => setTimeout(() => tone(f, 0.7, 0.14), i * 70));
+    overlay.replaceChildren();
+    const fin = el('div', 'celebrate-final');
+    fin.append(el('div', 'final-pct mono', '100%'));
+    fin.append(el('div', 'final-title', 'Day complete'));
+    fin.append(el('div', 'final-sub', state.streak && state.streak.streak
+      ? `${state.streak.streak} day streak, checked in automatically`
+      : 'checked in automatically'));
+    overlay.append(fin);
+    setTimeout(() => overlay.remove(), 2600);
+  };
+
+  // уважение к reduced motion: без тира, сразу карточка
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    document.body.append(overlay);
+    finale();
+    return;
+  }
+
+  const hint = el('div', 'celebrate-hint', 'shoot the targets');
+  overlay.append(hint);
+
+  const R = Math.max(140, Math.min(300, Math.min(window.innerWidth, window.innerHeight) * 0.3));
+  let left = 5;
+  for (let i = 0; i < 5; i++) {
+    const ang = (-90 + i * 72) * Math.PI / 180;
+    const ball = el('button', 'celebrate-ball');
+    ball.style.left = `calc(50% + ${Math.round(Math.cos(ang) * R)}px)`;
+    ball.style.top = `calc(50% + ${Math.round(Math.sin(ang) * R)}px)`;
+    ball.addEventListener('click', () => {
+      if (ball.classList.contains('hit')) return;
+      ball.classList.add('hit');
+      tone(HIT_NOTES[5 - left]);
+      hint.classList.add('gone');
+      left--;
+      if (left === 0) setTimeout(finale, 180);
+    }, { once: false });
+    overlay.append(ball);
+  }
+
+  const skip = el('button', 'celebrate-skip ghost', 'skip');
+  skip.addEventListener('click', () => overlay.remove());
+  overlay.append(skip);
+
+  document.body.append(overlay);
+}
+
 // Кликабельный чип шер-кода: клик копирует, подпись мигает подтверждением.
 function codeChip(code) {
   const chip = el('button', 'code-chip mono', code);
@@ -451,6 +550,17 @@ async function copyText(text) {
 
 // ---------- вкладка Group ----------
 
+// Сессия протухла: чистим токен и возвращаем на экран входа, иначе
+// приложение вечно долбит бэкенд 401-ми поверх устаревших данных.
+function handleApiError(e) {
+  if (e && e.status === 401) {
+    logout();
+    location.reload();
+    return true;
+  }
+  return false;
+}
+
 async function refreshGroup() {
   try {
     state.group = await api.getGroup(localMonth());
@@ -461,6 +571,7 @@ async function refreshGroup() {
     if (state.tab === 'group') renderGroup();
     if (state.tab === 'today') renderToday();
   } catch (e) {
+    if (handleApiError(e)) return;
     state.scanError = e.message;
   }
   clearTimeout(groupTimer);

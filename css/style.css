@@ -331,6 +331,75 @@ li.done .scen-count { color: var(--pass); }
 
 /* ---------- admin ---------- */
 
+/* ---------- церемония 100% ---------- */
+
+.celebrate-overlay {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(5, 4, 9, 0.94);
+  backdrop-filter: blur(4px);
+  cursor: crosshair;
+  animation: cel-fade .35s ease-out;
+}
+@keyframes cel-fade { from { opacity: 0; } to { opacity: 1; } }
+
+.celebrate-hint {
+  position: absolute; top: 16%; left: 0; right: 0;
+  text-align: center;
+  font-size: 12px; letter-spacing: .18em; text-transform: uppercase;
+  color: var(--text-1);
+  transition: opacity .4s;
+}
+.celebrate-hint.gone { opacity: 0; }
+
+.celebrate-ball {
+  position: absolute;
+  width: 76px; height: 76px;
+  margin: -38px 0 0 -38px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 0;
+  cursor: crosshair;
+  background:
+    radial-gradient(circle at 33% 28%, rgba(255,255,255,0.28) 0%, rgba(255,255,255,0.05) 18%, transparent 40%),
+    radial-gradient(circle at 50% 45%, #23232c 0%, #101016 55%, #050508 100%);
+  box-shadow:
+    0 0 22px rgba(124, 108, 240, 0.22),
+    inset -6px -8px 16px rgba(0, 0, 0, 0.8);
+  animation: cel-pop-in .3s cubic-bezier(.2, 1.6, .4, 1) backwards;
+  transition: transform .13s ease-out, opacity .13s ease-out;
+}
+.celebrate-ball:nth-child(2) { animation-delay: .03s; }
+.celebrate-ball:nth-child(3) { animation-delay: .09s; }
+.celebrate-ball:nth-child(4) { animation-delay: .15s; }
+.celebrate-ball:nth-child(5) { animation-delay: .21s; }
+.celebrate-ball:nth-child(6) { animation-delay: .27s; }
+.celebrate-ball:hover { box-shadow: 0 0 30px rgba(124, 108, 240, 0.45), inset -6px -8px 16px rgba(0, 0, 0, 0.8); }
+.celebrate-ball.hit { transform: scale(1.45); opacity: 0; pointer-events: none; }
+@keyframes cel-pop-in { from { transform: scale(0); } to { transform: scale(1); } }
+
+.celebrate-skip {
+  position: absolute; bottom: 6%; left: 50%; transform: translateX(-50%);
+  color: var(--text-1); font-size: 12px;
+}
+
+.celebrate-final {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 6px;
+  animation: cel-final .5s cubic-bezier(.2, 1.4, .4, 1);
+  text-align: center;
+}
+@keyframes cel-final { from { transform: scale(.7); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.final-pct {
+  font-size: 84px; font-weight: 500; letter-spacing: -0.04em;
+  color: var(--pass);
+  text-shadow: 0 0 42px rgba(111, 163, 122, 0.45);
+}
+.final-title { font-size: 20px; font-weight: 600; letter-spacing: .04em; }
+.final-sub { font-size: 13px; color: var(--text-1); }
+
+/* ---------- admin ---------- */
+
 .admin-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 18px; }
 .preview { margin-top: 6px; }
 .preview-list { max-height: 340px; overflow-y: auto; }
