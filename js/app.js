@@ -87,7 +87,9 @@ async function boot() {
   state.handle = await getStoredFolder();
   if (state.handle) state.granted = await ensurePermission(state.handle);
 
-  switchTab('today');
+  // с телефона чек-ин невозможен, зато групповой календарь работает,
+  // так что мобильных встречает сразу он
+  switchTab(fsSupported() ? 'today' : 'group');
   refreshGroup();
   if (state.granted) startPolling();
 }
@@ -222,11 +224,14 @@ async function maybePost() {
 // ---------- вкладка Today ----------
 
 async function connectFolder() {
+  // стоп и рестарт, чтобы наблюдатель пересоздался на новом handle
+  stopPolling();
   try {
     state.handle = await pickStatsFolder();
     state.granted = await ensurePermission(state.handle, { request: true });
   } catch (e) {
     if (e.name !== 'AbortError') state.scanError = e.message;
+    state.granted = state.handle ? await ensurePermission(state.handle) : false;
   }
   renderToday();
   if (state.granted) startPolling();
@@ -243,7 +248,7 @@ export function renderToday() {
   root.replaceChildren();
 
   if (!fsSupported()) {
-    root.append(notice('This browser cannot read local folders. Use desktop Chrome or Edge.'));
+    root.append(notice('Check-ins happen on your gaming PC in desktop Chrome or Edge. On this device you can watch the group tab.'));
     return;
   }
   if (!state.playlist || !state.playlist.scenarios || !state.playlist.scenarios.length) {
@@ -268,8 +273,25 @@ export function renderToday() {
     } else {
       // первый раз: браузер требует выбрать папку руками, но путь можно
       // вставить в диалог целиком, без блужданий по Program Files
-      gate.append(el('h2', null, 'Connect your stats folder'));
-      gate.append(el('p', 'lede', 'One-time setup. Copy the path, press the button, paste it into the folder field of the picker and hit Select Folder.'));
+      gate.append(el('h2', null, 'One-time setup'));
+
+      const steps = el('ol', 'setup-steps');
+      const step = (title, rest) => {
+        const li = el('li');
+        li.append(el('b', null, title));
+        if (typeof rest === 'string') li.append(' ' + rest);
+        else if (rest) li.append(...rest);
+        steps.append(li);
+        return li;
+      };
+      step('Turn on stats export.', 'In KovaaK\'s: Game Options -> Main -> Statistics Export = "Always". Without it the game writes no stats files and nothing can be tracked.');
+      if (state.playlist && state.playlist.shareCode) {
+        step('Get the playlist.', [' In KovaaK\'s, search playlists by this share code: ', codeChip(state.playlist.shareCode)]);
+      } else {
+        step('Get the playlist.', 'Import the week\'s playlist in KovaaK\'s (ask Rauder for the share code).');
+      }
+      step('Point this site at your stats folder.', 'Copy the path below, press the button, paste it into the folder field of the picker and hit Select Folder.');
+      gate.append(steps);
       const row = el('div', 'path-row');
       const code = el('code', 'mono path-text', DEFAULT_STATS_PATH);
       const copy = el('button', null, 'Copy path');
@@ -306,6 +328,19 @@ export function renderToday() {
     return;
   }
 
+  document.title = p.done
+    ? 'done for today - KOVA STREAK'
+    : `${Math.round(p.percent * 100)}% today - KOVA STREAK`;
+
+  // в папке вообще нет файлов статистики: почти наверняка выбрана не та
+  if (p.scanned === 0) {
+    const warn = notice('There are no KovaaK\'s stats files in this folder at all, so it is probably the wrong one. It has to be the "stats" folder inside FPSAimTrainer\\FPSAimTrainer. If the folder is right, check that Statistics Export is set to "Always" in KovaaK\'s Game Options.', 'error');
+    const rebtn = el('button', null, 'Pick a different folder');
+    rebtn.addEventListener('click', connectFolder);
+    warn.append(rebtn);
+    root.append(warn);
+  }
+
   // шапка: кольцо прогресса + стрик
   const top = el('div', 'today-top');
   top.append(progressRing(p));
@@ -316,6 +351,17 @@ export function renderToday() {
   if (state.streak) {
     stats.append(statBlock('Streak', `${state.streak.streak} ${state.streak.streak === 1 ? 'day' : 'days'}`, 'consecutive days completed'));
     stats.append(statBlock('Missed this month', String(state.streak.missedDays), 'this is what the ranking uses'));
+  }
+  if (state.group && state.group.players.length > 1) {
+    const doneCnt = state.group.players.filter((x) => x.doneToday).length;
+    stats.append(statBlock('Group today', `${doneCnt} / ${state.group.players.length}`, 'friends already checked in'));
+  }
+  if (state.playlist && state.playlist.shareCode) {
+    const pc = el('div', 'stat');
+    pc.append(el('span', 'stat-label', 'Playlist code'));
+    pc.append(codeChip(state.playlist.shareCode));
+    pc.append(el('span', 'stat-hint', 'import it in KovaaK\'s, click to copy'));
+    stats.append(pc);
   }
   top.append(stats);
   root.append(top);
@@ -368,6 +414,19 @@ function statBlock(label, value, hint) {
 
 function notice(text, kind = '') {
   return el('div', 'notice ' + kind, text);
+}
+
+// Кликабельный чип шер-кода: клик копирует, подпись мигает подтверждением.
+function codeChip(code) {
+  const chip = el('button', 'code-chip mono', code);
+  chip.title = 'Click to copy';
+  chip.addEventListener('click', async () => {
+    const ok = await copyText(code);
+    const prev = chip.textContent;
+    chip.textContent = ok ? 'copied!' : code;
+    if (ok) setTimeout(() => { chip.textContent = prev; }, 1200);
+  });
+  return chip;
 }
 
 // Клипборд с фолбэком: clipboard API может быть запрещен политикой,

@@ -191,6 +191,32 @@ main { max-width: 980px; margin: 0 auto; padding: 24px; width: 100%; }
 .gate-card { text-align: center; }
 .gate-card .lede { margin: 0 auto 20px; }
 
+.setup-steps {
+  text-align: left;
+  max-width: 58ch;
+  margin: 0 auto 22px;
+  padding-left: 22px;
+  color: var(--chrome);
+}
+.setup-steps li { margin: 10px 0; }
+.setup-steps b { color: var(--text-0); }
+
+.code-chip {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-1);
+  border-radius: 999px;
+  color: var(--signal-soft);
+  padding: 3px 12px;
+  cursor: pointer;
+  vertical-align: middle;
+}
+.code-chip:hover { border-color: var(--signal); background: var(--bg-2); }
+.stat .code-chip { align-self: flex-start; margin: 4px 0 2px; }
+
+.notice button { display: block; margin-top: 10px; }
+
 .path-row {
   display: flex; align-items: center; justify-content: center;
   gap: 8px; flex-wrap: wrap;
