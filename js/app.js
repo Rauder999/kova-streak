@@ -35,6 +35,8 @@ export const state = {
 
 let pollTimer = null;
 let groupTimer = null;
+let fsObserver = null;
+let lastTickAt = 0;
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
@@ -52,6 +54,10 @@ async function boot() {
   document.querySelectorAll('.tab-btn').forEach((b) => {
     b.addEventListener('click', () => switchTab(b.dataset.tab));
   });
+
+  // вернулся в окно после игры: пересканировать немедленно, не ждать таймер
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && pollTimer) tick(); });
+  window.addEventListener('focus', () => { if (pollTimer) tick(); });
 
   const err = authError();
   if (err) {
@@ -116,19 +122,41 @@ function startPolling() {
   if (pollTimer) return;
   $('scan-state').hidden = false;
   tick();
+  // Поллинг это запасной механизм: в фоне Chrome душит таймеры до раза в
+  // минуту, поэтому основную скорость дают observer и focus/visibility ниже.
   pollTimer = setInterval(tick, POLL_MS);
-  // при возврате на вкладку проверяем сразу, не дожидаясь таймера
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
+  startObserver();
+}
+
+// Нативный наблюдатель за папкой: реагирует на новый CSV сразу, даже когда
+// вкладка спрятана за игрой. Есть не во всех браузерах, поэтому только
+// как ускоритель поверх поллинга.
+async function startObserver() {
+  if (fsObserver || !('FileSystemObserver' in window)) return;
+  try {
+    fsObserver = new FileSystemObserver(() => tick());
+    await fsObserver.observe(state.handle);
+  } catch {
+    fsObserver = null; // не дался, остается поллинг
+  }
 }
 
 function stopPolling() {
   clearInterval(pollTimer);
   pollTimer = null;
+  if (fsObserver) {
+    fsObserver.disconnect();
+    fsObserver = null;
+  }
   $('scan-state').hidden = true;
 }
 
 async function tick() {
   if (!state.handle || !state.playlist) return;
+  // observer, focus и интервал могут выстрелить пачкой, скан чаще раза в
+  // секунду смысла не имеет
+  if (Date.now() - lastTickAt < 1000) return;
+  lastTickAt = Date.now();
 
   // полуночный переход: новый день, счетчики с нуля
   const today = localDate();
