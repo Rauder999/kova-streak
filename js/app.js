@@ -75,6 +75,12 @@ async function boot() {
     box.hidden = false;
   }
 
+  // предпросмотр церемонии: ?celebrate=test, работает и без логина,
+  // настоящую сегодняшнюю церемонию не съедает
+  if (new URLSearchParams(location.search).get('celebrate') === 'test') {
+    startCelebration(true);
+  }
+
   state.user = initAuth();
   if (!state.user) return showView('login');
 
@@ -99,11 +105,6 @@ async function boot() {
   switchTab(fsSupported() ? 'today' : 'group');
   refreshGroup();
   if (state.granted) startPolling();
-
-  // предпросмотр церемонии: ?celebrate=test, localStorage не трогает
-  if (new URLSearchParams(location.search).get('celebrate') === 'test') {
-    startCelebration(true);
-  }
 }
 
 function avatarFallback(uid) {
@@ -431,29 +432,70 @@ function notice(text, kind = '') {
 }
 
 // ---------- церемония 100%: пентагон целей, как в KovaaK's ----------
-// Затемнение, пять "3D" шаров пятиугольником, каждый клик звучит на ноту
-// выше, после пятого финальный аккорд и карточка Day complete.
+// Затемнение ~секунду, пять "3D" шаров появляются по одному с раскруткой
+// и нарастающим спавн-звуком. Клик = звук выстрела (всегда одинаковый) +
+// килл-звук, который с каждым попаданием выше. Пятый: аккорд и карточка.
+// Звуки настоящие, из папки KovaaK's Pasha: 808 perc (спавн), rxSound11
+// (выстрел), kick-deep (килл). Если не загрузились, синтез-фолбэк.
 
 const CELEBRATED_KEY = 'kova-celebrated';
-const HIT_NOTES = [392.0, 440.0, 493.88, 587.33, 659.25]; // G4 A4 B4 D5 E5
+const HIT_NOTES = [392.0, 440.0, 493.88, 587.33, 659.25]; // фолбэк: G4 A4 B4 D5 E5
 const FINAL_CHORD = [523.25, 659.25, 783.99, 1046.5];     // C E G C
+const KILL_RATES = [1, 1.19, 1.41, 1.68, 2.0];    // +3 полутона на каждое попадание
+const SPAWN_RATES = [1, 1.12, 1.26, 1.41, 1.59];  // +2 полутона на каждый спавн
 
 let actx = null;
+function ensureCtx() {
+  actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+  if (actx.state === 'suspended') actx.resume();
+  return actx;
+}
+
 function tone(freq, dur = 0.22, gainV = 0.16) {
   try {
-    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
-    if (actx.state === 'suspended') actx.resume();
-    const t = actx.currentTime;
-    const o = actx.createOscillator();
-    const g = actx.createGain();
+    const ctx = ensureCtx();
+    const t = ctx.currentTime;
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
     o.type = 'triangle';
     o.frequency.value = freq;
     g.gain.setValueAtTime(gainV, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-    o.connect(g).connect(actx.destination);
+    o.connect(g).connect(ctx.destination);
     o.start(t);
     o.stop(t + dur + 0.05);
   } catch { /* звук опционален */ }
+}
+
+let sndBuffers = null; // null = не грузили, false = не вышло, объект = готово
+async function loadSounds() {
+  if (sndBuffers !== null) return;
+  try {
+    const ctx = ensureCtx();
+    const load = async (url) => ctx.decodeAudioData(await (await fetch(url)).arrayBuffer());
+    const [spawn, shot, kill] = await Promise.all(
+      ['assets/spawn-808.ogg', 'assets/shot-rx11.ogg', 'assets/kill-kick.ogg'].map(load));
+    sndBuffers = { spawn, shot, kill };
+  } catch {
+    sndBuffers = false;
+  }
+}
+
+function playBuf(name, rate = 1, gain = 0.5) {
+  if (!sndBuffers || !sndBuffers[name]) return false;
+  try {
+    const ctx = ensureCtx();
+    const s = ctx.createBufferSource();
+    s.buffer = sndBuffers[name];
+    s.playbackRate.value = rate;
+    const g = ctx.createGain();
+    g.gain.value = gain;
+    s.connect(g).connect(ctx.destination);
+    s.start();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function maybeCelebrate() {
@@ -465,6 +507,7 @@ function maybeCelebrate() {
 function startCelebration(test = false) {
   if (document.querySelector('.celebrate-overlay')) return;
   if (!test) localStorage.setItem(CELEBRATED_KEY, state.date);
+  loadSounds(); // декод трех мелких ogg успевает до первого спавна
 
   const overlay = el('div', 'celebrate-overlay');
   const finale = () => {
@@ -491,6 +534,7 @@ function startCelebration(test = false) {
   overlay.append(hint);
 
   const R = Math.max(140, Math.min(300, Math.min(window.innerWidth, window.innerHeight) * 0.3));
+  const balls = [];
   let left = 5;
   for (let i = 0; i < 5; i++) {
     const ang = (-90 + i * 72) * Math.PI / 180;
@@ -498,14 +542,18 @@ function startCelebration(test = false) {
     ball.style.left = `calc(50% + ${Math.round(Math.cos(ang) * R)}px)`;
     ball.style.top = `calc(50% + ${Math.round(Math.sin(ang) * R)}px)`;
     ball.addEventListener('click', () => {
-      if (ball.classList.contains('hit')) return;
+      if (ball.classList.contains('hit') || !ball.classList.contains('spawned')) return;
       ball.classList.add('hit');
-      tone(HIT_NOTES[5 - left]);
+      const idx = 5 - left;
+      // выстрел всегда одинаковый, килл-звук поднимается с каждым попаданием
+      if (!playBuf('shot', 1, 0.5)) tone(660, 0.05, 0.07);
+      if (!playBuf('kill', KILL_RATES[idx], 0.6)) tone(HIT_NOTES[idx]);
       hint.classList.add('gone');
       left--;
-      if (left === 0) setTimeout(finale, 180);
-    }, { once: false });
+      if (left === 0) setTimeout(finale, 220);
+    });
     overlay.append(ball);
+    balls.push(ball);
   }
 
   const skip = el('button', 'celebrate-skip ghost', 'skip');
@@ -513,6 +561,16 @@ function startCelebration(test = false) {
   overlay.append(skip);
 
   document.body.append(overlay);
+
+  // затемнение ~0.9с, потом шары по одному: раскрутка + спавн-звук выше и выше
+  balls.forEach((b, i) => {
+    setTimeout(() => {
+      if (!overlay.isConnected) return; // могли нажать skip во время спавна
+      b.classList.add('spawned');
+      if (!playBuf('spawn', SPAWN_RATES[i], 0.45)) tone(280 * SPAWN_RATES[i], 0.14, 0.07);
+      if (i === balls.length - 1) hint.classList.add('shown');
+    }, 900 + i * 190);
+  });
 }
 
 // Кликабельный чип шер-кода: клик копирует, подпись мигает подтверждением.

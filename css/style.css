@@ -337,8 +337,9 @@ li.done .scen-count { color: var(--pass); }
   position: fixed; inset: 0; z-index: 100;
   background: rgba(5, 4, 9, 0.94);
   backdrop-filter: blur(4px);
-  cursor: crosshair;
-  animation: cel-fade .35s ease-out;
+  /* перекрашенный lmbPlus.png из KovaaK's Pasha, хотспот в центре плюса */
+  cursor: url('../assets/crosshair.png') 25 25, crosshair;
+  animation: cel-fade .9s ease-out;
 }
 @keyframes cel-fade { from { opacity: 0; } to { opacity: 1; } }
 
@@ -347,8 +348,10 @@ li.done .scen-count { color: var(--pass); }
   text-align: center;
   font-size: 12px; letter-spacing: .18em; text-transform: uppercase;
   color: var(--text-1);
+  opacity: 0;
   transition: opacity .4s;
 }
+.celebrate-hint.shown { opacity: 1; }
 .celebrate-hint.gone { opacity: 0; }
 
 .celebrate-ball {
@@ -358,24 +361,28 @@ li.done .scen-count { color: var(--pass); }
   border-radius: 50%;
   border: 1px solid rgba(255, 255, 255, 0.08);
   padding: 0;
-  cursor: crosshair;
+  cursor: url('../assets/crosshair.png') 25 25, crosshair;
   background:
     radial-gradient(circle at 33% 28%, rgba(255,255,255,0.28) 0%, rgba(255,255,255,0.05) 18%, transparent 40%),
     radial-gradient(circle at 50% 45%, #23232c 0%, #101016 55%, #050508 100%);
   box-shadow:
     0 0 22px rgba(124, 108, 240, 0.22),
     inset -6px -8px 16px rgba(0, 0, 0, 0.8);
-  animation: cel-pop-in .3s cubic-bezier(.2, 1.6, .4, 1) backwards;
+  visibility: hidden;
   transition: transform .13s ease-out, opacity .13s ease-out;
 }
-.celebrate-ball:nth-child(2) { animation-delay: .03s; }
-.celebrate-ball:nth-child(3) { animation-delay: .09s; }
-.celebrate-ball:nth-child(4) { animation-delay: .15s; }
-.celebrate-ball:nth-child(5) { animation-delay: .21s; }
-.celebrate-ball:nth-child(6) { animation-delay: .27s; }
+/* спавн: разгоняется, крутится и тормозит на своем месте; блик на шаре
+   делает вращение видимым */
+.celebrate-ball.spawned {
+  visibility: visible;
+  animation: cel-spin-in .6s cubic-bezier(.55, .05, .15, 1) backwards;
+}
+@keyframes cel-spin-in {
+  from { transform: scale(0) rotate(-560deg); }
+  to { transform: scale(1) rotate(0deg); }
+}
 .celebrate-ball:hover { box-shadow: 0 0 30px rgba(124, 108, 240, 0.45), inset -6px -8px 16px rgba(0, 0, 0, 0.8); }
 .celebrate-ball.hit { transform: scale(1.45); opacity: 0; pointer-events: none; }
-@keyframes cel-pop-in { from { transform: scale(0); } to { transform: scale(1); } }
 
 .celebrate-skip {
   position: absolute; bottom: 6%; left: 50%; transform: translateX(-50%);
