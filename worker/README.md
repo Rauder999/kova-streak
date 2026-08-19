@@ -60,7 +60,8 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 | POST | `/api/completion` | сессия | отметка за день |
 | GET | `/api/group?month=YYYY-MM` | сессия | календарь, стрики, лидерборд |
 
-Cron `0 20 * * *` шлет дайджест в вебхук.
+Cron `0 23 * * *` (17:00 Denver летом) шлет дайджест в вебхук.
+Ручная отправка: POST `/api/digest` (админ) или кнопка в админке.
 
 ## Модель данных в KV
 

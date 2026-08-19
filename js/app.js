@@ -824,7 +824,7 @@ function renderAdmin() {
   // ручной дайджест: тот же текст, что уходит по крону в 23:00
   const dig = el('div', 'card');
   dig.append(el('h2', null, 'Discord digest'));
-  dig.append(el('p', 'lede', 'Every day at 23:00 the worker posts a check-in summary to the group channel: who is done, who is still open, whose streak is on the line, top-5 by fewest missed days. This button posts one right now, same content.'));
+  dig.append(el('p', 'lede', 'Every day at 17:00 the worker posts a nudge to the group channel: whose streak is on the line tonight, who is already done, who is a few runs away, streak milestones and the prize race. This button posts one right now, same content.'));
   const dbtn = el('button', 'primary', 'Post digest now');
   const dmsg = el('p', 'notice');
   dmsg.hidden = true;

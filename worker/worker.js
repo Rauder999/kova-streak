@@ -414,44 +414,82 @@ async function handleApi(request, env, url, cors) {
 
 // ---------- ежедневный дайджест в Discord ----------
 
+// Дайджест построен на механиках Duolingo: угроза стрику первой строкой
+// (loss aversion сильнее награды), конкретные числа, вехи празднуются,
+// провалившимся - "прогресс важнее идеальности" вместо стыда, и копия
+// ротируется по дню месяца, чтобы не стать обоями.
 async function postDigest(env) {
   if (!env.DISCORD_WEBHOOK_URL) return;
 
   const today = groupDate(env);
   const standings = await buildStandings(env, today.slice(0, 7));
-  if (!standings.players.length) return;
+  const players = standings.players;
+  if (!players.length) return;
 
-  const done = standings.players.filter((p) => p.doneToday);
-  const missing = standings.players.filter((p) => !p.doneToday);
+  const done = players.filter((p) => p.doneToday);
+  const missing = players.filter((p) => !p.doneToday);
+  const atRisk = missing.filter((p) => p.streak >= 1);
+  const partial = missing.filter((p) => p.todayRuns && p.todayRuns.completedRuns > 0);
+  const notStarted = missing.filter((p) => !p.todayRuns || p.todayRuns.completedRuns === 0);
 
-  const lines = [];
-  lines.push(`**Streak check, ${today}**`);
-  lines.push('');
+  const dayNum = Number(today.slice(-2));
+  const pick = (arr) => arr[dayNum % arr.length];
+  const header = new Date(today + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+  const flame = (p) => (p.streak >= 3 ? ` 🔥${p.streak}` : '');
 
-  if (done.length) {
-    lines.push(`Checked in today (${done.length}/${standings.players.length}):`);
-    lines.push(done.map((p) => `${p.displayName} ${p.streak > 1 ? `\`${p.streak}d\`` : ''}`.trim()).join(', '));
+  const lines = [`**KOVA STREAK - ${header}**`];
+
+  if (missing.length === 0) {
+    lines.push(pick([
+      `💯 Full house: all ${players.length} checked in today. Untouchable.`,
+      `💯 ${players.length}/${players.length}. Nobody blinked today.`,
+      `💯 Clean sweep, all ${players.length} done. See you tomorrow.`,
+    ]));
   } else {
-    lines.push('Nobody has trained today yet.');
-  }
-
-  if (missing.length) {
-    lines.push('');
-    const atRisk = missing.filter((p) => p.streak >= 3);
-    lines.push(`Still open: ${missing.map((p) => p.displayName).join(', ')}`);
+    // угроза стрику: главный крючок, всегда первой строкой
     if (atRisk.length) {
-      lines.push(`Streak on the line: ${atRisk.map((p) => `**${p.displayName}** (${p.streak} days)`).join(', ')}`);
+      const names = atRisk.map((p) => `**${p.displayName}** (${p.streak}d)`).join(', ');
+      lines.push(pick([
+        `⚠️ Streaks on the line tonight: ${names}. One playlist keeps them alive.`,
+        `⚠️ ${names} - the streak ends at midnight unless you play today.`,
+        `⚠️ 30 minutes of aim vs a dead streak. ${names}, easy choice.`,
+      ]));
     }
-    const partial = missing.filter((p) => p.todayRuns && p.todayRuns.completedRuns > 0);
+    if (done.length) {
+      lines.push(`✅ Done today (${done.length}/${players.length}): ` + done.map((p) => p.displayName + flame(p)).join(', '));
+    } else {
+      lines.push('👀 Nobody has checked in yet. First one in gets bragging rights.');
+    }
+    // оставшееся считаем до конца, а не от нуля: "10 ранов до цели"
     for (const p of partial) {
-      const { completedRuns: c, requiredRuns: r } = p.todayRuns;
-      lines.push(`${p.displayName} is at ${c}/${r} runs${r > 0 && c / r >= 0.7 ? ', almost there' : ''}.`);
+      const left = p.todayRuns.requiredRuns - p.todayRuns.completedRuns;
+      lines.push(`⏳ ${p.displayName}: ${left} ${left === 1 ? 'run' : 'runs'} to close the day.`);
+    }
+    // после сорванного стрика - прогресс, а не стыд
+    const fresh = notStarted.filter((p) => p.streak === 0 && Object.values(p.byDate).some((d) => d.done));
+    for (const p of fresh.slice(0, 3)) {
+      const goodDays = Object.values(p.byDate).filter((d) => d.done).length;
+      lines.push(`💪 ${p.displayName}: fresh start today - already ${goodDays} good ${goodDays === 1 ? 'day' : 'days'} this month.`);
     }
   }
 
-  lines.push('');
-  const top = standings.players.slice(0, 5);
-  lines.push('Fewest missed days this month: ' + top.map((p, i) => `${i + 1}. ${p.displayName} (${p.missedDays})`).join('  |  '));
+  // вехи празднуем в день достижения
+  const MILESTONES = new Set([3, 7, 14, 21, 30, 50, 75, 100]);
+  for (const p of done.filter((x) => MILESTONES.has(x.streak))) {
+    lines.push(`🎉 ${p.displayName} just hit a ${p.streak}-day streak!`);
+  }
+
+  // гонка за призы: только когда есть реальное расслоение
+  const best = players[0].missedDays;
+  const leaders = players.filter((p) => p.missedDays === best).map((p) => p.displayName);
+  if (leaders.length < players.length) {
+    const chasers = players.filter((p) => p.missedDays === best + 1).map((p) => p.displayName);
+    let race = leaders.length === 1
+      ? `🏆 ${leaders[0]} leads the prize race with ${best} missed`
+      : `🏆 Prize race: ${leaders.join(', ')} tied at ${best} missed`;
+    if (chasers.length && chasers.length <= 3) race += ` - ${chasers.join(', ')} one day behind`;
+    lines.push(race + '.');
+  }
 
   await fetch(env.DISCORD_WEBHOOK_URL, {
     method: 'POST',
