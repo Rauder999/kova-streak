@@ -69,9 +69,10 @@ $watcher = @'
 $src = '__SRC__'
 $dst = '__DST__'
 
+# exit 99 = другой экземпляр уже жив, лаунчер-сторож поймет и не будет крутить рестарты
 $mutex = New-Object System.Threading.Mutex($false, 'Local\KovaaKStatsMirror')
 try { $acquired = $mutex.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $acquired = $true }
-if (-not $acquired) { exit }
+if (-not $acquired) { exit 99 }
 
 $log = Join-Path $env:USERPROFILE 'kovaaks-stats-mirror.log'
 "start $(Get-Date -Format s) pid=$PID src=$src" | Set-Content $log
@@ -83,28 +84,48 @@ function Sync-Pass {
 
 Sync-Pass
 
-$fsw = New-Object System.IO.FileSystemWatcher $src
-$fsw.IncludeSubdirectories = $false
-
+# Сон/резюм убивает хэндл FileSystemWatcher (WaitForChanged кидает исключение).
+# Поэтому: любое исключение = лог, пересоздание вотчера, синк и жизнь дальше.
+$fsw = $null
 while ($true) {
-    $change = $fsw.WaitForChanged([System.IO.WatcherChangeTypes]::All, 3600000)
-    "wake $(Get-Date -Format s) timedOut=$($change.TimedOut) name=$($change.Name)" | Add-Content $log
-    Start-Sleep -Milliseconds 300
+    try {
+        if (-not $fsw) {
+            $fsw = New-Object System.IO.FileSystemWatcher $src
+            $fsw.IncludeSubdirectories = $false
+        }
+        $change = $fsw.WaitForChanged([System.IO.WatcherChangeTypes]::All, 3600000)
+        "wake $(Get-Date -Format s) timedOut=$($change.TimedOut) name=$($change.Name)" | Add-Content $log
+        Start-Sleep -Milliseconds 300
+    } catch {
+        "watch error $(Get-Date -Format s): $($_.Exception.Message)" | Add-Content $log
+        try { if ($fsw) { $fsw.Dispose() } } catch {}
+        $fsw = $null
+        Start-Sleep -Seconds 5
+    }
     Sync-Pass
 }
 '@
 $watcher = $watcher.Replace('__SRC__', $stats).Replace('__DST__', $mirror)
 [System.IO.File]::WriteAllText($ps1, $watcher, (New-Object System.Text.UTF8Encoding($false)))
 
-$launcher = "' KOVA STREAK mirror launcher (installed by mirror-setup)`r`n" +
+# Лаунчер-сторож: держит вотчер живым. Ждет его выхода и перезапускает через
+# 30 секунд, кроме кода 99 (другой экземпляр уже работает, дубль не нужен).
+$launcher = "' KOVA STREAK mirror launcher + watchdog (installed by mirror-setup)`r`n" +
   "Set sh = CreateObject(""Wscript.Shell"")`r`n" +
-  "sh.Run ""powershell.exe -NoProfile -ExecutionPolicy Bypass -File """"$ps1"""""", 0, False`r`n"
+  "Do`r`n" +
+  "  rc = sh.Run(""powershell.exe -NoProfile -ExecutionPolicy Bypass -File """"$ps1"""""", 0, True)`r`n" +
+  "  If rc = 99 Then Exit Do`r`n" +
+  "  WScript.Sleep 30000`r`n" +
+  "Loop`r`n"
 [System.IO.File]::WriteAllText($vbs, $launcher, (New-Object System.Text.UTF8Encoding($false)))
 
-# restart cleanly if an older copy is running
-Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
-  Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match 'kovaaks-stats-mirror' } |
-  ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+# restart cleanly if an older copy is running: сначала сторож, потом вотчер,
+# иначе сторож успеет перезапустить убитого
+foreach ($pname in @('wscript.exe', 'powershell.exe')) {
+  Get-CimInstance Win32_Process -Filter "Name='$pname'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match 'kovaaks-stats-mirror' } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+}
 Start-Sleep -Milliseconds 500
 
 Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'KovaaKStatsMirror' -Value ('wscript.exe "' + $vbs + '"')
