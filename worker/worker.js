@@ -424,6 +424,12 @@ async function handleApi(request, env, url, cors, ctx) {
 
 const MILESTONES = new Set([3, 7, 14, 21, 30, 50, 75, 100]);
 
+// Голос "Системы" из манхв: холодные строки в квадратных скобках внутри
+// серого код-блока Discord. Формульность и повторяемость - часть эстетики.
+function systemBlock(lines) {
+  return '```\n' + lines.join('\n') + '\n```';
+}
+
 // Мгновенный пост в канал, когда игрок впервые за день закрыл плейлисту.
 // Социальное давление капает весь день, а не одним вечерним залпом.
 // Никогда не ломает сам чек-ин: все ошибки глотаются.
@@ -436,22 +442,24 @@ async function announceCompletion(env, user, streak) {
     const meCounted = players.some((p) => p.userId === user.uid && p.doneToday);
     const doneCount = players.filter((p) => p.doneToday).length + (meCounted ? 0 : 1);
 
-    const name = `**${user.name}**`;
     const variants = [
-      `🎯 ${name} just became a slightly better aimer. Playlist done.`,
-      `✅ ${name} closed today's playlist. Good aim is just showing up daily.`,
-      `🫡 ${name} did the work today.`,
-      `📈 ${name} finished the daily. That is how streaks are built.`,
+      `[Daily quest complete: ${user.name}]`,
+      `[Player ${user.name} has cleared today's playlist.]`,
+      `[${user.name}: all runs verified. Day secured.]`,
+      `[Quest log updated: ${user.name} - daily training complete.]`,
     ];
-    let msg = variants[Math.floor(Math.random() * variants.length)];
-    if (streak >= 3) msg += ` 🔥 ${streak} days straight.`;
-    if (MILESTONES.has(streak)) msg += ` 🎉 ${streak}-day milestone!`;
-    if (players.length >= 3) msg += ` (${doneCount}/${players.length} in today)`;
+    const lines = [variants[Math.floor(Math.random() * variants.length)]];
+    if (streak >= 3) {
+      lines.push(MILESTONES.has(streak)
+        ? `[Streak: ${streak} days. Milestone reached.]`
+        : `[Streak: ${streak} days.]`);
+    }
+    if (players.length >= 3) lines.push(`[${doneCount}/${players.length} players complete today.]`);
 
     await fetch(env.DISCORD_WEBHOOK_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: msg, allowed_mentions: { parse: [] } }),
+      body: JSON.stringify({ content: systemBlock(lines), allowed_mentions: { parse: [] } }),
     });
   } catch { /* пост не критичен */ }
 }
@@ -477,47 +485,48 @@ async function postDigest(env) {
   const dayNum = Number(today.slice(-2));
   const pick = (arr) => arr[dayNum % arr.length];
   const header = new Date(today + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
-  const flame = (p) => (p.streak >= 3 ? ` 🔥${p.streak}` : '');
+  const tag = (p) => (p.streak >= 3 ? `${p.displayName} (${p.streak}d)` : p.displayName);
 
-  const lines = [`**KOVA STREAK - ${header}**`];
+  const lines = [`[SYSTEM NOTICE - ${header}]`];
 
   if (missing.length === 0) {
+    lines.push(`[All ${players.length} players have completed the daily quest.]`);
     lines.push(pick([
-      `💯 Full house: all ${players.length} checked in today. Untouchable.`,
-      `💯 ${players.length}/${players.length}. Nobody blinked today.`,
-      `💯 Clean sweep, all ${players.length} done. See you tomorrow.`,
+      '[No penalties issued today.]',
+      '[Flawless day recorded.]',
+      '[The system approves. Barely.]',
     ]));
   } else {
     // угроза стрику: главный крючок, всегда первой строкой
     if (atRisk.length) {
-      const names = atRisk.map((p) => `**${p.displayName}** (${p.streak}d)`).join(', ');
+      const names = atRisk.map(tag).join(', ');
       lines.push(pick([
-        `⚠️ Streaks on the line tonight: ${names}. One playlist keeps them alive.`,
-        `⚠️ ${names} - the streak ends at midnight unless you play today.`,
-        `⚠️ 30 minutes of aim vs a dead streak. ${names}, easy choice.`,
+        `[Warning: streak termination at midnight for: ${names}.]`,
+        `[Unfinished daily detected: ${names}. Consequences apply at midnight.]`,
+        `[Pending streak loss: ${names}. The system does not extend deadlines.]`,
       ]));
     }
     if (done.length) {
-      lines.push(`✅ Done today (${done.length}/${players.length}): ` + done.map((p) => p.displayName + flame(p)).join(', '));
+      lines.push(`[Complete: ${done.length}/${players.length} - ${done.map(tag).join(', ')}]`);
     } else {
-      lines.push('👀 Nobody has checked in yet. First one in gets bragging rights.');
+      lines.push('[Complete: 0/' + players.length + '. The system is watching.]');
     }
-    // оставшееся считаем до конца, а не от нуля: "10 ранов до цели"
+    // оставшееся считаем до конца, а не от нуля
     for (const p of partial) {
       const left = p.todayRuns.requiredRuns - p.todayRuns.completedRuns;
-      lines.push(`⏳ ${p.displayName}: ${left} ${left === 1 ? 'run' : 'runs'} to close the day.`);
+      lines.push(`[${p.displayName}: ${left} ${left === 1 ? 'run' : 'runs'} remaining.]`);
     }
     // после сорванного стрика - прогресс, а не стыд
     const fresh = notStarted.filter((p) => p.streak === 0 && Object.values(p.byDate).some((d) => d.done));
     for (const p of fresh.slice(0, 3)) {
       const goodDays = Object.values(p.byDate).filter((d) => d.done).length;
-      lines.push(`💪 ${p.displayName}: fresh start today - already ${goodDays} good ${goodDays === 1 ? 'day' : 'days'} this month.`);
+      lines.push(`[${p.displayName}: streak reset. ${goodDays} completed ${goodDays === 1 ? 'day' : 'days'} on record this month. A new one starts today.]`);
     }
   }
 
   // вехи празднуем в день достижения
   for (const p of done.filter((x) => MILESTONES.has(x.streak))) {
-    lines.push(`🎉 ${p.displayName} just hit a ${p.streak}-day streak!`);
+    lines.push(`[Milestone: ${p.displayName} - ${p.streak} consecutive days.]`);
   }
 
   // гонка за призы: только когда есть реальное расслоение
@@ -526,16 +535,16 @@ async function postDigest(env) {
   if (leaders.length < players.length) {
     const chasers = players.filter((p) => p.missedDays === best + 1).map((p) => p.displayName);
     let race = leaders.length === 1
-      ? `🏆 ${leaders[0]} leads the prize race with ${best} missed`
-      : `🏆 Prize race: ${leaders.join(', ')} tied at ${best} missed`;
-    if (chasers.length && chasers.length <= 3) race += ` - ${chasers.join(', ')} one day behind`;
-    lines.push(race + '.');
+      ? `[Ranking: ${leaders[0]} leads with ${best} missed.`
+      : `[Ranking: ${leaders.join(', ')} tied at ${best} missed.`;
+    if (chasers.length && chasers.length <= 3) race += ` ${chasers.join(', ')} trail by one.`;
+    lines.push(race + ']');
   }
 
   await fetch(env.DISCORD_WEBHOOK_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content: lines.join('\n').slice(0, 1900), allowed_mentions: { parse: [] } }),
+    body: JSON.stringify({ content: systemBlock(lines).slice(0, 1900), allowed_mentions: { parse: [] } }),
   });
 }
 
