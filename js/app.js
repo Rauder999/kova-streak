@@ -8,8 +8,8 @@ import {
   ensurePermission, countRunsForDate, matchPlaylist,
 } from './fs.js';
 
-// Стандартный путь стима; у друзей библиотека может жить на другом диске
-const DEFAULT_STATS_PATH = 'C:\\Program Files (x86)\\Steam\\steamapps\\common\\FPSAimTrainer\\FPSAimTrainer\\stats';
+// Предпросмотр гайда подключения для залогиненного админа: ?setup=test
+const SETUP_PREVIEW = new URLSearchParams(location.search).get('setup') === 'test';
 
 const POLL_MS = 5000;          // как часто перечитываем листинг папки
 const POST_DEBOUNCE_MS = 60000; // не чаще раза в минуту шлем частичный прогресс
@@ -273,9 +273,9 @@ export function renderToday() {
     return;
   }
 
-  if (!state.granted) {
+  if (SETUP_PREVIEW || !state.granted) {
     const gate = el('div', 'card gate-card');
-    if (state.handle) {
+    if (state.handle && !SETUP_PREVIEW) {
       // папка уже выбрана раньше, нужен только клик по разрешению
       gate.append(el('h2', null, 'Grant folder access'));
       gate.append(el('p', 'lede', 'The folder is remembered. In the browser prompt pick "Allow on every visit" and even this click disappears: next time the page will just start watching on its own.'));
@@ -286,9 +286,31 @@ export function renderToday() {
       forget.addEventListener('click', async () => { await forgetFolder(); state.handle = null; renderToday(); });
       gate.append(forget);
     } else {
-      // первый раз: браузер требует выбрать папку руками, но путь можно
-      // вставить в диалог целиком, без блужданий по Program Files
+      // первый раз: четыре шага, путь к папке всегда приезжает из хелпера
+      // через клипборд. Никаких запасных кнопок Copy path: они затирали
+      // клипборд не тем путем, друзья дважды на этом ловились.
       gate.append(el('h2', null, 'One-time setup'));
+      gate.append(el('p', 'lede', 'Four steps, about two minutes. After this, check-ins are fully automatic: you play, the site sees it.'));
+
+      const CMD = 'irm https://rauder999.github.io/kova-streak/mirror-setup.txt | iex';
+      const cmdRow = el('div', 'path-row');
+      const cmdCode = el('code', 'mono path-text', CMD);
+      const cmdCopy = el('button', null, 'Copy command');
+      cmdCopy.addEventListener('click', async () => {
+        const ok = await copyText(CMD);
+        if (ok) {
+          cmdCopy.textContent = 'Copied';
+          setTimeout(() => { cmdCopy.textContent = 'Copy command'; }, 1500);
+        } else {
+          const range = document.createRange();
+          range.selectNodeContents(cmdCode);
+          const sel = getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+          cmdCopy.textContent = 'Press Ctrl+C';
+        }
+      });
+      cmdRow.append(cmdCode, cmdCopy);
 
       const steps = el('ol', 'setup-steps');
       const step = (title, rest) => {
@@ -299,70 +321,25 @@ export function renderToday() {
         steps.append(li);
         return li;
       };
-      step('Turn on stats export.', 'In KovaaK\'s: Game Options -> Main -> Statistics Export = "Always". Without it the game writes no stats files and nothing can be tracked.');
+      step('Turn on stats export.', 'In KovaaK\'s: Game Options -> Main -> Statistics Export = "Always". Without it the game does not write the files this site reads.');
       if (state.playlist && state.playlist.shareCode) {
-        step('Get the playlist.', [' In KovaaK\'s, search playlists by this share code: ', codeChip(state.playlist.shareCode)]);
+        step('Get the playlist.', [' In KovaaK\'s, search playlists by this code and download it: ', codeChip(state.playlist.shareCode)]);
       } else {
         step('Get the playlist.', 'Import the week\'s playlist in KovaaK\'s (ask Rauder for the share code).');
       }
-      step('Point this site at your stats folder.', 'Copy the path below, press the button, paste it into the folder field of the picker, press Enter, then Select Folder. If Chrome refuses with a "system files" error, use the fix underneath.');
+      step('Run the folder helper.', [
+        ' Press Win, type "powershell", press Enter. Paste this line, press Enter and wait for the green text:',
+        cmdRow,
+        'It finds your KovaaK\'s stats folder, quietly works around Chrome\'s Program Files restriction if your Steam lives there, and leaves the right folder path in your clipboard.',
+      ]);
+      step('Pick the folder.', 'Come back here, press the big button below, paste the path (Ctrl+V), press Enter, then hit "Select Folder".');
       gate.append(steps);
-      const row = el('div', 'path-row');
-      const code = el('code', 'mono path-text', DEFAULT_STATS_PATH);
-      const copy = el('button', null, 'Copy path');
-      copy.addEventListener('click', async () => {
-        const ok = await copyText(DEFAULT_STATS_PATH);
-        if (ok) {
-          copy.textContent = 'Copied';
-          setTimeout(() => { copy.textContent = 'Copy path'; }, 1500);
-        } else {
-          // оба механизма копирования зарезаны: выделяем путь, юзеру остается Ctrl+C
-          const range = document.createRange();
-          range.selectNodeContents(code);
-          const sel = getSelection();
-          sel.removeAllRanges();
-          sel.addRange(range);
-          copy.textContent = 'Press Ctrl+C';
-        }
-      });
-      row.append(code, copy);
-      gate.append(row);
+
       const btn = el('button', 'primary big', 'Choose stats folder');
       btn.addEventListener('click', connectFolder);
       gate.append(btn);
 
-      // Chrome отказал: у большинства Steam стоит в Program Files, и браузер
-      // такие папки не открывает. Однострочник ставит живое зеркало сам.
-      const fix = el('div', 'gate-fix');
-      fix.append(el('h3', null, 'Chrome says it "contains system files"?'));
-      fix.append(el('p', null, 'That is Chrome refusing anything under C:\\Program Files, where default Steam installs live. One-time fix: press Win, type "powershell", Enter, then paste this line and press Enter:'));
-      const cmdRow = el('div', 'path-row');
-      const CMD = 'irm https://rauder999.github.io/kova-streak/mirror-setup.txt | iex';
-      cmdRow.append(el('code', 'mono path-text', CMD));
-      const cmdCopy = el('button', null, 'Copy command');
-      cmdCopy.addEventListener('click', async () => {
-        const ok = await copyText(CMD);
-        cmdCopy.textContent = ok ? 'Copied' : 'Select and copy above';
-        if (ok) setTimeout(() => { cmdCopy.textContent = 'Copy command'; }, 1500);
-      });
-      cmdRow.append(cmdCopy);
-      fix.append(cmdRow);
-      fix.append(el('p', null, 'It finds your KovaaK\'s and sets up a tiny live mirror Chrome is allowed to open: synced within a second, starts with Windows. When it is done, press "Choose stats folder" above and paste this as the folder name (do NOT copy the Program Files path again):'));
-      const mirRow = el('div', 'path-row');
-      const MIRROR_PATH = '%USERPROFILE%\\KovaaK-stats';
-      mirRow.append(el('code', 'mono path-text', MIRROR_PATH));
-      const mirCopy = el('button', null, 'Copy mirror path');
-      mirCopy.addEventListener('click', async () => {
-        const ok = await copyText(MIRROR_PATH);
-        mirCopy.textContent = ok ? 'Copied' : 'Select and copy above';
-        if (ok) setTimeout(() => { mirCopy.textContent = 'Copy mirror path'; }, 1500);
-      });
-      mirRow.append(mirCopy);
-      fix.append(mirRow);
-      fix.append(el('p', null, 'Paste it, press Enter (the picker jumps inside the folder), then hit Select Folder.'));
-      gate.append(fix);
-
-      gate.append(el('p', 'fine', 'The folder is remembered afterwards. Next visits are a single "Grant access" click, and none at all if you pick "Allow on every visit".'));
+      gate.append(el('p', 'fine', 'Clipboard got overwritten? Paste %USERPROFILE%\\KovaaK-stats into the picker instead. Steam outside Program Files? You can skip step 3 and pick your ...\\FPSAimTrainer\\FPSAimTrainer\\stats folder directly. Either way the folder is remembered: next visits are one "Grant access" click, none at all after "Allow on every visit".'));
     }
     root.append(gate);
     if (state.scanError) root.append(notice(state.scanError, 'error'));
@@ -682,7 +659,7 @@ function renderGroup() {
   const lb = el('div', 'card');
   const lbHead = el('div', 'card-head');
   lbHead.append(el('h2', null, 'Fewest missed days'));
-  lbHead.append(el('span', 'muted', monthName(g.month)));
+  lbHead.append(el('span', 'muted', 'the prize ranking'));
   lb.append(lbHead);
 
   const table = el('table', 'leaderboard');
@@ -716,8 +693,15 @@ function renderGroup() {
   // календарь месяца, строка на участника
   const cal = el('div', 'card');
   const calHead = el('div', 'card-head');
-  calHead.append(el('h2', null, 'The month'));
-  calHead.append(el('span', 'muted', 'green means the day was completed'));
+  calHead.append(el('h2', null, monthName(g.month)));
+  const legend = el('div', 'cal-legend');
+  [['is-done', 'done'], ['is-partial', 'partial'], ['is-today-empty', 'today'], ['is-future', 'upcoming']].forEach(([cls, label]) => {
+    const item = el('span', 'legend-item');
+    item.append(el('span', 'legend-swatch ' + cls));
+    item.append(label);
+    legend.append(item);
+  });
+  calHead.append(legend);
   cal.append(calHead);
 
   const grid = el('div', 'calendar');

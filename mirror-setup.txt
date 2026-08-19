@@ -45,9 +45,9 @@ foreach ($pf in @(${env:ProgramFiles(x86)}, $env:ProgramFiles)) {
 if (-not $underPF) {
   Set-Clipboard $stats
   Write-Host ''
-  Write-Host 'Good news: this folder is NOT under Program Files, Chrome can open it directly.' -ForegroundColor Green
-  Write-Host 'The path is already in your clipboard. On the site press "Choose stats folder"'
-  Write-Host 'and paste it into the folder field:'
+  Write-Host 'Done! No mirror needed: Chrome can open this folder directly.' -ForegroundColor Green
+  Write-Host 'The folder path is in your clipboard. Go back to the site, press'
+  Write-Host '"Choose stats folder", paste (Ctrl+V), press Enter, hit Select Folder:'
   Write-Host "  $stats" -ForegroundColor Cyan
   exit 0
 }
@@ -114,13 +114,11 @@ Write-Host ''
 Write-Host 'Syncing your stats for the first time...'
 Start-Sleep -Seconds 3
 $count = (Get-ChildItem $mirror -Filter *.csv -ErrorAction SilentlyContinue | Measure-Object).Count
-Write-Host "Mirror ready: $count stats files." -ForegroundColor Green
-Write-Host 'It stays live-synced and starts with Windows from now on.'
+Write-Host "Done! Mirror ready: $count stats files, live-synced, starts with Windows." -ForegroundColor Green
 Write-Host ''
 Set-Clipboard $mirror
-Write-Host 'The folder path is already in your clipboard. On the site press'
-Write-Host '"Choose stats folder", paste it into the folder field, press Enter,'
-Write-Host 'then hit Select Folder:'
+Write-Host 'The folder path is in your clipboard. Go back to the site, press'
+Write-Host '"Choose stats folder", paste (Ctrl+V), press Enter, hit Select Folder:'
 Write-Host "  $mirror" -ForegroundColor Cyan
 Write-Host ''
 Write-Host 'If the clipboard gets overwritten, this works in the picker too:'
