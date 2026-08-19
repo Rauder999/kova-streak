@@ -821,6 +821,29 @@ function renderAdmin() {
 
   root.append(card);
 
+  // ручной дайджест: тот же текст, что уходит по крону в 23:00
+  const dig = el('div', 'card');
+  dig.append(el('h2', null, 'Discord digest'));
+  dig.append(el('p', 'lede', 'Every day at 23:00 the worker posts a check-in summary to the group channel: who is done, who is still open, whose streak is on the line, top-5 by fewest missed days. This button posts one right now, same content.'));
+  const dbtn = el('button', 'primary', 'Post digest now');
+  const dmsg = el('p', 'notice');
+  dmsg.hidden = true;
+  dbtn.addEventListener('click', async () => {
+    dbtn.disabled = true;
+    try {
+      await api.postDigest();
+      dmsg.textContent = 'Posted. Check the channel.';
+      dmsg.className = 'notice ok';
+    } catch (e) {
+      dmsg.textContent = e.message;
+      dmsg.className = 'notice error';
+    }
+    dmsg.hidden = false;
+    dbtn.disabled = false;
+  });
+  dig.append(dbtn, dmsg);
+  root.append(dig);
+
   if (state.playlist && state.playlist.scenarios) {
     const cur = el('div', 'card');
     const h = el('div', 'card-head');

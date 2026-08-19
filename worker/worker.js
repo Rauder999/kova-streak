@@ -401,6 +401,14 @@ async function handleApi(request, env, url, cors) {
     return json(await buildStandings(env, month), 200, cors);
   }
 
+  // ручная отправка дайджеста из админки: тот же текст, что уйдет по крону
+  if (path === '/api/digest' && request.method === 'POST') {
+    if (!user.admin) return json({ error: 'Admin only' }, 403, cors);
+    if (!env.DISCORD_WEBHOOK_URL) return json({ error: 'Webhook is not configured yet (DISCORD_WEBHOOK_URL)' }, 400, cors);
+    await postDigest(env);
+    return json({ ok: true }, 200, cors);
+  }
+
   return json({ error: 'Not found' }, 404, cors);
 }
 
@@ -436,7 +444,8 @@ async function postDigest(env) {
     }
     const partial = missing.filter((p) => p.todayRuns && p.todayRuns.completedRuns > 0);
     for (const p of partial) {
-      lines.push(`${p.displayName} is at ${p.todayRuns.completedRuns}/${p.todayRuns.requiredRuns} runs, almost there.`);
+      const { completedRuns: c, requiredRuns: r } = p.todayRuns;
+      lines.push(`${p.displayName} is at ${c}/${r} runs${r > 0 && c / r >= 0.7 ? ', almost there' : ''}.`);
     }
   }
 
