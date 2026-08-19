@@ -419,7 +419,7 @@ export function renderToday() {
   const card = el('div', 'card');
   const head = el('div', 'card-head');
   head.append(el('h2', null, 'What is left to play'));
-  head.append(el('span', 'muted mono', state.date));
+  head.append(el('span', 'muted mono', state.date + ' · resets at your local midnight'));
   card.append(head);
 
   const list = el('ul', 'checklist');
