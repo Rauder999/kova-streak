@@ -312,7 +312,7 @@ async function auth(request, env) {
   return verifyToken(header.slice(7), env.SESSION_SECRET);
 }
 
-async function handleApi(request, env, url, cors) {
+async function handleApi(request, env, url, cors, ctx) {
   const path = url.pathname;
 
   if (path === '/api/playlist' && request.method === 'GET') {
@@ -367,6 +367,10 @@ async function handleApi(request, env, url, cors) {
 
     const key = `completion:${user.uid}:${body.date}`;
     const prev = await env.KOVA.get(key, 'json');
+    // Первый переход через 100% за этот день: prev либо не было, либо он
+    // был частичным. Повторные посты того же дня (перезагрузка вкладки)
+    // анонс не триггерят.
+    const firstCompletionToday = done && !(prev && prev.done);
     // День уже закрыт: не даем случайно откатить его частичным сканом
     // (например, после смены плейлисты в середине дня).
     if (!(prev && prev.done && !done)) {
@@ -387,10 +391,14 @@ async function handleApi(request, env, url, cors) {
       all[k.name.slice(`completion:${user.uid}:`.length)] = { completedRuns: m.c || 0, requiredRuns: m.r || 0, done: !!m.d };
     }
     const profile = await env.KOVA.get(`user:${user.uid}`, 'json');
+    const streak = computeStreak(all, today);
+
+    if (firstCompletionToday && ctx) ctx.waitUntil(announceCompletion(env, user, streak));
+
     return json({
       ok: true,
       done,
-      streak: computeStreak(all, today),
+      streak,
       missedDays: computeMissed(all, today.slice(0, 7), today, profile && profile.joinedDate),
     }, 200, cors);
   }
@@ -413,6 +421,40 @@ async function handleApi(request, env, url, cors) {
 }
 
 // ---------- ежедневный дайджест в Discord ----------
+
+const MILESTONES = new Set([3, 7, 14, 21, 30, 50, 75, 100]);
+
+// Мгновенный пост в канал, когда игрок впервые за день закрыл плейлисту.
+// Социальное давление капает весь день, а не одним вечерним залпом.
+// Никогда не ломает сам чек-ин: все ошибки глотаются.
+async function announceCompletion(env, user, streak) {
+  if (!env.DISCORD_WEBHOOK_URL) return;
+  try {
+    const today = groupDate(env);
+    const standings = await buildStandings(env, today.slice(0, 7));
+    const players = standings.players;
+    const meCounted = players.some((p) => p.userId === user.uid && p.doneToday);
+    const doneCount = players.filter((p) => p.doneToday).length + (meCounted ? 0 : 1);
+
+    const name = `**${user.name}**`;
+    const variants = [
+      `🎯 ${name} just became a slightly better aimer. Playlist done.`,
+      `✅ ${name} closed today's playlist. Good aim is just showing up daily.`,
+      `🫡 ${name} did the work today.`,
+      `📈 ${name} finished the daily. That is how streaks are built.`,
+    ];
+    let msg = variants[Math.floor(Math.random() * variants.length)];
+    if (streak >= 3) msg += ` 🔥 ${streak} days straight.`;
+    if (MILESTONES.has(streak)) msg += ` 🎉 ${streak}-day milestone!`;
+    if (players.length >= 3) msg += ` (${doneCount}/${players.length} in today)`;
+
+    await fetch(env.DISCORD_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: msg, allowed_mentions: { parse: [] } }),
+    });
+  } catch { /* пост не критичен */ }
+}
 
 // Дайджест построен на механиках Duolingo: угроза стрику первой строкой
 // (loss aversion сильнее награды), конкретные числа, вехи празднуются,
@@ -474,7 +516,6 @@ async function postDigest(env) {
   }
 
   // вехи празднуем в день достижения
-  const MILESTONES = new Set([3, 7, 14, 21, 30, 50, 75, 100]);
   for (const p of done.filter((x) => MILESTONES.has(x.streak))) {
     lines.push(`🎉 ${p.displayName} just hit a ${p.streak}-day streak!`);
   }
@@ -501,7 +542,7 @@ async function postDigest(env) {
 // ---------- вход ----------
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const origin = request.headers.get('Origin') || '';
     const cors = corsHeaders(origin);
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
@@ -512,7 +553,7 @@ export default {
     if (url.pathname === '/auth/callback') return handleCallback(request, env);
     if (url.pathname.startsWith('/api/')) {
       try {
-        return await handleApi(request, env, url, cors);
+        return await handleApi(request, env, url, cors, ctx);
       } catch (e) {
         return json({ error: 'Server error: ' + e.message }, 500, cors);
       }
