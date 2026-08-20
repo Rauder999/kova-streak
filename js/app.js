@@ -11,6 +11,9 @@ import {
 // Предпросмотр гайда подключения для залогиненного админа: ?setup=test
 const SETUP_PREVIEW = new URLSearchParams(location.search).get('setup') === 'test';
 
+// Однострочник установки/починки зеркала, он же в гайде и в строке помощи
+const MIRROR_CMD = 'irm https://rauder999.github.io/kova-streak/mirror-setup.txt | iex';
+
 const POLL_MS = 5000;          // как часто перечитываем листинг папки
 const POST_DEBOUNCE_MS = 60000; // не чаще раза в минуту шлем частичный прогресс
 const GROUP_REFRESH_MS = 60000;
@@ -292,12 +295,11 @@ export function renderToday() {
       gate.append(el('h2', null, 'One-time setup'));
       gate.append(el('p', 'lede', 'Four steps, about two minutes. After this, check-ins are fully automatic: you play, the site sees it.'));
 
-      const CMD = 'irm https://rauder999.github.io/kova-streak/mirror-setup.txt | iex';
       const cmdRow = el('div', 'path-row');
-      const cmdCode = el('code', 'mono path-text', CMD);
+      const cmdCode = el('code', 'mono path-text', MIRROR_CMD);
       const cmdCopy = el('button', null, 'Copy command');
       cmdCopy.addEventListener('click', async () => {
-        const ok = await copyText(CMD);
+        const ok = await copyText(MIRROR_CMD);
         if (ok) {
           cmdCopy.textContent = 'Copied';
           setTimeout(() => { cmdCopy.textContent = 'Copy command'; }, 1500);
@@ -411,6 +413,20 @@ export function renderToday() {
   }
   card.append(list);
   root.append(card);
+
+  // скорая помощь на виду: зеркало на машине игрока могло умереть
+  const help = el('div', 'help-line');
+  help.append(el('span', null, 'Progress not updating while you play? Run this in PowerShell:'));
+  const hcode = el('code', 'mono', MIRROR_CMD);
+  help.append(hcode);
+  const hbtn = el('button', 'ghost', 'Copy');
+  hbtn.addEventListener('click', async () => {
+    const ok = await copyText(MIRROR_CMD);
+    hbtn.textContent = ok ? 'Copied' : 'Copy';
+    if (ok) setTimeout(() => { hbtn.textContent = 'Copy'; }, 1500);
+  });
+  help.append(hbtn);
+  root.append(help);
 }
 
 function progressRing(p) {
