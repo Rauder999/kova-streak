@@ -129,6 +129,21 @@ foreach ($pname in @('wscript.exe', 'powershell.exe')) {
 Start-Sleep -Milliseconds 500
 
 Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'KovaaKStatsMirror' -Value ('wscript.exe "' + $vbs + '"')
+
+# Планировщик: перезапуск каждые 15 минут и при логоне. Modern Standby умеет
+# тихо убивать фоновые процессы за ночь, а Run-ключ срабатывает только при
+# логоне, которых на вечно спящих машинах не бывает неделями. Дубликаты
+# гасятся мьютексом мгновенно, так что частые запуски бесплатны.
+try {
+  $action = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument ('"' + $vbs + '"')
+  $t1 = New-ScheduledTaskTrigger -AtLogOn
+  $t2 = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) -RepetitionInterval (New-TimeSpan -Minutes 15) -RepetitionDuration (New-TimeSpan -Days 3650)
+  $tset = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -StartWhenAvailable
+  Register-ScheduledTask -TaskName 'KovaaKStatsMirror' -Action $action -Trigger $t1,$t2 -Settings $tset -Force -ErrorAction Stop | Out-Null
+} catch {
+  schtasks /Create /F /TN KovaaKStatsMirror /SC MINUTE /MO 15 /TR ('wscript.exe \"' + $vbs + '\"') | Out-Null
+}
+
 Start-Process wscript.exe -ArgumentList ('"' + $vbs + '"')
 
 Write-Host ''
