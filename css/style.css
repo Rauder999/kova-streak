@@ -221,7 +221,7 @@ main { max-width: 980px; margin: 0 auto; padding: 24px; width: 100%; }
 
 .help-line {
   display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
-  margin: -6px 0 20px;
+  margin: 0 0 18px;
   font-size: 13px; color: var(--text-1);
 }
 .help-line code {

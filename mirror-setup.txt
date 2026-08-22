@@ -9,15 +9,27 @@ $ErrorActionPreference = 'Stop'
 Write-Host ''
 Write-Host '=== KOVA STREAK mirror setup ===' -ForegroundColor Magenta
 
-# --- find the stats folder: default installs, then every Steam library on the PC ---
+# --- find the stats folder ---
+# Корень Steam берем из реестра (Steam пишет его туда при установке, где бы
+# он ни стоял), Program Files оставлен только как страховка. Дальше все
+# библиотеки из libraryfolders.vdf каждого корня.
 $statsTail = 'steamapps\common\FPSAimTrainer\FPSAimTrainer\stats'
-$candidates = @()
-foreach ($pf in @(${env:ProgramFiles(x86)}, $env:ProgramFiles)) {
-  if ($pf) { $candidates += (Join-Path $pf ('Steam\' + $statsTail)) }
+$steamRoots = @()
+foreach ($rk in @('HKCU:\Software\Valve\Steam', 'HKLM:\SOFTWARE\WOW6432Node\Valve\Steam', 'HKLM:\SOFTWARE\Valve\Steam')) {
+  try {
+    $rp = Get-ItemProperty -Path $rk -ErrorAction Stop
+    foreach ($n in @('SteamPath', 'InstallPath')) {
+      if ($rp.$n) { $steamRoots += ($rp.$n -replace '/', '\') }
+    }
+  } catch { }
 }
 foreach ($pf in @(${env:ProgramFiles(x86)}, $env:ProgramFiles)) {
-  if (-not $pf) { continue }
-  $vdf = Join-Path $pf 'Steam\steamapps\libraryfolders.vdf'
+  if ($pf) { $steamRoots += (Join-Path $pf 'Steam') }
+}
+$candidates = @()
+foreach ($root in ($steamRoots | Select-Object -Unique)) {
+  $candidates += (Join-Path $root $statsTail)
+  $vdf = Join-Path $root 'steamapps\libraryfolders.vdf'
   if (Test-Path $vdf) {
     foreach ($m in [regex]::Matches((Get-Content $vdf -Raw), '"path"\s+"([^"]+)"')) {
       $lib = $m.Groups[1].Value -replace '\\\\', '\'
@@ -30,10 +42,16 @@ foreach ($c in ($candidates | Select-Object -Unique)) {
   if (Test-Path $c) { $stats = $c; break }
 }
 if (-not $stats) {
+  Write-Host ''
   Write-Host 'Could not find the KovaaK''s stats folder automatically.' -ForegroundColor Yellow
-  $stats = Read-Host 'Paste the full path to your ...\FPSAimTrainer\FPSAimTrainer\stats folder'
+  Write-Host 'Get the path like this:' -ForegroundColor Yellow
+  Write-Host '  1. Open Steam, right-click KovaaK''s -> Manage -> Browse local files.'
+  Write-Host '  2. In the Explorer window that opens, go into FPSAimTrainer, then into stats.'
+  Write-Host '  3. Click the address bar at the top, Ctrl+C the full path.'
+  Write-Host '  4. Come back here, RIGHT-CLICK to paste it, press Enter.'
+  $stats = Read-Host 'Path'
   $stats = $stats.Trim('"').Trim()
-  if (-not (Test-Path $stats)) { Write-Host 'That path does not exist. Aborting.' -ForegroundColor Red; exit 1 }
+  if (-not (Test-Path $stats)) { Write-Host 'That path does not exist. Aborting, nothing was changed.' -ForegroundColor Red; exit 1 }
 }
 Write-Host "Found KovaaK's stats: $stats"
 

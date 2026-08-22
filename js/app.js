@@ -293,7 +293,7 @@ export function renderToday() {
       // через клипборд. Никаких запасных кнопок Copy path: они затирали
       // клипборд не тем путем, друзья дважды на этом ловились.
       gate.append(el('h2', null, 'One-time setup'));
-      gate.append(el('p', 'lede', 'Four steps, about two minutes. After this, check-ins are fully automatic: you play, the site sees it.'));
+      gate.append(el('p', 'lede', 'Two minutes, once. Then it is fully automatic: you play, the site checks you in.'));
 
       const cmdRow = el('div', 'path-row');
       const cmdCode = el('code', 'mono path-text', MIRROR_CMD);
@@ -323,25 +323,25 @@ export function renderToday() {
         steps.append(li);
         return li;
       };
-      step('Turn on stats export.', 'In KovaaK\'s: Game Options -> Main -> Statistics Export = "Always". Without it the game does not write the files this site reads.');
+      step('KovaaK\'s settings.', 'Game Options -> Main -> Statistics Export = "Always".');
       if (state.playlist && state.playlist.shareCode) {
-        step('Get the playlist.', [' In KovaaK\'s, search playlists by this code and download it: ', codeChip(state.playlist.shareCode)]);
+        step('Playlist.', [' Download it in KovaaK\'s with this code: ', codeChip(state.playlist.shareCode)]);
       } else {
-        step('Get the playlist.', 'Import the week\'s playlist in KovaaK\'s (ask Rauder for the share code).');
+        step('Playlist.', 'Import the week\'s playlist in KovaaK\'s (ask Rauder for the code).');
       }
-      step('Run the folder helper.', [
-        ' Press Win, type "powershell", press Enter. Paste this line, press Enter and wait for the green text:',
+      step('PowerShell.', [
+        ' Press Win, type "powershell", Enter. Paste this line, Enter:',
         cmdRow,
-        'It finds your KovaaK\'s stats folder, quietly works around Chrome\'s Program Files restriction if your Steam lives there, and leaves the right folder path in your clipboard.',
+        'When it says Done, your folder path is in the clipboard. If it asks a question, answer it right there.',
       ]);
-      step('Pick the folder.', 'Come back here, press the big button below, paste the path (Ctrl+V), press Enter, then hit "Select Folder".');
+      step('Folder.', 'Press the button below, then Ctrl+V, Enter, "Select Folder".');
       gate.append(steps);
 
       const btn = el('button', 'primary big', 'Choose stats folder');
       btn.addEventListener('click', connectFolder);
       gate.append(btn);
 
-      gate.append(el('p', 'fine', 'Clipboard got overwritten? Paste %USERPROFILE%\\KovaaK-stats into the picker instead. Steam outside Program Files? You can skip step 3 and pick your ...\\FPSAimTrainer\\FPSAimTrainer\\stats folder directly. Either way the folder is remembered: next visits are one "Grant access" click, none at all after "Allow on every visit".'));
+      gate.append(el('p', 'fine', 'When Chrome asks for folder access, pick "Allow on every visit". Everything is remembered after that.'));
     }
     root.append(gate);
     if (state.scanError) root.append(notice(state.scanError, 'error'));
@@ -357,6 +357,21 @@ export function renderToday() {
   document.title = p.done
     ? 'done for today - KOVA STREAK'
     : `${Math.round(p.percent * 100)}% today - KOVA STREAK`;
+
+  // скорая помощь первой строкой, до нее не нужно доматывать: если зеркало
+  // на машине игрока умерло, ответ висит прямо над кольцом
+  const help = el('div', 'help-line');
+  help.append(el('span', null, 'Progress not updating while you play? Run this in PowerShell:'));
+  const hcode = el('code', 'mono', MIRROR_CMD);
+  help.append(hcode);
+  const hbtn = el('button', 'ghost', 'Copy');
+  hbtn.addEventListener('click', async () => {
+    const ok = await copyText(MIRROR_CMD);
+    hbtn.textContent = ok ? 'Copied' : 'Copy';
+    if (ok) setTimeout(() => { hbtn.textContent = 'Copy'; }, 1500);
+  });
+  help.append(hbtn);
+  root.append(help);
 
   // в папке вообще нет файлов статистики: почти наверняка выбрана не та
   if (p.scanned === 0) {
@@ -413,20 +428,6 @@ export function renderToday() {
   }
   card.append(list);
   root.append(card);
-
-  // скорая помощь на виду: зеркало на машине игрока могло умереть
-  const help = el('div', 'help-line');
-  help.append(el('span', null, 'Progress not updating while you play? Run this in PowerShell:'));
-  const hcode = el('code', 'mono', MIRROR_CMD);
-  help.append(hcode);
-  const hbtn = el('button', 'ghost', 'Copy');
-  hbtn.addEventListener('click', async () => {
-    const ok = await copyText(MIRROR_CMD);
-    hbtn.textContent = ok ? 'Copied' : 'Copy';
-    if (ok) setTimeout(() => { hbtn.textContent = 'Copy'; }, 1500);
-  });
-  help.append(hbtn);
-  root.append(help);
 }
 
 function progressRing(p) {
