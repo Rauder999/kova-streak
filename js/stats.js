@@ -122,6 +122,19 @@ export function buildDailyReport(allRuns, today) {
     if (n.scoreDelta != null && n.scoreDelta >= 0.03) n.codes.add('STRONG');
     if (!n.codes.size) n.codes.add('OK');
     n.codes = [...n.codes].sort();
+
+    // аспекты ниши против своей нормы: даже в зеленый день у тренера
+    // должен быть материал для следующего задания
+    n.aspects = {
+      accDeltaPp: n.accDelta != null ? Math.round(n.accDelta * 100) : null,
+      paceRatio: (() => { const v = pickNum(withBase, (s) => s.ttkRatio); return v.length ? Math.round(median(v) * 100) / 100 : null; })(),
+      chokeExcessPp: (() => {
+        const v = withBase.map((s) => (s.tailToday != null ? s.tailToday - ((s.base && s.base.ttkTail) || 0) : null)).filter((x) => x != null);
+        return v.length ? Math.round(Math.max(...v) * 100) : null;
+      })(),
+      fadePp: (() => { const v = pickNum(n.scenarios, (s) => s.dropToday); return v.length ? Math.round(median(v) * 100) : null; })(),
+    };
+    n.pbs = n.scenarios.filter((s) => s.isPB).map((s) => s.name);
   }
 
   // сортировка ниш: самая проблемная первой
@@ -144,7 +157,7 @@ export function buildDailyReport(allRuns, today) {
 function hashReport(report) {
   const bucket = (v) => (v == null ? 'x' : Math.round(v * 20));
   const src = report.niches.map((n) =>
-    `${n.niche}:${n.codes.join('+')}:${bucket(n.scoreDelta)}:${bucket(n.accDelta)}:${n.worst ? n.worst.name : ''}`
+    `${n.niche}:${n.codes.join('+')}:${bucket(n.scoreDelta)}:${bucket(n.accDelta)}:${n.worst ? n.worst.name : ''}:${n.aspects ? [n.aspects.paceRatio, n.aspects.chokeExcessPp, n.aspects.fadePp].join(',') : ''}`
   ).join('|') + (report.rusty ? `|rust${report.gapDays}` : '');
   let h = 5381;
   for (let i = 0; i < src.length; i++) h = ((h << 5) + h + src.charCodeAt(i)) >>> 0;
@@ -165,6 +178,9 @@ export function coachPayload(report) {
       worstScenario: n.worst ? n.worst.name : null,
       worstScenarioDeltaPct: n.worst ? pct(n.worst.scoreDelta) : null,
       bestScenario: n.best ? n.best.name : null,
+      aspects: n.aspects || null,
+      pbs: n.pbs || [],
+      runsToday: n.scenarios.reduce((a, s) => a + s.runsToday, 0),
     })),
   };
 }
