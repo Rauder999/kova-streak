@@ -31,21 +31,28 @@ export function scenarioBaseline(historyRuns) {
   };
 }
 
-// Семейство сценария: покебол это отдельный вид (статичные шары, зажатый М1,
-// советы только про плавный путь), остальное по данным ранов.
+// Семейство сценария. Имя решает там, где данные слепы: покебол (статичные
+// шары, зажатый М1) и динамик (движущиеся цели под клик: pasu без track/smooth
+// в имени, 3-click и т.п.) по CSV неотличимы от трекинга и статика, а советы
+// им нужны принципиально другие.
 function scenarioKind(name, runs) {
   if (/pokeball/i.test(name)) return 'pokeball';
+  if (/\b\d[- ]?click\b|dynamic/i.test(name)) return 'dynamic';
+  if (/pasu/i.test(name) && !/track|smooth/i.test(name)) return 'dynamic';
   const counts = {};
   for (const r of runs) counts[r.type] = (counts[r.type] || 0) + 1;
   const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
   return top && top[0] !== 'unknown' ? top[0] : null;
 }
 
-// Ниша для группировки вердикта: покеболы живут в трекинге (ассистирующий
-// скилл по 4BK), но их СЕМЕЙСТВО остается pokeball и определяет советы.
+// Ниша для группировки вердикта: покеболы живут в трекинге, динамик в
+// кликинге (семейства ассистирующих скиллов по 4BK), но их KIND остается
+// своим и определяет советы.
 function scenarioNiche(name, runs) {
   const kind = scenarioKind(name, runs);
-  return kind === 'pokeball' ? 'tracking' : kind;
+  if (kind === 'pokeball') return 'tracking';
+  if (kind === 'dynamic') return 'clicking';
+  return kind;
 }
 
 // Отчет дня: по каждому сценарию, сыгранному в выбранную дату, дельты
@@ -116,10 +123,13 @@ export function buildDailyReport(allRuns, today) {
     n.best = [...withBase].sort((a, b) => (b.scoreDelta ?? 0) - (a.scoreDelta ?? 0))[0] || null;
 
     if (n.niche === 'clicking') {
+      // темповые коды только по чистым статикам: на динамике долгий килл
+      // это часто правильная техника (трек перед кликом), а не пересиживание
+      const statics = withBase.filter((s) => s.kind === 'clicking');
       // стреляет быстрее обычного и попадает хуже = клики на авось
-      if (n.accDelta != null && n.accDelta <= -0.05 && withBase.some((s) => s.ttkRatio != null && s.ttkRatio <= 1.05)) n.codes.add('SPAM');
+      if (n.accDelta != null && n.accDelta <= -0.05 && statics.some((s) => s.ttkRatio != null && s.ttkRatio <= 1.05)) n.codes.add('SPAM');
       // медленнее обычного при своей же точности = пересиживание
-      if (withBase.some((s) => s.ttkRatio != null && s.ttkRatio >= 1.15 && (s.accDelta ?? 0) >= -0.01)) n.codes.add('HESITATE');
+      if (statics.some((s) => s.ttkRatio != null && s.ttkRatio >= 1.15 && (s.accDelta ?? 0) >= -0.01)) n.codes.add('HESITATE');
     }
     // чоки: хвост длинных киллов заметно выше своей нормы
     if (withBase.some((s) => s.tailToday != null && s.tailToday > Math.max(0.08, ((s.base && s.base.ttkTail) || 0) * 1.5))) n.codes.add('CHOKES');

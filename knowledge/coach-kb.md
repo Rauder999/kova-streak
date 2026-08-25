@@ -65,10 +65,12 @@ knowledge section of the coach prompt: keep it prompt-sized and keep worker.js i
   track: higher-HP / evasive TS, regen switching. Eyes jump to the next target the instant
   the current one dies; hand 10-20% faster than comfortable. Chain kills: minimal time
   BETWEEN targets, a fraction longer ON the target.
-- DYNAMIC (clicking moving targets). NEVER spam: track the bot for a millisecond before
-  clicking; dynamic is tracking first, clicking second. Target reading: flick to where the
-  target WILL be, not its old position (flicking to old position is the #1 reason for
-  "overflick in game but not in KovaaK's"). 3-click scens force tracking priority.
+- DYNAMIC (clicking moving targets; pasu family, 3-click scens). NEVER spam and never
+  pace-push: track the bot for a millisecond before clicking; dynamic is tracking first,
+  clicking second, and a longer kill time here is often correct technique, not hesitation.
+  Target reading: flick to where the target WILL be, not its old position (flicking to old
+  position is the #1 reason for "overflick in game but not in KovaaK's"). 3-click scens
+  force tracking priority.
 - TRACKING = smoothness. Reactive = recognizing and reacting to a direction change;
   everything before and after the reaction is smoothness. Read the target: if he is smooth,
   be smooth; be reactive only for the millisecond of the change (constant reactivity =
