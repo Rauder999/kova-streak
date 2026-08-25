@@ -45,6 +45,8 @@ export const state = {
   coachLines: null,
   coachHash: null,
   coachError: null,
+  restDates: [],        // запланированные выходные (даты)
+  restError: null,
 };
 
 let pollTimer = null;
@@ -126,6 +128,7 @@ async function boot() {
   // так что мобильных встречает сразу он
   switchTab(fsSupported() ? 'today' : 'group');
   refreshGroup();
+  loadRest().then(() => { if (state.tab === 'today') renderToday(); });
   if (state.granted) startPolling();
 }
 
@@ -484,6 +487,7 @@ export function renderToday() {
 
   if (!fsSupported()) {
     root.append(notice('Check-ins happen on your gaming PC in desktop Chrome or Edge. On this device you can watch the group tab.'));
+    root.append(renderRestCard()); // выходные удобно ставить как раз с телефона
     return;
   }
   if (!state.playlist || !state.playlist.scenarios || !state.playlist.scenarios.length) {
@@ -645,6 +649,57 @@ export function renderToday() {
   }
   card.append(list);
   root.append(card);
+
+  root.append(renderRestCard());
+}
+
+// ---------- выходные ----------
+// До 2 дней в неделю без потери стрика. Планируются строго до начала дня
+// (по времени группы), поэтому сегодняшний день переключить нельзя: это
+// защита от "забыл поиграть, вечером оформлю выходной".
+
+async function loadRest() {
+  try {
+    const res = await api.getRest();
+    state.restDates = res.dates || [];
+  } catch { /* не критично */ }
+}
+
+function renderRestCard() {
+  const card = el('div', 'card rest-card');
+  const head = el('div', 'card-head');
+  head.append(el('h2', null, 'Rest days'));
+  head.append(el('span', 'muted', 'up to 2 per week, streak survives'));
+  card.append(head);
+  card.append(el('p', 'lede', 'Know you cannot play on a day? Schedule it in advance and your streak will pass right over it. Days must be set before they start, today cannot be changed.'));
+
+  const row = el('div', 'rest-days');
+  for (let i = 1; i <= 10; i++) {
+    const d = new Date();
+    d.setDate(d.getDate() + i);
+    const pad = (n) => String(n).padStart(2, '0');
+    const iso = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const label = d.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric' });
+    const on = state.restDates.includes(iso);
+    const chip = el('button', 'rest-chip' + (on ? ' on' : ''), label);
+    chip.title = iso + (on ? ' - scheduled rest day, click to cancel' : ' - click to schedule a rest day');
+    chip.addEventListener('click', async () => {
+      chip.disabled = true;
+      try {
+        const res = await api.postRest(iso, !on);
+        state.restDates = res.dates || [];
+        state.restError = null;
+      } catch (e) {
+        if (handleApiError(e)) return;
+        state.restError = e.message;
+      }
+      renderToday();
+    });
+    row.append(chip);
+  }
+  card.append(row);
+  if (state.restError) card.append(el('p', 'notice error', state.restError));
+  return card;
 }
 
 function progressRing(p) {
@@ -889,6 +944,39 @@ function renderGroup() {
   const today = localDate();
   const days = g.days;
 
+  // пульс группы: главные цифры дня одной полосой
+  const doneCnt = g.players.filter((p) => p.doneToday).length;
+  const restCnt = g.players.filter((p) => p.restToday).length;
+  const runsToday = g.players.reduce((a, p) => a + ((p.todayRuns && p.todayRuns.completedRuns) || 0), 0);
+  const topStreak = [...g.players].sort((a, b) => b.streak - a.streak)[0];
+  const hero = el('div', 'group-hero');
+  const tile = (label, value, hint) => {
+    const t = el('div', 'hero-tile');
+    t.append(el('span', 'stat-label', label));
+    t.append(el('span', 'hero-value mono', value));
+    if (hint) t.append(el('span', 'stat-hint', hint));
+    return t;
+  };
+  hero.append(tile('Checked in today', `${doneCnt} / ${g.players.length}`));
+  hero.append(tile('Runs today', String(runsToday)));
+  if (topStreak && topStreak.streak > 0) hero.append(tile('Top streak', `${topStreak.streak}d`, topStreak.displayName));
+  if (restCnt) hero.append(tile('On rest today', String(restCnt)));
+  root.append(hero);
+
+  // стрики под угрозой: социальное давление прямо на групповой странице
+  const risk = g.players.filter((p) => !p.doneToday && !p.restToday && p.streak >= 3);
+  if (risk.length) {
+    const rs = el('div', 'card risk-strip');
+    const rh = el('div', 'card-head');
+    rh.append(el('h2', null, 'Streaks on the line tonight'));
+    rh.append(el('span', 'muted', 'one playlist keeps them alive'));
+    rs.append(rh);
+    const chips = el('div', 'risk-chips');
+    for (const p of risk) chips.append(el('span', 'risk-chip mono', `${p.displayName} ${p.streak}d`));
+    rs.append(chips);
+    root.append(rs);
+  }
+
   // лидерборд по количеству пропусков
   const lb = el('div', 'card');
   const lbHead = el('div', 'card-head');
@@ -899,12 +987,13 @@ function renderGroup() {
   const table = el('table', 'leaderboard');
   const thead = el('thead');
   const hr = el('tr');
-  ['#', 'Player', 'Missed', 'Streak', 'Today'].forEach((h) => hr.append(el('th', null, h)));
+  ['#', 'Player', 'Missed', 'Streak', 'This week', 'Today'].forEach((h) => hr.append(el('th', null, h)));
   thead.append(hr);
   table.append(thead);
   const tbody = el('tbody');
   g.players.forEach((pl, i) => {
-    const tr = el('tr', pl.userId === state.user.uid ? 'me' : '');
+    const medal = i === 0 ? ' rank-1' : i === 1 ? ' rank-2' : i === 2 ? ' rank-3' : '';
+    const tr = el('tr', (pl.userId === state.user.uid ? 'me' : '') + medal);
     tr.append(el('td', 'rank mono', String(i + 1)));
     const nameCell = el('td', 'player');
     const img = el('img');
@@ -913,10 +1002,15 @@ function renderGroup() {
     nameCell.append(img, el('span', null, pl.displayName));
     tr.append(nameCell);
     tr.append(el('td', 'mono', String(pl.missedDays)));
-    tr.append(el('td', 'mono', String(pl.streak)));
+    tr.append(el('td', 'mono', pl.streak > 0 ? pl.streak + 'd' : '-'));
+    tr.append(el('td', 'mono muted', (pl.weekDone != null ? pl.weekDone : 0) + '/7'));
     const t = pl.byDate[today];
     const todayCell = el('td', 'mono');
-    todayCell.append(el('span', 'pill ' + cellClass(t), t && t.done ? 'done' : t ? Math.round((t.completedRuns / t.requiredRuns) * 100) + '%' : '-'));
+    if (!(t && t.done) && pl.restToday) {
+      todayCell.append(el('span', 'pill is-rest', 'rest'));
+    } else {
+      todayCell.append(el('span', 'pill ' + cellClass(t), t && t.done ? 'done' : t ? Math.round((t.completedRuns / t.requiredRuns) * 100) + '%' : '-'));
+    }
     tr.append(todayCell);
     tbody.append(tr);
   });
@@ -929,7 +1023,7 @@ function renderGroup() {
   const calHead = el('div', 'card-head');
   calHead.append(el('h2', null, monthName(g.month)));
   const legend = el('div', 'cal-legend');
-  [['is-done', 'done'], ['is-partial', 'partial'], ['is-today-empty', 'today'], ['is-future', 'upcoming']].forEach(([cls, label]) => {
+  [['is-done', 'done'], ['is-partial', 'partial'], ['is-rest', 'rest'], ['is-today-empty', 'today'], ['is-future', 'upcoming']].forEach(([cls, label]) => {
     const item = el('span', 'legend-item');
     item.append(el('span', 'legend-swatch ' + cls));
     item.append(label);
@@ -941,18 +1035,24 @@ function renderGroup() {
   const grid = el('div', 'calendar');
   grid.style.setProperty('--days', String(days.length));
 
+  const isMonday = (d) => new Date(d + 'T00:00:00Z').getUTCDay() === 1;
   grid.append(el('div', 'cal-corner'));
   for (const d of days) {
-    const h = el('div', 'cal-day-head' + (d === today ? ' is-today' : ''), String(Number(d.slice(-2))));
+    const h = el('div', 'cal-day-head' + (d === today ? ' is-today' : '') + (isMonday(d) ? ' wk' : ''), String(Number(d.slice(-2))));
     grid.append(h);
   }
   for (const pl of g.players) {
+    const restSet = new Set(pl.restDays || []);
     const nameCell = el('div', 'cal-name' + (pl.userId === state.user.uid ? ' me' : ''), pl.displayName);
     grid.append(nameCell);
     for (const d of days) {
       const rec = pl.byDate[d];
-      const cell = el('div', 'cal-cell ' + cellClass(rec, d, today, pl.joinedDate));
-      cell.title = `${pl.displayName}, ${d}: ` + (rec ? `${rec.completedRuns}/${rec.requiredRuns}` : 'nothing');
+      let cls = cellClass(rec, d, today, pl.joinedDate);
+      let title = rec ? `${rec.completedRuns}/${rec.requiredRuns}` : 'nothing';
+      // выходной виден и в прошлом, и как план на будущее
+      if (!(rec && rec.done) && restSet.has(d)) { cls = 'is-rest'; title = 'scheduled rest day'; }
+      const cell = el('div', 'cal-cell ' + cls + (isMonday(d) ? ' wk' : ''));
+      cell.title = `${pl.displayName}, ${d}: ` + title;
       grid.append(cell);
     }
   }

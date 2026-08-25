@@ -99,6 +99,16 @@ function monthDays(month) {
 const isDate = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
 const isMonth = (s) => typeof s === 'string' && /^\d{4}-\d{2}$/.test(s);
 
+// Понедельник недели, к которой относится дата: ключ недельной квоты выходных
+function weekKeyOf(date) {
+  const d = new Date(date + 'T00:00:00Z');
+  const dow = (d.getUTCDay() + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - dow);
+  return d.toISOString().slice(0, 10);
+}
+
+const REST_QUOTA_PER_WEEK = 2;
+
 // ---------- KV ----------
 
 async function listAll(env, prefix) {
@@ -143,25 +153,29 @@ async function loadGroup(env) {
 }
 
 // Стрик: подряд идущие выполненные дни, заканчивая сегодня. Если сегодня еще
-// не закрыт, день не обнуляет стрик, он просто пока не считается.
-function computeStreak(byDate, today) {
-  let cursor = byDate[today] && byDate[today].done ? today : shiftDate(today, -1);
+// не закрыт, день не обнуляет стрик, он просто пока не считается. Выходной
+// (rest day) прозрачен: стрик через него проходит, не растя и не обрываясь.
+function computeStreak(byDate, today, rest) {
   let n = 0;
-  while (byDate[cursor] && byDate[cursor].done) {
-    n++;
-    cursor = shiftDate(cursor, -1);
+  if (byDate[today] && byDate[today].done) n++;
+  let cursor = shiftDate(today, -1);
+  while (true) {
+    if (byDate[cursor] && byDate[cursor].done) { n++; cursor = shiftDate(cursor, -1); continue; }
+    if (rest && rest.has(cursor)) { cursor = shiftDate(cursor, -1); continue; }
+    break;
   }
   return n;
 }
 
 // Пропуски за месяц. Сегодняшний день не считается пропуском, пока он не
-// закончился, и дни до вступления в группу тоже не считаются.
-function computeMissed(byDate, month, today, joinedDate) {
+// закончился; дни до вступления в группу и объявленные выходные тоже нет.
+function computeMissed(byDate, month, today, joinedDate, rest) {
   const days = monthDays(month);
   let missed = 0;
   for (const d of days) {
     if (d >= today) continue;
     if (joinedDate && d < joinedDate) continue;
+    if (rest && rest.has(d)) continue;
     if (!(byDate[d] && byDate[d].done)) missed++;
   }
   return missed;
@@ -170,16 +184,25 @@ function computeMissed(byDate, month, today, joinedDate) {
 async function buildStandings(env, month) {
   const today = groupDate(env);
   const { users, byUser } = await loadGroup(env);
+  const restLists = await Promise.all(users.map((u) => env.KOVA.get(`rest:${u.userId}`, 'json')));
 
-  const players = users.map((u) => {
+  const players = users.map((u, i) => {
     const all = byUser.get(u.userId) || {};
+    const rest = new Set(Array.isArray(restLists[i]) ? restLists[i] : []);
     const byDate = {};
     for (const [d, rec] of Object.entries(all)) if (d.startsWith(month + '-')) byDate[d] = rec;
+    // дней недели, закрытых на текущей неделе (для колонки This week)
+    const wk = weekKeyOf(today);
+    let weekDone = 0;
+    for (let d = wk; d <= today; d = shiftDate(d, 1)) if (all[d] && all[d].done) weekDone++;
     return {
       ...u,
       byDate,
-      streak: computeStreak(all, today),
-      missedDays: computeMissed(all, month, today, u.joinedDate),
+      restDays: [...rest].filter((d) => d.startsWith(month.slice(0, 7))),
+      restToday: rest.has(today) && !(all[today] && all[today].done),
+      weekDone,
+      streak: computeStreak(all, today, rest),
+      missedDays: computeMissed(all, month, today, u.joinedDate, rest),
       doneToday: !!(all[today] && all[today].done),
       todayRuns: all[today] || null,
     };
@@ -391,7 +414,9 @@ async function handleApi(request, env, url, cors, ctx) {
       all[k.name.slice(`completion:${user.uid}:`.length)] = { completedRuns: m.c || 0, requiredRuns: m.r || 0, done: !!m.d };
     }
     const profile = await env.KOVA.get(`user:${user.uid}`, 'json');
-    const streak = computeStreak(all, today);
+    const restArr = (await env.KOVA.get(`rest:${user.uid}`, 'json')) || [];
+    const rest = new Set(restArr);
+    const streak = computeStreak(all, today, rest);
 
     if (firstCompletionToday && ctx) ctx.waitUntil(announceCompletion(env, user, streak));
 
@@ -399,8 +424,47 @@ async function handleApi(request, env, url, cors, ctx) {
       ok: true,
       done,
       streak,
-      missedDays: computeMissed(all, today.slice(0, 7), today, profile && profile.joinedDate),
+      missedDays: computeMissed(all, today.slice(0, 7), today, profile && profile.joinedDate, rest),
     }, 200, cors);
+  }
+
+  // выходные: до 2 в неделю, объявлять СТРОГО до начала дня по времени
+  // группы. Задним числом и в течение дня нельзя: это и есть защита от
+  // "забыл поиграть, оформлю выходной вечером".
+  if (path === '/api/rest' && request.method === 'GET') {
+    const dates = (await env.KOVA.get(`rest:${user.uid}`, 'json')) || [];
+    return json({ dates, quota: REST_QUOTA_PER_WEEK, today: groupDate(env) }, 200, cors);
+  }
+
+  if (path === '/api/rest' && request.method === 'POST') {
+    const body = await request.json().catch(() => null);
+    if (!body || !isDate(body.date) || typeof body.on !== 'boolean') {
+      return json({ error: 'date and on are required' }, 400, cors);
+    }
+    const today = groupDate(env);
+    if (body.date <= today) {
+      return json({ error: 'Rest days must be scheduled before the day starts. Today and past days cannot be changed.' }, 400, cors);
+    }
+    if (body.date > shiftDate(today, 21)) {
+      return json({ error: 'Rest days can be scheduled at most 3 weeks ahead' }, 400, cors);
+    }
+    let dates = (await env.KOVA.get(`rest:${user.uid}`, 'json')) || [];
+    if (body.on) {
+      if (!dates.includes(body.date)) {
+        const sameWeek = dates.filter((d) => weekKeyOf(d) === weekKeyOf(body.date)).length;
+        if (sameWeek >= REST_QUOTA_PER_WEEK) {
+          return json({ error: `Only ${REST_QUOTA_PER_WEEK} rest days per week` }, 400, cors);
+        }
+        dates.push(body.date);
+      }
+    } else {
+      dates = dates.filter((d) => d !== body.date);
+    }
+    // прошлое старше 4 месяцев не нужно даже для длинных стриков
+    const keepFrom = shiftDate(today, -120);
+    dates = dates.filter((d) => d >= keepFrom).sort();
+    await env.KOVA.put(`rest:${user.uid}`, JSON.stringify(dates));
+    return json({ dates, quota: REST_QUOTA_PER_WEEK, today }, 200, cors);
   }
 
   if (path === '/api/group' && request.method === 'GET') {
@@ -742,7 +806,8 @@ async function postDigest(env) {
   if (!players.length) return;
 
   const done = players.filter((p) => p.doneToday);
-  const missing = players.filter((p) => !p.doneToday);
+  const resting = players.filter((p) => !p.doneToday && p.restToday);
+  const missing = players.filter((p) => !p.doneToday && !p.restToday);
   const atRisk = missing.filter((p) => p.streak >= 1);
   const partial = missing.filter((p) => p.todayRuns && p.todayRuns.completedRuns > 0);
   const notStarted = missing.filter((p) => !p.todayRuns || p.todayRuns.completedRuns === 0);
@@ -754,13 +819,15 @@ async function postDigest(env) {
 
   const lines = [`[SYSTEM NOTICE - ${header}]`];
 
-  if (missing.length === 0) {
+  if (done.length === players.length) {
     lines.push(`[All ${players.length} players have completed the daily quest.]`);
     lines.push(pick([
       '[No penalties issued today.]',
       '[Flawless day recorded.]',
       '[The system approves. Barely.]',
     ]));
+  } else if (missing.length === 0) {
+    lines.push(`[Complete: ${done.length}/${players.length}. Everyone else is on a scheduled rest day. No penalties.]`);
   } else {
     // угроза стрику: главный крючок, всегда первой строкой
     if (atRisk.length) {
@@ -775,6 +842,9 @@ async function postDigest(env) {
       lines.push(`[Complete: ${done.length}/${players.length} - ${done.map(tag).join(', ')}]`);
     } else {
       lines.push('[Complete: 0/' + players.length + '. The system is watching.]');
+    }
+    if (resting.length) {
+      lines.push(`[Scheduled rest day: ${resting.map((p) => p.displayName).join(', ')}. Streaks preserved.]`);
     }
     // оставшееся считаем до конца, а не от нуля
     for (const p of partial) {
