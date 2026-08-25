@@ -338,21 +338,41 @@ li.done .scen-count { color: var(--pass); }
 .podium-name { font-weight: 500; font-size: 14px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .podium-streak { display: flex; align-items: center; gap: 5px; font-size: 13px; color: var(--signal-soft); }
 .podium-flame { width: 14px; height: 14px; }
+/* постаменты без цифр: место читается силуэтом, высотой и металлом кромки.
+   1 = монолит с коронной ступенью, 2 = скошенные плечи, 3 = низкая плита */
 .podium-pedestal {
-  width: 100%; min-width: 96px;
-  display: flex; align-items: flex-start; justify-content: center;
-  border-radius: 4px 4px 0 0;
+  width: 100%;
   background:
-    repeating-linear-gradient(to bottom, rgba(183, 174, 247, 0.07) 0 2px, transparent 2px 5px),
-    linear-gradient(to bottom, rgba(124, 108, 240, 0.32), rgba(124, 108, 240, 0.04));
-  border-top: 1px solid var(--signal-soft);
-  box-shadow: 0 -6px 22px rgba(124, 108, 240, 0.18);
+    repeating-linear-gradient(to bottom, rgba(183, 174, 247, 0.06) 0 2px, transparent 2px 5px),
+    linear-gradient(to bottom, rgba(124, 108, 240, 0.30), rgba(124, 108, 240, 0.03));
 }
-.place-1 .podium-pedestal { height: 84px; }
-.place-2 .podium-pedestal { height: 58px; }
-.place-3 .podium-pedestal { height: 42px; }
-.podium-pedestal span { font-size: 22px; color: var(--signal-soft); opacity: .85; padding-top: 6px; }
-.place-1 .podium-pedestal span { color: #e8b64a; }
+.place-1 .podium-pedestal {
+  height: 100px; min-width: 132px;
+  clip-path: polygon(0 26px, 26% 26px, 36% 0, 64% 0, 74% 26px, 100% 26px, 100% 100%, 0 100%);
+  background:
+    linear-gradient(to bottom, rgba(232, 182, 74, 0.85) 0 3px, transparent 3px),
+    repeating-linear-gradient(to bottom, rgba(232, 182, 74, 0.07) 0 2px, transparent 2px 5px),
+    linear-gradient(to bottom, rgba(232, 182, 74, 0.28), rgba(124, 108, 240, 0.05));
+  filter: drop-shadow(0 -4px 14px rgba(232, 182, 74, 0.28));
+}
+.place-2 .podium-pedestal {
+  height: 56px; min-width: 104px;
+  clip-path: polygon(0 16px, 16% 0, 84% 0, 100% 16px, 100% 100%, 0 100%);
+  background:
+    linear-gradient(to bottom, rgba(199, 199, 204, 0.8) 0 2px, transparent 2px),
+    repeating-linear-gradient(to bottom, rgba(199, 199, 204, 0.06) 0 2px, transparent 2px 5px),
+    linear-gradient(to bottom, rgba(199, 199, 204, 0.22), rgba(124, 108, 240, 0.04));
+  filter: drop-shadow(0 -3px 10px rgba(199, 199, 204, 0.2));
+}
+.place-3 .podium-pedestal {
+  height: 26px; min-width: 96px;
+  clip-path: polygon(6px 0, calc(100% - 6px) 0, 100% 8px, 100% 100%, 0 100%, 0 8px);
+  background:
+    linear-gradient(to bottom, rgba(176, 141, 87, 0.8) 0 2px, transparent 2px),
+    repeating-linear-gradient(to bottom, rgba(176, 141, 87, 0.07) 0 2px, transparent 2px 5px),
+    linear-gradient(to bottom, rgba(176, 141, 87, 0.2), rgba(124, 108, 240, 0.03));
+  filter: drop-shadow(0 -3px 10px rgba(176, 141, 87, 0.22));
+}
 
 .leaderboard tr.rank-1 .rank { color: #e8b64a; font-weight: 600; }
 .leaderboard tr.rank-2 .rank { color: var(--chrome); font-weight: 600; }

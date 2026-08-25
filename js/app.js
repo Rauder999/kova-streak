@@ -102,6 +102,7 @@ async function boot() {
   if (!state.user) return showView('login');
 
   $('user-name').textContent = state.user.name;
+  safeAvatar($('user-avatar'), state.user.uid);
   $('user-avatar').src = state.user.avatar || avatarFallback(state.user.uid);
   $('user-chip').hidden = false;
   $('tabs').hidden = false;
@@ -135,6 +136,16 @@ async function boot() {
 function avatarFallback(uid) {
   const i = (BigInt(uid || '0') >> 22n) % 6n;
   return `https://cdn.discordapp.com/embed/avatars/${i}.png`;
+}
+
+// Хэш аватарки протухает, когда человек меняет ее после логина: CDN отдает
+// 404 и картинка ломается. При ошибке тихо падаем на дефолтную.
+function safeAvatar(img, uid) {
+  img.addEventListener('error', () => {
+    const fb = avatarFallback(uid);
+    if (img.src !== fb) img.src = fb;
+  }, { once: true });
+  return img;
 }
 
 // ---------- вкладки ----------
@@ -986,6 +997,7 @@ export function renderGroup() {
       const img = el('img', 'podium-avatar');
       img.src = p.avatar || avatarFallback(p.userId);
       img.alt = '';
+      safeAvatar(img, p.userId);
       frame.append(img);
       slot.append(frame);
       slot.append(el('div', 'podium-name', p.displayName));
@@ -995,9 +1007,7 @@ export function renderGroup() {
       fl.alt = '';
       st.append(fl, `${p.streak}d`);
       slot.append(st);
-      const ped = el('div', 'podium-pedestal');
-      ped.append(el('span', 'mono', String(i + 1)));
-      slot.append(ped);
+      slot.append(el('div', 'podium-pedestal'));
       stage.append(slot);
     }
     pod.append(stage);
@@ -1026,6 +1036,7 @@ export function renderGroup() {
     const img = el('img');
     img.src = pl.avatar || avatarFallback(pl.userId);
     img.width = 22; img.height = 22; img.alt = '';
+    safeAvatar(img, pl.userId);
     nameCell.append(img, el('span', null, pl.displayName));
     tr.append(nameCell);
     tr.append(el('td', 'mono', String(pl.missedDays)));
