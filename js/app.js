@@ -1158,7 +1158,7 @@ function renderAdmin() {
   // ручной дайджест: тот же текст, что уходит по крону в 23:00
   const dig = el('div', 'card');
   dig.append(el('h2', null, 'Discord digest'));
-  dig.append(el('p', 'lede', 'Two kinds of channel posts: an instant shout the moment somebody finishes their playlist, and a daily 17:00 nudge (whose streak is on the line tonight, who is done, who is close, milestones, the prize race). This button posts the daily nudge right now.'));
+  dig.append(el('p', 'lede', 'Instant completion shouts are live. The daily 17:00 auto-post is PAUSED for rework; this button still posts the daily digest manually whenever you want to test it.'));
   const dbtn = el('button', 'primary', 'Post digest now');
   const dmsg = el('p', 'notice');
   dmsg.hidden = true;

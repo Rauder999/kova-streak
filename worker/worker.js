@@ -906,6 +906,12 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(postDigest(env));
+    ctx.waitUntil((async () => {
+      // авто-дайджест можно глушить флагом без передеплоя:
+      // flag:digest = {"enabled":false}. Ручная кнопка в админке работает всегда.
+      const flag = await env.KOVA.get('flag:digest', 'json');
+      if (flag && flag.enabled === false) return;
+      await postDigest(env);
+    })());
   },
 };
