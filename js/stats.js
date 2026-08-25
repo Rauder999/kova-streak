@@ -183,7 +183,7 @@ export function coachPayload(report) {
       codes: n.codes,
       scoreDeltaPct: pct(n.scoreDelta),
       accDeltaPp: pct(n.accDelta),
-      worstScenario: n.worst ? { name: n.worst.name, kind: n.worst.kind } : null,
+      worstScenario: n.worst ? { name: n.worst.name, kind: n.worst.kind, accPct: pct(n.worst.accToday) } : null,
       worstScenarioDeltaPct: n.worst ? pct(n.worst.scoreDelta) : null,
       bestScenario: n.best ? { name: n.best.name, kind: n.best.kind } : null,
       aspects: n.aspects || null,
