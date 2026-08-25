@@ -50,3 +50,4 @@ export const getGroup = (month) => call(`/api/group?month=${encodeURIComponent(m
 
 export const postCompletion = (payload) => call('/api/completion', { method: 'POST', body: payload });
 export const postDigest = () => call('/api/digest', { method: 'POST' });
+export const postCoach = (payload) => call('/api/coach', { method: 'POST', body: payload });

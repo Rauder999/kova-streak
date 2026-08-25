@@ -357,6 +357,40 @@ li.done .scen-count { color: var(--pass); }
 
 /* ---------- admin ---------- */
 
+/* ---------- личная статистика ---------- */
+
+.coach-card { border-left: 2px solid var(--signal); }
+.coach-line {
+  display: flex; align-items: baseline; gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line-0);
+}
+.coach-line:last-child { border-bottom: none; }
+.coach-niche {
+  flex: none; width: 92px;
+  font-size: 11px; letter-spacing: .08em;
+  color: var(--signal-soft);
+}
+
+.stats-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.stats-table th {
+  text-align: left; font-weight: 400; font-size: 11px;
+  text-transform: uppercase; letter-spacing: .1em; color: var(--text-1);
+  padding: 0 10px 8px 0; border-bottom: 1px solid var(--line-0);
+}
+.stats-table td { padding: 8px 10px 8px 0; border-bottom: 1px solid var(--line-0); }
+.stats-table tr:last-child td { border-bottom: none; }
+.stats-table .scen { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pb-chip {
+  font-size: 10px; margin-left: 8px; padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(232, 182, 74, 0.14);
+  border: 1px solid rgba(232, 182, 74, 0.5);
+  color: #e8b64a;
+}
+.delta.up { color: var(--pass); }
+.delta.down { color: var(--fail); }
+
 /* ---------- церемония 100% ---------- */
 
 .celebrate-overlay {

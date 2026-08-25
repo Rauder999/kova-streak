@@ -5,8 +5,10 @@ import * as api from './api.js';
 import { localDate, localMonth } from './parser.js';
 import {
   fsSupported, pickStatsFolder, getStoredFolder, forgetFolder,
-  ensurePermission, countRunsForDate, matchPlaylist,
+  ensurePermission, countRunsForDate, matchPlaylist, indexRunContents,
 } from './fs.js';
+import { getAllParsedRuns } from './db.js';
+import { buildDailyReport, coachPayload } from './stats.js';
 
 // Предпросмотр гайда подключения для залогиненного админа: ?setup=test
 const SETUP_PREVIEW = new URLSearchParams(location.search).get('setup') === 'test';
@@ -34,6 +36,12 @@ export const state = {
   group: null,
   tab: 'today',
   scanError: null,
+  coachEnabled: false,
+  indexProgress: null,   // {done,total} пока идет первичная индексация
+  report: null,          // buildDailyReport
+  coachLines: null,
+  coachHash: null,
+  coachError: null,
 };
 
 let pollTimer = null;
@@ -100,6 +108,13 @@ async function boot() {
   }
   renderWeekLabel();
 
+  // флаг коуча: раскатка управляется из KV, фронт просто спрашивает
+  try {
+    const me = await api.getMe();
+    state.coachEnabled = !!(me && me.coachEnabled);
+    $('stats-tab-btn').hidden = !state.coachEnabled;
+  } catch { /* без флага живем как раньше */ }
+
   state.handle = await getStoredFolder();
   if (state.handle) state.granted = await ensurePermission(state.handle);
 
@@ -122,6 +137,7 @@ function switchTab(tab) {
   document.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
   showView(tab);
   if (tab === 'today') renderToday();
+  if (tab === 'stats') renderStats();
   if (tab === 'group') { renderGroup(); refreshGroup(); }
   if (tab === 'admin') renderAdmin();
 }
@@ -207,6 +223,135 @@ async function tick() {
 
   if (state.tab === 'today') renderToday();
   maybePost();
+  if (state.coachEnabled) refreshStatsPipeline();
+}
+
+// ---------- личная статистика и коуч ----------
+
+let statsBusy = false;
+async function refreshStatsPipeline() {
+  if (statsBusy || !state.handle || !state.playlist) return;
+  statsBusy = true;
+  try {
+    const res = await indexRunContents(state.handle, (p) => {
+      state.indexProgress = p;
+      if (state.tab === 'stats') renderStats();
+    });
+    state.indexProgress = null;
+    // отчет пересчитываем, когда появились новые файлы или его еще нет
+    if (res.added > 0 || !state.report) {
+      const runs = await getAllParsedRuns();
+      state.report = buildDailyReport(runs, state.playlist.scenarios, state.date);
+      if (state.tab === 'stats') renderStats();
+      await maybeCoach();
+    }
+  } catch (e) {
+    state.coachError = e.message;
+  } finally {
+    statsBusy = false;
+  }
+}
+
+// ИИ дергается только на смене хэша состояния, иначе текст из кэша
+async function maybeCoach() {
+  const r = state.report;
+  if (!r || !r.niches.length) return;
+  if (r.stateHash === state.coachHash && state.coachLines) return;
+  try {
+    const res = await api.postCoach(coachPayload(r));
+    state.coachLines = res.lines;
+    state.coachHash = r.stateHash;
+    state.coachError = null;
+  } catch (e) {
+    if (handleApiError(e)) return;
+    state.coachError = e.message;
+  }
+  if (state.tab === 'stats') renderStats();
+}
+
+function renderStats() {
+  const root = $('view-stats');
+  root.replaceChildren();
+
+  if (!state.granted) {
+    root.append(notice('Connect your stats folder on the Today tab first.'));
+    return;
+  }
+  if (state.indexProgress) {
+    root.append(notice(`Reading your history: ${state.indexProgress.done} / ${state.indexProgress.total} runs parsed. First time takes a minute, later it is instant.`));
+    return;
+  }
+  const r = state.report;
+  if (!r) {
+    root.append(notice('Crunching your runs...'));
+    return;
+  }
+
+  // коуч: ответ первым
+  const coach = el('div', 'card coach-card');
+  const ch = el('div', 'card-head');
+  ch.append(el('h2', null, 'Next session'));
+  if (r.rusty) ch.append(el('span', 'muted', `${r.gapDays} days off before today`));
+  coach.append(ch);
+  if (state.coachLines && state.coachLines.length) {
+    for (const line of state.coachLines) {
+      const m = /^\[(CLICKING|TRACKING|SWITCHING)\]\s*(.*)$/.exec(line);
+      const row = el('div', 'coach-line');
+      row.append(el('span', 'coach-niche mono', m ? m[1] : '•'));
+      row.append(el('span', null, m ? m[2] : line));
+      coach.append(row);
+    }
+  } else if (state.coachError) {
+    coach.append(el('p', 'muted', 'Coach is unavailable: ' + state.coachError));
+  } else if (!r.scenarios.length) {
+    coach.append(el('p', 'muted', 'Play some of this week\'s playlist and the verdict appears here.'));
+  } else {
+    coach.append(el('p', 'muted', 'Thinking...'));
+  }
+  root.append(coach);
+
+  // сегодняшние сценарии против своего бейзлайна
+  const card = el('div', 'card');
+  const head = el('div', 'card-head');
+  head.append(el('h2', null, 'Today vs your usual'));
+  head.append(el('span', 'muted', 'best today against the median of your past runs'));
+  card.append(head);
+
+  if (!r.scenarios.length) {
+    card.append(el('p', 'muted', 'No runs from today\'s playlist yet.'));
+  } else {
+    const table = el('table', 'stats-table');
+    const thead = el('thead');
+    const hr = el('tr');
+    ['Scenario', 'Runs', 'Best today', 'Your usual', 'Delta'].forEach((h) => hr.append(el('th', null, h)));
+    thead.append(hr);
+    table.append(thead);
+    const tbody = el('tbody');
+    for (const s of r.scenarios) {
+      const tr = el('tr');
+      const nameCell = el('td', 'scen');
+      nameCell.append(el('span', null, s.name));
+      if (s.isPB) nameCell.append(el('span', 'pb-chip mono', 'PB'));
+      tr.append(nameCell);
+      tr.append(el('td', 'mono', String(s.runsToday)));
+      tr.append(el('td', 'mono', s.bestToday != null ? fmtScore(s.bestToday) : '-'));
+      tr.append(el('td', 'mono muted', s.base ? fmtScore(s.base.score) : 'no baseline yet'));
+      const d = el('td', 'mono');
+      if (s.scoreDelta != null) {
+        const pct = Math.round(s.scoreDelta * 100);
+        d.append(el('span', 'delta ' + (pct > 2 ? 'up' : pct < -2 ? 'down' : ''), (pct > 0 ? '+' : '') + pct + '%'));
+      } else d.textContent = '-';
+      tr.append(d);
+      tbody.append(tr);
+    }
+    table.append(tbody);
+    card.append(table);
+  }
+  root.append(card);
+}
+
+function fmtScore(v) {
+  return v >= 100 ? String(Math.round(v)) : (Math.round(v * 10) / 10).toString();
 }
 
 // Отправляем прогресс, когда он изменился. Полное выполнение шлем немедленно,

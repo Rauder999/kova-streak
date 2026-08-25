@@ -324,7 +324,7 @@ async function handleApi(request, env, url, cors, ctx) {
   if (!user) return json({ error: 'Not signed in' }, 401, cors);
 
   if (path === '/api/me' && request.method === 'GET') {
-    return json(user, 200, cors);
+    return json({ ...user, coachEnabled: await coachAllowed(env, user) }, 200, cors);
   }
 
   if (path === '/api/playlist' && request.method === 'PUT') {
@@ -409,6 +409,26 @@ async function handleApi(request, env, url, cors, ctx) {
     return json(await buildStandings(env, month), 200, cors);
   }
 
+  // трехстрочный коуч: правила на клиенте нашли коды диагнозов, ИИ здесь
+  // только формулирует. Кэш по хэшу состояния: пока диагноз не изменился,
+  // повторные запросы не тратят ни токена.
+  if (path === '/api/coach' && request.method === 'POST') {
+    if (!(await coachAllowed(env, user))) return json({ error: 'Coach is not enabled for you yet' }, 403, cors);
+    if (!env.ANTHROPIC_API_KEY) return json({ error: 'Coach is not configured yet (ANTHROPIC_API_KEY)' }, 503, cors);
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body.stateHash !== 'string' || !Array.isArray(body.niches) || !body.niches.length) {
+      return json({ error: 'stateHash and niches are required' }, 400, cors);
+    }
+    const cacheKey = `coach:${user.uid}:${body.stateHash.slice(0, 64)}`;
+    const cached = await env.KOVA.get(cacheKey, 'json');
+    if (cached) return json({ lines: cached.lines, cached: true }, 200, cors);
+
+    const lines = await generateCoachLines(env, body);
+    if (!lines) return json({ error: 'Coach model returned nothing useful' }, 502, cors);
+    await env.KOVA.put(cacheKey, JSON.stringify({ lines, at: Date.now() }), { expirationTtl: 60 * 60 * 24 * 14 });
+    return json({ lines, cached: false }, 200, cors);
+  }
+
   // ручная отправка дайджеста из админки: тот же текст, что уйдет по крону
   if (path === '/api/digest' && request.method === 'POST') {
     if (!user.admin) return json({ error: 'Admin only' }, 403, cors);
@@ -423,6 +443,64 @@ async function handleApi(request, env, url, cors, ctx) {
 // ---------- ежедневный дайджест в Discord ----------
 
 const MILESTONES = new Set([3, 7, 14, 21, 30, 50, 75, 100]);
+
+// ---------- коуч ----------
+
+// Флаг раскатки: KV flag:coach = {"all":true} или {"users":["discordId",...]}.
+// Меняется правкой KV, без передеплоя.
+async function coachAllowed(env, user) {
+  const flag = await env.KOVA.get('flag:coach', 'json');
+  if (!flag) return false;
+  if (flag.all) return true;
+  return Array.isArray(flag.users) && flag.users.includes(user.uid);
+}
+
+// Общая база знаний, дистиллирована из материалов тренера 4BK и доктрины
+// Voltaic/Aimer7, БЕЗ персонального контекста. Ищут правила на клиенте,
+// модель только формулирует советы человеческим языком.
+const COACH_PROMPT = `You are an aim-training coach for KovaaK's players (FPS: The Finals). You receive per-niche diagnosis CODES computed from the player's own history (all deltas are vs THEIR OWN baselines on the same scenarios, never absolute). Turn them into a tiny actionable note.
+
+KNOWLEDGE (use to phrase advice and pick drills):
+- Flick model: eyes lead the hand. Look at the target BEFORE/DURING the flick, let central vision engage mid-flight so deceleration starts before the target and the correction blends into one motion. Prefer slight underflick. "Fake speed" (explosive flick, full stop, separate slow correction) is the classic fault.
+- Clicking: visually CONFIRM every shot, click dead center, never click because you think you are on target. If accuracy dropped while pace stayed or rose (SPAM): slow down 10-15%, play accuracy-first, punishment/one-shot statics help. If pace dropped while accuracy is fine (HESITATE): you are over-confirming; trust the first confirmation, click earlier, speed-focused statics help.
+- CHOKES (occasional very long kills): usually eyes late to the next target or a missed first flick spiraling. Cue: snap eyes to the next target the moment the current one dies.
+- FATIGUE (accuracy fades within runs): grip/arm tension creeping in. Cue: relax the hand between kills, shake out between runs, do not death-grip.
+- Target switching: one fluid flick-into-track motion, hold M1 where allowed, eyes jump first, hand follows 10-20% faster than feels natural.
+- Tracking: smoothness beats reaction. Aim at target center, READ the strafe pattern instead of chasing it, stay smooth while it is smooth and react only at direction changes. Shaky = tension; late direction changes = watch the target, not the crosshair.
+- Rust after days off: expected, scores below baseline after a break are not regression. Technique survives breaks, cheesed score does not. Advise an easy warmup day, not panic.
+- Warmup: first runs of a session are cold for most players; judge the day by the later runs.
+
+OUTPUT CONTRACT (strict):
+- One line per niche in the EXACT order given (worst first). No preamble, no summary, nothing else.
+- Format: [CLICKING] / [TRACKING] / [SWITCHING] prefix, then ONE imperative sentence with the concrete thing to do next session. At most one number per line.
+- A niche with code OK or STRONG gets at most 5 words (e.g. "[TRACKING] Solid. Keep it.").
+- Plain words a newcomer understands. Never print code names, metric names or "baseline". Say "your usual" instead.
+- If rustyDays is present, fold "after N days off this is normal" into the worst niche's line instead of scolding.`;
+
+async function generateCoachLines(env, body) {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': env.ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-5',
+      max_tokens: 300,
+      system: COACH_PROMPT,
+      messages: [{ role: 'user', content: 'Diagnosis:\n' + JSON.stringify({ rustyDays: body.rustyDays || null, niches: body.niches }) }],
+    }),
+  });
+  if (!res.ok) {
+    console.log('coach model error', res.status, (await res.text()).slice(0, 300));
+    return null;
+  }
+  const data = await res.json();
+  const text = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n');
+  const lines = text.split('\n').map((l) => l.trim()).filter((l) => /^\[(CLICKING|TRACKING|SWITCHING)\]/.test(l)).slice(0, 3);
+  return lines.length ? lines : null;
+}
 
 // Голос "Системы" из манхв: холодные строки в квадратных скобках внутри
 // серого код-блока Discord. Формульность и повторяемость - часть эстетики.
