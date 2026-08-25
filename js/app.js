@@ -934,7 +934,7 @@ async function refreshGroup() {
   groupTimer = setTimeout(refreshGroup, GROUP_REFRESH_MS);
 }
 
-function renderGroup() {
+export function renderGroup() {
   const root = $('view-group');
   root.replaceChildren();
 
