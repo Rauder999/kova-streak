@@ -420,7 +420,7 @@ async function handleApi(request, env, url, cors, ctx) {
       return json({ error: 'stateHash and niches are required' }, 400, cors);
     }
     // версия в ключе: смена поколения промпта хоронит старые кэшированные вердикты
-    const cacheKey = `coach:v5:${user.uid}:${body.stateHash.slice(0, 64)}`;
+    const cacheKey = `coach:v6:${user.uid}:${body.stateHash.slice(0, 64)}`;
     const cached = await env.KOVA.get(cacheKey, 'json');
     if (cached) return json({ lines: cached.lines, cached: true }, 200, cors);
 
@@ -467,6 +467,7 @@ PAYLOAD SEMANTICS:
 - Diagnosis codes and numbers are computed from the player's own history: every delta is vs THEIR OWN past runs of the same scenarios, never absolute standards.
 - Niches arrive sorted worst first. Each named scenario carries a "kind" tag (pokeball / tracking / clicking / switching / dynamic); the KIND, not the niche, decides which cue from the base fits it. kind "clicking" = static targets; kind "dynamic" = MOVING targets clicked once (pasu family, 3-click): dynamic is tracking first, clicking second, never pace-pushed, and a longer kill time there is often correct technique (tracking before the click), not hesitation. accPct on a scenario is its accuracy today, usable ONLY for the difficulty-calibration rules, never to shame the player.
 - Codes map to the diagnostic playbook: SPAM, HESITATE, CHOKES, FATIGUE, SOFT, STRONG, OK; rustyDays means a break before this day.
+- The TRACKING niche carries NO diagnosis (code NO_MEASURE) and always arrives LAST. Stats files cannot see what the hand does in tracking (invincible and regen bots, accuracy means different things per scenario), so its payload lists only what was played. Never claim tracking measurements, deltas or "your usual" for tracking, and never call tracking the best or worst part of the day.
 
 KNOWLEDGE BASE:
 ## Philosophy (overrides everything)
@@ -529,10 +530,12 @@ KNOWLEDGE BASE:
   track: higher-HP / evasive TS, regen switching. Eyes jump to the next target the instant
   the current one dies; hand 10-20% faster than comfortable. Chain kills: minimal time
   BETWEEN targets, a fraction longer ON the target.
-- DYNAMIC (clicking moving targets). NEVER spam: track the bot for a millisecond before
-  clicking; dynamic is tracking first, clicking second. Target reading: flick to where the
-  target WILL be, not its old position (flicking to old position is the #1 reason for
-  "overflick in game but not in KovaaK's"). 3-click scens force tracking priority.
+- DYNAMIC (clicking moving targets; pasu family, 3-click scens). NEVER spam and never
+  pace-push: track the bot for a millisecond before clicking; dynamic is tracking first,
+  clicking second, and a longer kill time here is often correct technique, not hesitation.
+  Target reading: flick to where the target WILL be, not its old position (flicking to old
+  position is the #1 reason for "overflick in game but not in KovaaK's"). 3-click scens
+  force tracking priority.
 - TRACKING = smoothness. Reactive = recognizing and reacting to a direction change;
   everything before and after the reaction is smoothness. Read the target: if he is smooth,
   be smooth; be reactive only for the millisecond of the change (constant reactivity =
@@ -546,6 +549,9 @@ KNOWLEDGE BASE:
 - MOVEMENT: mouse and keyboard in sync; anti-mirror always (mirroring = cheese); freezing
   the crosshair (or the feet) while the other works = disconnection; move after firing
   regardless of hit.
+- MEASUREMENT LIMIT: stats files cannot see the hand in tracking (invincible and regen
+  bots, accuracy semantics vary per scenario). Tracking is therefore never diagnosed from
+  data: the coach gives doctrine-based general assignments for tracking, no measured claims.
 - REFLEX / INFORMATION / PUNISHMENT: the most game-like field; punishes misses live the way
   a game punishes with death. One single-target surprise scenario per category counters
   pre-pathing with peripherals. Requires fundamentals first.
@@ -617,6 +623,7 @@ HOW TO ANSWER:
 - Anchor the assignment on the WORST scenario by name whenever one is given; its kind picks the cue. Do not dodge to the best scenario because the worst is awkward. Pokeball worst = pokeball work only (lines OR +5% handspeed, never both). Dynamic worst = track-first work: track each target briefly, decide, then click; intercept where it WILL be; never "add pace".
 - Green niche = assign the next rung from the progression doctrine, ONE dial, small step. One instruction per line: never two sequenced dials ("do X, then add Y" is two).
 - Faulty niche = the playbook prescription for its code, phrased around the named scenario.
+- TRACKING line = one general assignment straight from the base's tracking doctrine (smoothness first, read the strafe, track where he is GOING, glue to one body part, use the arm, reactive only at the change, easy smoothness right after reactive), anchored by name on one of the playedScenarios; a pokeball in the list gets pokeball doctrine. Vary which cue you pick between days. State only what was played, never how well.
 - If rustyDays is present, fold "normal after N days off" into the first line, then still assign.
 
 VOICE:

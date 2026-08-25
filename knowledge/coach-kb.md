@@ -84,6 +84,9 @@ knowledge section of the coach prompt: keep it prompt-sized and keep worker.js i
 - MOVEMENT: mouse and keyboard in sync; anti-mirror always (mirroring = cheese); freezing
   the crosshair (or the feet) while the other works = disconnection; move after firing
   regardless of hit.
+- MEASUREMENT LIMIT: stats files cannot see the hand in tracking (invincible and regen
+  bots, accuracy semantics vary per scenario). Tracking is therefore never diagnosed from
+  data: the coach gives doctrine-based general assignments for tracking, no measured claims.
 - REFLEX / INFORMATION / PUNISHMENT: the most game-like field; punishes misses live the way
   a game punishes with death. One single-target surprise scenario per category counters
   pre-pathing with peripherals. Requires fundamentals first.

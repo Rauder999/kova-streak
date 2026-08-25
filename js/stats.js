@@ -122,6 +122,17 @@ export function buildDailyReport(allRuns, today) {
     n.worst = [...withBase].sort((a, b) => (a.scoreDelta ?? 0) - (b.scoreDelta ?? 0))[0] || null;
     n.best = [...withBase].sort((a, b) => (b.scoreDelta ?? 0) - (a.scoreDelta ?? 0))[0] || null;
 
+    // ЧЕСТНОСТЬ (фидбек Rauder): CSV не видит руку в трекинге (инвинсибл и
+    // реген-боты, разная семантика точности), любые "диагнозы" оттуда были
+    // бы гаданием. Трекинг не анализируем: коуч дает общее задание по
+    // доктрине 4BK, скоры остаются только в таблице.
+    if (n.niche === 'tracking') {
+      n.codes = ['NO_MEASURE'];
+      n.aspects = null;
+      n.pbs = n.scenarios.filter((s) => s.isPB).map((s) => s.name);
+      continue;
+    }
+
     if (n.niche === 'clicking') {
       // темповые коды только по чистым статикам: на динамике долгий килл
       // это часто правильная техника (трек перед кликом), а не пересиживание
@@ -155,8 +166,12 @@ export function buildDailyReport(allRuns, today) {
     n.pbs = n.scenarios.filter((s) => s.isPB).map((s) => s.name);
   }
 
-  // сортировка ниш: самая проблемная первой
-  const order = Object.values(niches).sort((a, b) => (a.scoreDelta ?? 0) - (b.scoreDelta ?? 0));
+  // сортировка ниш: измеренные по проблемности, трекинг всегда последним
+  // (у него нет честных чисел, чтобы претендовать на "худший")
+  const measured = Object.values(niches).filter((n) => n.niche !== 'tracking')
+    .sort((a, b) => (a.scoreDelta ?? 0) - (b.scoreDelta ?? 0));
+  const trackingNiche = Object.values(niches).find((n) => n.niche === 'tracking');
+  const order = trackingNiche ? [...measured, trackingNiche] : measured;
 
   const report = {
     today,
@@ -174,8 +189,9 @@ export function buildDailyReport(allRuns, today) {
 // новый текст коуча не генерируется, ответ берется из кэша.
 function hashReport(report) {
   const bucket = (v) => (v == null ? 'x' : Math.round(v * 20));
-  const src = report.niches.map((n) =>
-    `${n.niche}:${n.codes.join('+')}:${bucket(n.scoreDelta)}:${bucket(n.accDelta)}:${n.worst ? n.worst.name : ''}:${n.aspects ? [n.aspects.paceRatio, n.aspects.chokeExcessPp, n.aspects.fadePp].join(',') : ''}`
+  const src = report.niches.map((n) => n.niche === 'tracking'
+    ? `tracking:${n.scenarios.map((s) => s.name).sort().join(',')}`
+    : `${n.niche}:${n.codes.join('+')}:${bucket(n.scoreDelta)}:${bucket(n.accDelta)}:${n.worst ? n.worst.name : ''}:${n.aspects ? [n.aspects.paceRatio, n.aspects.chokeExcessPp, n.aspects.fadePp].join(',') : ''}`
   ).join('|') + (report.rusty ? `|rust${report.gapDays}` : '');
   let h = 5381;
   for (let i = 0; i < src.length; i++) h = ((h << 5) + h + src.charCodeAt(i)) >>> 0;
@@ -188,17 +204,25 @@ export function coachPayload(report) {
   return {
     stateHash: report.stateHash,
     rustyDays: report.rusty ? report.gapDays : null,
-    niches: report.niches.map((n) => ({
-      niche: n.niche,
-      codes: n.codes,
-      scoreDeltaPct: pct(n.scoreDelta),
-      accDeltaPp: pct(n.accDelta),
-      worstScenario: n.worst ? { name: n.worst.name, kind: n.worst.kind, accPct: pct(n.worst.accToday) } : null,
-      worstScenarioDeltaPct: n.worst ? pct(n.worst.scoreDelta) : null,
-      bestScenario: n.best ? { name: n.best.name, kind: n.best.kind } : null,
-      aspects: n.aspects || null,
-      pbs: (n.scenarios || []).filter((s) => s.isPB).map((s) => ({ name: s.name, kind: s.kind })),
-      runsToday: n.scenarios.reduce((a, s) => a + s.runsToday, 0),
-    })),
+    niches: report.niches.map((n) => n.niche === 'tracking'
+      ? {
+          // трекинг без диагноза: только что игралось, для общего задания
+          niche: 'tracking',
+          codes: n.codes,
+          runsToday: n.scenarios.reduce((a, s) => a + s.runsToday, 0),
+          playedScenarios: n.scenarios.slice(0, 5).map((s) => ({ name: s.name, kind: s.kind })),
+        }
+      : {
+          niche: n.niche,
+          codes: n.codes,
+          scoreDeltaPct: pct(n.scoreDelta),
+          accDeltaPp: pct(n.accDelta),
+          worstScenario: n.worst ? { name: n.worst.name, kind: n.worst.kind, accPct: pct(n.worst.accToday) } : null,
+          worstScenarioDeltaPct: n.worst ? pct(n.worst.scoreDelta) : null,
+          bestScenario: n.best ? { name: n.best.name, kind: n.best.kind } : null,
+          aspects: n.aspects || null,
+          pbs: (n.scenarios || []).filter((s) => s.isPB).map((s) => ({ name: s.name, kind: s.kind })),
+          runsToday: n.scenarios.reduce((a, s) => a + s.runsToday, 0),
+        }),
   };
 }
