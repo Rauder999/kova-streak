@@ -505,6 +505,37 @@ async function handleApi(request, env, url, cors, ctx) {
   return json({ error: 'Not found' }, 404, cors);
 }
 
+// Обновление профилей бот-токеном: у OAuth-входа снимок аватарки одноразовый,
+// а бот может спрашивать Discord когда угодно. Крон дергает это ежедневно.
+async function refreshProfiles(env) {
+  if (!env.DISCORD_BOT_TOKEN) return;
+  try {
+    const list = await listAll(env, 'user:');
+    for (const k of list) {
+      const uid = k.name.slice('user:'.length);
+      // без DiscordBot-UA дискордовский edge молча отдает пустой 403
+      const res = await fetch(`https://discord.com/api/v10/users/${uid}`, {
+        headers: {
+          Authorization: `Bot ${env.DISCORD_BOT_TOKEN}`,
+          'User-Agent': 'DiscordBot (https://rauder999.github.io/kova-streak, 1.0)',
+        },
+      });
+      if (!res.ok) continue;
+      const u = await res.json();
+      const prev = (await env.KOVA.get(k.name, 'json')) || {};
+      const displayName = u.global_name || u.username || prev.displayName;
+      const avatar = u.avatar ? `https://cdn.discordapp.com/avatars/${uid}/${u.avatar}.png?size=64` : null;
+      if (displayName === prev.displayName && avatar === prev.avatar) continue;
+      const profile = { ...prev, displayName, avatar };
+      await env.KOVA.put(k.name, JSON.stringify(profile), {
+        metadata: { n: displayName, a: avatar, j: prev.joinedDate || null },
+      });
+    }
+  } catch (e) {
+    console.log('profile refresh failed', e.message);
+  }
+}
+
 // ---------- ежедневный дайджест в Discord ----------
 
 const MILESTONES = new Set([3, 7, 14, 21, 30, 50, 75, 100]);
@@ -907,6 +938,9 @@ export default {
 
   async scheduled(event, env, ctx) {
     ctx.waitUntil((async () => {
+      // раз в день подтягиваем свежие аватарки/имена (смена в Discord
+      // доезжает без перелогина)
+      await refreshProfiles(env);
       // авто-дайджест можно глушить флагом без передеплоя:
       // flag:digest = {"enabled":false}. Ручная кнопка в админке работает всегда.
       const flag = await env.KOVA.get('flag:digest', 'json');
