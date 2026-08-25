@@ -487,7 +487,9 @@ async function generateCoachLines(env, body) {
     },
     body: JSON.stringify({
       model: 'claude-sonnet-5',
-      max_tokens: 300,
+      // щедрый лимит: у думающих моделей рассуждение ест бюджет до текста,
+      // 300 токенов обрезали ответ на полуслове (грабли, знакомые по AimSama)
+      max_tokens: 6000,
       system: COACH_PROMPT,
       messages: [{ role: 'user', content: 'Diagnosis:\n' + JSON.stringify({ rustyDays: body.rustyDays || null, niches: body.niches }) }],
     }),
