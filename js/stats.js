@@ -42,15 +42,16 @@ function scenarioNiche(name, runs) {
   return top && top[0] !== 'unknown' ? top[0] : null;
 }
 
-// Отчет дня: по каждому сценарию плейлисты, сыгранному сегодня, дельты
-// против бейзлайна; агрегация в ниши; коды диагнозов.
-export function buildDailyReport(allRuns, playlistScenarios, today) {
-  const playlistNames = new Set(playlistScenarios.map((s) => s.name));
+// Отчет дня: по каждому сценарию, сыгранному в выбранную дату, дельты
+// против бейзлайна (только раны ДО этой даты); агрегация в ниши; коды.
+// Работает для любого прошедшего дня, не только сегодняшнего.
+export function buildDailyReport(allRuns, today) {
   const byScenario = new Map();
   for (const r of allRuns) {
     if (!byScenario.has(r.scenario)) byScenario.set(r.scenario, []);
     byScenario.get(r.scenario).push(r);
   }
+  const playedNames = new Set(allRuns.filter((r) => r.date === today).map((r) => r.scenario));
 
   // ржавчина: дней с прошлой сессии до сегодняшней
   const dates = [...new Set(allRuns.map((r) => r.date))].sort();
@@ -58,7 +59,7 @@ export function buildDailyReport(allRuns, playlistScenarios, today) {
   const gapDays = prevDate ? Math.round((new Date(today) - new Date(prevDate)) / 86400000) : null;
 
   const scenarios = [];
-  for (const name of playlistNames) {
+  for (const name of playedNames) {
     const runs = (byScenario.get(name) || []).sort((a, b) => a.dateTime.localeCompare(b.dateTime));
     const todayRuns = runs.filter((r) => r.date === today);
     const history = runs.filter((r) => r.date < today);
@@ -70,7 +71,8 @@ export function buildDailyReport(allRuns, playlistScenarios, today) {
     const ttkToday = median(pickNum(todayRuns, (r) => r.ttkMed));
     const tailToday = median(pickNum(todayRuns, (r) => r.ttkTail));
     const dropToday = median(pickNum(todayRuns, (r) => r.accDrop));
-    const allTimeBest = Math.max(...pickNum(runs, (r) => r.score));
+    // рекорд "на тот момент": будущее относительно выбранного дня не подглядываем
+    const allTimeBest = Math.max(...pickNum(runs.filter((r) => r.date <= today), (r) => r.score));
     scenarios.push({
       name,
       niche,

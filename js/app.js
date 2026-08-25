@@ -38,7 +38,9 @@ export const state = {
   scanError: null,
   coachEnabled: false,
   indexProgress: null,   // {done,total} пока идет первичная индексация
-  report: null,          // buildDailyReport
+  report: null,          // buildDailyReport для statsDate
+  statsDate: null,       // какой день смотрим на вкладке (null = сегодня)
+  playedDates: [],       // даты, за которые есть раны, свежие первыми
   coachLines: null,
   coachHash: null,
   coachError: null,
@@ -230,7 +232,7 @@ async function tick() {
 
 let statsBusy = false;
 async function refreshStatsPipeline() {
-  if (statsBusy || !state.handle || !state.playlist) return;
+  if (statsBusy || !state.handle) return;
   statsBusy = true;
   try {
     const res = await indexRunContents(state.handle, (p) => {
@@ -240,16 +242,22 @@ async function refreshStatsPipeline() {
     state.indexProgress = null;
     // отчет пересчитываем, когда появились новые файлы или его еще нет
     if (res.added > 0 || !state.report) {
-      const runs = await getAllParsedRuns();
-      state.report = buildDailyReport(runs, state.playlist.scenarios, state.date);
-      if (state.tab === 'stats') renderStats();
-      await maybeCoach();
+      await rebuildReport(state.statsDate || state.date);
     }
   } catch (e) {
     state.coachError = e.message;
   } finally {
     statsBusy = false;
   }
+}
+
+// Строит отчет за выбранную дату (сегодня или любой прошедший день)
+async function rebuildReport(day) {
+  const runs = await getAllParsedRuns();
+  state.playedDates = [...new Set(runs.map((r) => r.date))].sort().reverse().slice(0, 21);
+  state.report = buildDailyReport(runs, day);
+  if (state.tab === 'stats') renderStats();
+  await maybeCoach();
 }
 
 // ИИ дергается только на смене хэша состояния, иначе текст из кэша
@@ -287,11 +295,34 @@ function renderStats() {
     return;
   }
 
+  // выбор дня: сегодняшний и прошлые сыгранные даты
+  if (state.playedDates.length) {
+    const days = el('div', 'day-chips');
+    const mk = (label, day, active) => {
+      const b = el('button', 'day-chip mono' + (active ? ' active' : ''), label);
+      b.addEventListener('click', async () => {
+        state.statsDate = day;
+        state.coachLines = null;
+        state.coachHash = null;
+        await rebuildReport(day || state.date);
+      });
+      return b;
+    };
+    const viewing = state.statsDate || state.date;
+    days.append(mk('today', null, viewing === state.date));
+    for (const d of state.playedDates) {
+      if (d === state.date) continue;
+      days.append(mk(d.slice(5), d, viewing === d));
+    }
+    root.append(days);
+  }
+
   // коуч: ответ первым
+  const isPast = (state.statsDate && state.statsDate !== state.date);
   const coach = el('div', 'card coach-card');
   const ch = el('div', 'card-head');
-  ch.append(el('h2', null, 'Next session'));
-  if (r.rusty) ch.append(el('span', 'muted', `${r.gapDays} days off before today`));
+  ch.append(el('h2', null, isPast ? `Verdict for ${r.today}` : 'Next session'));
+  if (r.rusty) ch.append(el('span', 'muted', `${r.gapDays} days off before that day`));
   coach.append(ch);
   if (state.coachLines && state.coachLines.length) {
     for (const line of state.coachLines) {
@@ -304,21 +335,21 @@ function renderStats() {
   } else if (state.coachError) {
     coach.append(el('p', 'muted', 'Coach is unavailable: ' + state.coachError));
   } else if (!r.scenarios.length) {
-    coach.append(el('p', 'muted', 'Play some of this week\'s playlist and the verdict appears here.'));
+    coach.append(el('p', 'muted', isPast ? 'No runs on that day.' : 'Play something and the verdict appears here.'));
   } else {
     coach.append(el('p', 'muted', 'Thinking...'));
   }
   root.append(coach);
 
-  // сегодняшние сценарии против своего бейзлайна
+  // сценарии дня против своего бейзлайна
   const card = el('div', 'card');
   const head = el('div', 'card-head');
-  head.append(el('h2', null, 'Today vs your usual'));
-  head.append(el('span', 'muted', 'best today against the median of your past runs'));
+  head.append(el('h2', null, isPast ? `${r.today} vs your usual back then` : 'Today vs your usual'));
+  head.append(el('span', 'muted', 'best of the day against the median of the runs before it'));
   card.append(head);
 
   if (!r.scenarios.length) {
-    card.append(el('p', 'muted', 'No runs from today\'s playlist yet.'));
+    card.append(el('p', 'muted', isPast ? 'Nothing was played that day.' : 'No runs yet today.'));
   } else {
     const table = el('table', 'stats-table');
     const thead = el('thead');

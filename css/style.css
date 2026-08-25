@@ -359,6 +359,15 @@ li.done .scen-count { color: var(--pass); }
 
 /* ---------- личная статистика ---------- */
 
+.day-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+.day-chip {
+  font-size: 12px; padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--bg-1); border: 1px solid var(--line-1); color: var(--text-1);
+}
+.day-chip:hover { color: var(--text-0); }
+.day-chip.active { border-color: var(--signal); color: var(--signal-soft); background: rgba(124, 108, 240, .1); }
+
 .coach-card { border-left: 2px solid var(--signal); }
 .coach-line {
   display: flex; align-items: baseline; gap: 12px;
