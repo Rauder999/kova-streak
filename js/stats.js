@@ -31,15 +31,21 @@ export function scenarioBaseline(historyRuns) {
   };
 }
 
-// Тип сценария: по данным его ранов, имя только для известных семейств.
-// Покеболы это про плавный путь к цели (4BK: smooth pathing), читаем их
-// как трекинг, что бы ни говорили короткие TTK.
-function scenarioNiche(name, runs) {
-  if (/pokeball/i.test(name)) return 'tracking';
+// Семейство сценария: покебол это отдельный вид (статичные шары, зажатый М1,
+// советы только про плавный путь), остальное по данным ранов.
+function scenarioKind(name, runs) {
+  if (/pokeball/i.test(name)) return 'pokeball';
   const counts = {};
   for (const r of runs) counts[r.type] = (counts[r.type] || 0) + 1;
   const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
   return top && top[0] !== 'unknown' ? top[0] : null;
+}
+
+// Ниша для группировки вердикта: покеболы живут в трекинге (ассистирующий
+// скилл по 4BK), но их СЕМЕЙСТВО остается pokeball и определяет советы.
+function scenarioNiche(name, runs) {
+  const kind = scenarioKind(name, runs);
+  return kind === 'pokeball' ? 'tracking' : kind;
 }
 
 // Отчет дня: по каждому сценарию, сыгранному в выбранную дату, дельты
@@ -66,6 +72,7 @@ export function buildDailyReport(allRuns, today) {
     if (!todayRuns.length) continue;
     const base = scenarioBaseline(history);
     const niche = scenarioNiche(name, runs);
+    const kind = scenarioKind(name, runs);
     const bestToday = Math.max(...pickNum(todayRuns, (r) => r.score));
     const accToday = median(pickNum(todayRuns, (r) => r.accuracy));
     const ttkToday = median(pickNum(todayRuns, (r) => r.ttkMed));
@@ -76,6 +83,7 @@ export function buildDailyReport(allRuns, today) {
     scenarios.push({
       name,
       niche,
+      kind,
       runsToday: todayRuns.length,
       bestToday: Number.isFinite(bestToday) ? bestToday : null,
       accToday,
@@ -175,11 +183,11 @@ export function coachPayload(report) {
       codes: n.codes,
       scoreDeltaPct: pct(n.scoreDelta),
       accDeltaPp: pct(n.accDelta),
-      worstScenario: n.worst ? n.worst.name : null,
+      worstScenario: n.worst ? { name: n.worst.name, kind: n.worst.kind } : null,
       worstScenarioDeltaPct: n.worst ? pct(n.worst.scoreDelta) : null,
-      bestScenario: n.best ? n.best.name : null,
+      bestScenario: n.best ? { name: n.best.name, kind: n.best.kind } : null,
       aspects: n.aspects || null,
-      pbs: n.pbs || [],
+      pbs: (n.scenarios || []).filter((s) => s.isPB).map((s) => ({ name: s.name, kind: s.kind })),
       runsToday: n.scenarios.reduce((a, s) => a + s.runsToday, 0),
     })),
   };
