@@ -7,8 +7,9 @@ import {
   fsSupported, pickStatsFolder, getStoredFolder, forgetFolder,
   ensurePermission, countRunsForDate, matchPlaylist, indexRunContents,
 } from './fs.js';
-import { getAllParsedRuns } from './db.js';
-import { buildDailyReport, coachPayload } from './stats.js';
+import { getAllParsedRuns, kvGet, kvSet } from './db.js';
+import { buildDailyReport, coachPayload, buildTrackingLine } from './stats.js';
+import { annotateTerms, initGlossary } from './glossary.js';
 
 // Предпросмотр гайда подключения для залогиненного админа: ?setup=test
 const SETUP_PREVIEW = new URLSearchParams(location.search).get('setup') === 'test';
@@ -63,6 +64,7 @@ const el = (tag, cls, text) => {
 // ---------- запуск ----------
 
 async function boot() {
+  initGlossary();
   $('login-btn').addEventListener('click', login);
   $('logout-btn').addEventListener('click', () => { logout(); location.reload(); });
   document.querySelectorAll('.tab-btn').forEach((b) => {
@@ -260,16 +262,54 @@ async function rebuildReport(day) {
   await maybeCoach();
 }
 
-// ИИ дергается только на смене хэша состояния, иначе текст из кэша
+// ИИ дергается только на смене хэша состояния, иначе текст из кэша.
+// Коуч помнит, что советовал в прошлые дни: история уходит в пейлоад,
+// чтобы не повторять вчерашнюю подсказку без причины.
 async function maybeCoach() {
   const r = state.report;
   if (!r || !r.niches.length) return;
-  if (r.stateHash === state.coachHash && state.coachLines) return;
+
+  const history = (await kvGet('coachHistory')) || [];
+  const recent = history
+    .filter((h) => h.date < r.today)
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .slice(0, 2);
+  // история влияет на текст, значит должна влиять и на ключ кэша
+  let hh = 5381;
+  const hsrc = recent.map((h) => h.lines.join('|')).join('#');
+  for (let i = 0; i < hsrc.length; i++) hh = ((hh << 5) + hh + hsrc.charCodeAt(i)) >>> 0;
+  const fullHash = r.stateHash + '-a' + hh.toString(36);
+
+  if (fullHash === state.coachHash && state.coachLines) return;
   try {
-    const res = await api.postCoach(coachPayload(r));
-    state.coachLines = res.lines;
-    state.coachHash = r.stateHash;
+    const payload = coachPayload(r);
+    payload.stateHash = fullHash;
+    payload.recentAdvice = recent.map((h) => ({ date: h.date, lines: h.lines }));
+    // трекинг к модели не ходит: его строку клиент собирает сам из доктрины
+    const trackingLine = buildTrackingLine(r);
+    payload.niches = payload.niches.filter((n) => n.niche !== 'tracking');
+    // последняя подсказка по каждой нише, для правила "не повторяйся"
+    const lastLines = recent[0] ? recent[0].lines : [];
+    for (const n of payload.niches) {
+      const prev = lastLines.find((l) => l.toUpperCase().startsWith('[' + n.niche.toUpperCase() + ']'));
+      if (prev) n.lastAdvice = prev;
+    }
+
+    let lines = [];
+    if (payload.niches.length) {
+      const res = await api.postCoach(payload);
+      lines = res.lines || [];
+    }
+    if (trackingLine) lines = [...lines, trackingLine];
+
+    state.coachLines = lines;
+    state.coachHash = fullHash;
     state.coachError = null;
+    // запоминаем, что посоветовали за этот день (последняя версия дня побеждает)
+    const next = history.filter((h) => h.date !== r.today);
+    next.push({ date: r.today, lines });
+    next.sort((a, b) => a.date.localeCompare(b.date));
+    await kvSet('coachHistory', next.slice(-14));
   } catch (e) {
     if (handleApiError(e)) return;
     state.coachError = e.message;
@@ -332,6 +372,7 @@ function renderStats() {
       row.append(el('span', null, m ? m[2] : line));
       coach.append(row);
     }
+    annotateTerms(coach); // жаргон становится кликабельным словариком
   } else if (state.coachError) {
     coach.append(el('p', 'muted', 'Coach is unavailable: ' + state.coachError));
   } else if (!r.scenarios.length) {

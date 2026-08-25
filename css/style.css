@@ -369,6 +369,23 @@ li.done .scen-count { color: var(--pass); }
 .day-chip.active { border-color: var(--signal); color: var(--signal-soft); background: rgba(124, 108, 240, .1); }
 
 .coach-card { border-left: 2px solid var(--signal); }
+
+/* глоссарий: жаргон подчеркнут пунктиром, клик = объяснение */
+.term {
+  border-bottom: 1px dotted var(--signal-soft);
+  cursor: help;
+}
+#term-pop {
+  position: absolute; z-index: 120;
+  background: var(--bg-2);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font-size: 13px; line-height: 1.45;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .5);
+}
+#term-pop b { display: block; margin-bottom: 4px; color: var(--signal-soft); }
+#term-pop div { color: var(--chrome); }
 .coach-line {
   display: flex; align-items: baseline; gap: 12px;
   padding: 7px 0;

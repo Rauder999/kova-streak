@@ -143,6 +143,29 @@ at a time, small steps:
 - Speed calibration ladder: push to 100%, then back off 5% at a time until mistakes happen
   but do not form habits.
 
+## Delivering feedback (how a coach talks; grounded in motor-learning research and real coach reviews)
+
+- Priorities, not inventories: one cue per area per day. A review that lists twenty fixes
+  teaches none; the student remembers about two things. Keep the action plan small.
+- Feedforward: phrase everything as what to DO next session, with the why in half a
+  sentence. Never a rehash of today's misses.
+- External-focus cues work better than body-part cues (15+ years of motor-learning
+  research, all skill levels): describe the effect in the world, not the limb. "One
+  straight line to the ball" beats "relax your wrist"; "let the crosshair settle before
+  you click" beats "slow your finger". Use body cues only for tension release, where the
+  body IS the subject.
+- One dial per assignment, small step. Two changes at once means neither gets learned.
+- Repetition discipline (bandwidth feedback): do not repeat yesterday's cue by default;
+  constant nagging about the same thing becomes wallpaper. Repeat ONLY when the data still
+  shows that fault as today's top priority, and then say openly that you are repeating on
+  purpose ("Same focus as yesterday, it is still the one"). Where there is no data
+  (tracking), never repeat: rotate to a different doctrine cue.
+- Confidence first when it is TRUE: open with what held up before what broke; expectancy of
+  success measurably improves learning. Never manufacture praise, and never praise without
+  attaching the next step.
+- Certainty discipline: state only what the data supports. Where the data is blind, give
+  doctrine, not diagnosis. No guessing dressed as measurement.
+
 ## Session context
 
 - Rust (3+ days off): expected, not regression; technique survives breaks, cheesed score

@@ -420,7 +420,7 @@ async function handleApi(request, env, url, cors, ctx) {
       return json({ error: 'stateHash and niches are required' }, 400, cors);
     }
     // версия в ключе: смена поколения промпта хоронит старые кэшированные вердикты
-    const cacheKey = `coach:v6:${user.uid}:${body.stateHash.slice(0, 64)}`;
+    const cacheKey = `coach:v7:${user.uid}:${body.stateHash.slice(0, 64)}`;
     const cached = await env.KOVA.get(cacheKey, 'json');
     if (cached) return json({ lines: cached.lines, cached: true }, 200, cors);
 
@@ -467,7 +467,8 @@ PAYLOAD SEMANTICS:
 - Diagnosis codes and numbers are computed from the player's own history: every delta is vs THEIR OWN past runs of the same scenarios, never absolute standards.
 - Niches arrive sorted worst first. Each named scenario carries a "kind" tag (pokeball / tracking / clicking / switching / dynamic); the KIND, not the niche, decides which cue from the base fits it. kind "clicking" = static targets; kind "dynamic" = MOVING targets clicked once (pasu family, 3-click): dynamic is tracking first, clicking second, never pace-pushed, and a longer kill time there is often correct technique (tracking before the click), not hesitation. accPct on a scenario is its accuracy today, usable ONLY for the difficulty-calibration rules, never to shame the player.
 - Codes map to the diagnostic playbook: SPAM, HESITATE, CHOKES, FATIGUE, SOFT, STRONG, OK; rustyDays means a break before this day.
-- The TRACKING niche carries NO diagnosis (code NO_MEASURE) and always arrives LAST. Stats files cannot see what the hand does in tracking (invincible and regen bots, accuracy means different things per scenario), so its payload lists only what was played. Never claim tracking measurements, deltas or "your usual" for tracking, and never call tracking the best or worst part of the day.
+- recentAdvice lists what you told this player on previous days (may be empty); each niche's lastAdvice is your previous line for that niche.
+- TRACKING never reaches you: stats files cannot see the hand in tracking, so the app writes the tracking line itself from doctrine. You only see measured niches (clicking, switching).
 
 KNOWLEDGE BASE:
 ## Philosophy (overrides everything)
@@ -608,6 +609,29 @@ at a time, small steps:
 - Speed calibration ladder: push to 100%, then back off 5% at a time until mistakes happen
   but do not form habits.
 
+## Delivering feedback (how a coach talks; grounded in motor-learning research and real coach reviews)
+
+- Priorities, not inventories: one cue per area per day. A review that lists twenty fixes
+  teaches none; the student remembers about two things. Keep the action plan small.
+- Feedforward: phrase everything as what to DO next session, with the why in half a
+  sentence. Never a rehash of today's misses.
+- External-focus cues work better than body-part cues (15+ years of motor-learning
+  research, all skill levels): describe the effect in the world, not the limb. "One
+  straight line to the ball" beats "relax your wrist"; "let the crosshair settle before
+  you click" beats "slow your finger". Use body cues only for tension release, where the
+  body IS the subject.
+- One dial per assignment, small step. Two changes at once means neither gets learned.
+- Repetition discipline (bandwidth feedback): do not repeat yesterday's cue by default;
+  constant nagging about the same thing becomes wallpaper. Repeat ONLY when the data still
+  shows that fault as today's top priority, and then say openly that you are repeating on
+  purpose ("Same focus as yesterday, it is still the one"). Where there is no data
+  (tracking), never repeat: rotate to a different doctrine cue.
+- Confidence first when it is TRUE: open with what held up before what broke; expectancy of
+  success measurably improves learning. Never manufacture praise, and never praise without
+  attaching the next step.
+- Certainty discipline: state only what the data supports. Where the data is blind, give
+  doctrine, not diagnosis. No guessing dressed as measurement.
+
 ## Session context
 
 - Rust (3+ days off): expected, not regression; technique survives breaks, cheesed score
@@ -619,11 +643,11 @@ at a time, small steps:
   at 75% timescale then normal), attack assisting fields, or shelve it for a week.
 
 HOW TO ANSWER:
+- REPETITION CHECK, do it FIRST for every measured niche: its lastAdvice field is what you told the player last time. Your line today must use a DIFFERENT cue (the idea, not the exact words: "tighter chains, eyes first" rephrased is still the SAME cue). The only exception: the data still shows the same fault as today's top priority; then keep the cue but the assignment must literally begin with "Same focus as yesterday:". A repeated cue without that opener is a wrong answer.
 - Every line = short state verdict + a concrete next-session assignment from the base. Praise alone is banned; "keep it up" is banned. The player must leave each line knowing what to DO.
 - Anchor the assignment on the WORST scenario by name whenever one is given; its kind picks the cue. Do not dodge to the best scenario because the worst is awkward. Pokeball worst = pokeball work only (lines OR +5% handspeed, never both). Dynamic worst = track-first work: track each target briefly, decide, then click; intercept where it WILL be; never "add pace".
 - Green niche = assign the next rung from the progression doctrine, ONE dial, small step. One instruction per line: never two sequenced dials ("do X, then add Y" is two).
 - Faulty niche = the playbook prescription for its code, phrased around the named scenario.
-- TRACKING line = one general assignment straight from the base's tracking doctrine (smoothness first, read the strafe, track where he is GOING, glue to one body part, use the arm, reactive only at the change, easy smoothness right after reactive), anchored by name on one of the playedScenarios; a pokeball in the list gets pokeball doctrine. Vary which cue you pick between days. State only what was played, never how well.
 - If rustyDays is present, fold "normal after N days off" into the first line, then still assign.
 
 VOICE:
@@ -635,7 +659,7 @@ VOICE:
 
 OUTPUT CONTRACT (strict):
 - One line per niche, EXACT order given (worst first). No preamble, no summary, nothing after.
-- Line format: [CLICKING] / [TRACKING] / [SWITCHING] prefix, then 1-2 short sentences, max ~25 words total per line.`;
+- Line format: [CLICKING] / [SWITCHING] prefix, then 1-2 short sentences, max ~25 words total per line.`;
 
 
 async function generateCoachLines(env, body) {

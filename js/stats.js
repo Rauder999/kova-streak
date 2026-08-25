@@ -198,6 +198,43 @@ function hashReport(report) {
   return h.toString(36) + '-' + src.length;
 }
 
+// Доктринные подсказки трекинга. Ротация детерминирована по номеру дня:
+// соседние дни гарантированно получают разные подсказки, и никакая
+// забывчивость модели этого не сломает.
+export const TRACKING_CUES = [
+  'stay smooth through the strafe and react only at the instant of a direction change',
+  'track where the target is going, not where it was a moment ago',
+  'glue the crosshair to one body part and keep it there, no drifting inside the bot',
+  'steer the wide movements with the arm, not the wrist',
+  'aim at the center of the target the whole run, never the edges',
+  'spend the first seconds reading the pattern before committing to it',
+  'match the target speed instead of correcting after it moves away',
+  'after the twitchiest scenario, play one easy smooth scenario to calm the aim down',
+];
+
+export function trackingCueForDay(date) {
+  return TRACKING_CUES[Number(date.slice(-2)) % TRACKING_CUES.length];
+}
+
+// Трекинг-строка собирается на клиенте, без модели: данных там нет,
+// подсказка доктринная, ротация по дню, якорь на сыгранном сценарии.
+// Модель дважды подменяла выданную подсказку, детерминизм надежнее.
+export function buildTrackingLine(report) {
+  const t = report.niches.find((n) => n.niche === 'tracking');
+  if (!t || !t.scenarios.length) return null;
+  const nonPoke = t.scenarios.filter((s) => s.kind !== 'pokeball');
+  const pool = nonPoke.length ? nonPoke : t.scenarios;
+  const day = Number(report.today.slice(-2));
+  const scen = pool[day % pool.length];
+  const short = scen.name
+    .replace(/4BK\s*-\s*/i, '')
+    .replace(/\s*\(?Accuracy Edit\)?/i, '')
+    .replace(/\bVoltaic\b\s*/i, '')
+    .trim();
+  const cue = trackingCueForDay(report.today);
+  return `[TRACKING] On ${short}, ${cue}.`;
+}
+
 // Компактный пейлоад для воркера-коуча
 export function coachPayload(report) {
   const pct = (v) => (v == null ? null : Math.round(v * 100));
