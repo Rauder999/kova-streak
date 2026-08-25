@@ -320,15 +320,39 @@ li.done .scen-count { color: var(--pass); }
 }
 .hero-value { font-size: 26px; font-weight: 500; letter-spacing: -0.02em; }
 
-.risk-strip { border-left: 2px solid var(--fail); }
-.risk-chips { display: flex; flex-wrap: wrap; gap: 8px; }
-.risk-chip {
-  font-size: 12px; padding: 4px 12px;
-  border-radius: 999px;
-  background: rgba(201, 106, 94, 0.12);
-  border: 1px solid rgba(201, 106, 94, 0.5);
-  color: var(--fail);
+/* пьедестал стриков: рамки из пака OPERATOR, голографические постаменты */
+.podium {
+  display: flex; align-items: flex-end; justify-content: center;
+  gap: 26px; padding: 10px 0 4px;
 }
+.podium-slot { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.podium-frame {
+  position: relative;
+  background-size: contain; background-repeat: no-repeat; background-position: center;
+  display: flex; align-items: center; justify-content: center;
+}
+.place-1 .podium-frame { width: 132px; height: 136px; filter: drop-shadow(0 0 14px rgba(232, 182, 74, 0.35)); }
+.place-2 .podium-frame { width: 104px; height: 107px; filter: drop-shadow(0 0 10px rgba(199, 199, 204, 0.25)); }
+.place-3 .podium-frame { width: 96px; height: 99px; filter: drop-shadow(0 0 10px rgba(176, 141, 87, 0.3)); }
+.podium-avatar { border-radius: 50%; width: 52%; height: auto; aspect-ratio: 1; object-fit: cover; }
+.podium-name { font-weight: 500; font-size: 14px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.podium-streak { display: flex; align-items: center; gap: 5px; font-size: 13px; color: var(--signal-soft); }
+.podium-flame { width: 14px; height: 14px; }
+.podium-pedestal {
+  width: 100%; min-width: 96px;
+  display: flex; align-items: flex-start; justify-content: center;
+  border-radius: 4px 4px 0 0;
+  background:
+    repeating-linear-gradient(to bottom, rgba(183, 174, 247, 0.07) 0 2px, transparent 2px 5px),
+    linear-gradient(to bottom, rgba(124, 108, 240, 0.32), rgba(124, 108, 240, 0.04));
+  border-top: 1px solid var(--signal-soft);
+  box-shadow: 0 -6px 22px rgba(124, 108, 240, 0.18);
+}
+.place-1 .podium-pedestal { height: 84px; }
+.place-2 .podium-pedestal { height: 58px; }
+.place-3 .podium-pedestal { height: 42px; }
+.podium-pedestal span { font-size: 22px; color: var(--signal-soft); opacity: .85; padding-top: 6px; }
+.place-1 .podium-pedestal span { color: #e8b64a; }
 
 .leaderboard tr.rank-1 .rank { color: #e8b64a; font-weight: 600; }
 .leaderboard tr.rank-2 .rank { color: var(--chrome); font-weight: 600; }
@@ -337,7 +361,8 @@ li.done .scen-count { color: var(--pass); }
 
 .cal-cell.is-rest { background: var(--bg-2); border: 1px solid var(--chrome); opacity: .75; }
 .legend-swatch.is-rest { background: var(--bg-2); border: 1px solid var(--chrome); }
-.cal-day-head.wk, .cal-cell.wk { margin-left: 6px; }
+/* разделитель недель тенью, а не отступом: margin сжимал клетку понедельника */
+.cal-day-head.wk, .cal-cell.wk { box-shadow: -2px 0 0 0 var(--line-1); }
 
 .rest-days { display: flex; flex-wrap: wrap; gap: 8px; }
 .rest-chip {

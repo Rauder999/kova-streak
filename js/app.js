@@ -963,18 +963,45 @@ export function renderGroup() {
   if (restCnt) hero.append(tile('On rest today', String(restCnt)));
   root.append(hero);
 
-  // стрики под угрозой: социальное давление прямо на групповой странице
-  const risk = g.players.filter((p) => !p.doneToday && !p.restToday && p.streak >= 3);
-  if (risk.length) {
-    const rs = el('div', 'card risk-strip');
-    const rh = el('div', 'card-head');
-    rh.append(el('h2', null, 'Streaks on the line tonight'));
-    rh.append(el('span', 'muted', 'one playlist keeps them alive'));
-    rs.append(rh);
-    const chips = el('div', 'risk-chips');
-    for (const p of risk) chips.append(el('span', 'risk-chip mono', `${p.displayName} ${p.streak}d`));
-    rs.append(chips);
-    root.append(rs);
+  // пьедестал стриков: топ-3 большими аватарками в рамках из пака OPERATOR.
+  // Стрик это почет, а не позор: никакой красной доски "не сыграл сегодня".
+  const streakers = [...g.players].filter((p) => p.streak > 0)
+    .sort((a, b) => b.streak - a.streak || a.missedDays - b.missedDays || a.displayName.localeCompare(b.displayName))
+    .slice(0, 3);
+  if (streakers.length) {
+    const pod = el('div', 'card podium-card');
+    const ph = el('div', 'card-head');
+    ph.append(el('h2', null, 'Streak podium'));
+    ph.append(el('span', 'muted', 'longest active streaks'));
+    pod.append(ph);
+    const stage = el('div', 'podium');
+    const metals = ['gold', 'silver', 'bronze'];
+    // классика: второй слева, первый в центре, третий справа
+    const displayOrder = [1, 0, 2].filter((i) => i < streakers.length);
+    for (const i of displayOrder) {
+      const p = streakers[i];
+      const slot = el('div', `podium-slot place-${i + 1}`);
+      const frame = el('div', 'podium-frame');
+      frame.style.backgroundImage = `url('assets/frame-${metals[i]}.svg')`;
+      const img = el('img', 'podium-avatar');
+      img.src = p.avatar || avatarFallback(p.userId);
+      img.alt = '';
+      frame.append(img);
+      slot.append(frame);
+      slot.append(el('div', 'podium-name', p.displayName));
+      const st = el('div', 'podium-streak mono');
+      const fl = el('img', 'podium-flame');
+      fl.src = 'assets/flame.svg';
+      fl.alt = '';
+      st.append(fl, `${p.streak}d`);
+      slot.append(st);
+      const ped = el('div', 'podium-pedestal');
+      ped.append(el('span', 'mono', String(i + 1)));
+      slot.append(ped);
+      stage.append(slot);
+    }
+    pod.append(stage);
+    root.append(pod);
   }
 
   // лидерборд по количеству пропусков
