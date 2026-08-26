@@ -49,6 +49,7 @@ export const setPlaylist = (playlist) => call('/api/playlist', { method: 'PUT', 
 export const getGroup = (month) => call(`/api/group?month=${encodeURIComponent(month)}`);
 
 export const postCompletion = (payload) => call('/api/completion', { method: 'POST', body: payload });
+export const postScores = (bests) => call('/api/scores', { method: 'POST', body: { bests } });
 export const postDigest = () => call('/api/digest', { method: 'POST' });
 export const postCoach = (payload) => call('/api/coach', { method: 'POST', body: payload });
 export const getRest = () => call('/api/rest');

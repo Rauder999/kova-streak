@@ -241,7 +241,8 @@ async function tick() {
 
   if (state.tab === 'today') renderToday();
   maybePost();
-  if (state.coachEnabled) refreshStatsPipeline();
+  // индексация нужна и без коуча: на ней живет система рекордов
+  refreshStatsPipeline();
 }
 
 // ---------- личная статистика и коуч ----------
@@ -256,8 +257,9 @@ async function refreshStatsPipeline() {
       if (state.tab === 'stats') renderStats();
     });
     state.indexProgress = null;
+    await maybePostScores(res.added);
     // отчет пересчитываем, когда появились новые файлы или его еще нет
-    if (res.added > 0 || !state.report) {
+    if (state.coachEnabled && (res.added > 0 || !state.report)) {
       await rebuildReport(state.statsDate || state.date);
     }
   } catch (e) {
@@ -265,6 +267,34 @@ async function refreshStatsPipeline() {
   } finally {
     statsBusy = false;
   }
+}
+
+// Система соперничества: личные рекорды по сценариям текущей плейлисты
+// уходят на сервер, там решается, чьи рекорды пали и кого пинговать.
+// Кэш последней отправки в localStorage: без изменений запрос не уходит,
+// а тяжелый проход по всем ранам делаем только при новых файлах.
+const PB_CACHE_KEY = 'kova-streak-pb-posted';
+async function maybePostScores(added) {
+  if (!state.user || !state.playlist) return;
+  let cached = null;
+  try { cached = localStorage.getItem(PB_CACHE_KEY); } catch { /* приватный режим */ }
+  if (!added && cached !== null) return;
+
+  const wanted = new Set(state.playlist.scenarios.map((s) => s.name));
+  const runs = await getAllParsedRuns();
+  const bests = {};
+  for (const r of runs) {
+    if (!wanted.has(r.scenario) || !(r.score > 0)) continue;
+    if (!bests[r.scenario] || r.score > bests[r.scenario]) bests[r.scenario] = r.score;
+  }
+  if (!Object.keys(bests).length) return;
+
+  const ser = JSON.stringify(Object.entries(bests).sort((a, b) => a[0].localeCompare(b[0])));
+  if (ser === cached) return;
+  try {
+    await api.postScores(bests);
+    localStorage.setItem(PB_CACHE_KEY, ser);
+  } catch { /* не критично: повторим со следующим новым раном */ }
 }
 
 // Строит отчет за выбранную дату (сегодня или любой прошедший день)

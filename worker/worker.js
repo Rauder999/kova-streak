@@ -99,6 +99,13 @@ function monthDays(month) {
 const isDate = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
 const isMonth = (s) => typeof s === 'string' && /^\d{4}-\d{2}$/.test(s);
 
+// "2026-08-22" -> "Aug 22": в сообщениях даты всегда сокращенные
+function shortDate(date) {
+  return new Date(date + 'T12:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+}
+
+const daysBetween = (a, b) => Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000);
+
 // Понедельник недели, к которой относится дата: ключ недельной квоты выходных
 function weekKeyOf(date) {
   const d = new Date(date + 'T00:00:00Z');
@@ -195,12 +202,17 @@ async function buildStandings(env, month) {
     const wk = weekKeyOf(today);
     let weekDone = 0;
     for (let d = wk; d <= today; d = shiftDate(d, 1)) if (all[d] && all[d].done) weekDone++;
+    // последний закрытый день за всю историю: дайджест по нему отличает
+    // "не успел сегодня" от "молчит уже который день"
+    let lastDone = null;
+    for (const [d, rec] of Object.entries(all)) if (rec.done && (!lastDone || d > lastDone)) lastDone = d;
     return {
       ...u,
       byDate,
       restDays: [...rest].filter((d) => d.startsWith(month.slice(0, 7))),
       restToday: rest.has(today) && !(all[today] && all[today].done),
       weekDone,
+      lastDone,
       streak: computeStreak(all, today, rest),
       missedDays: computeMissed(all, month, today, u.joinedDate, rest),
       doneToday: !!(all[today] && all[today].done),
@@ -471,6 +483,43 @@ async function handleApi(request, env, url, cors, ctx) {
     dates = dates.filter((d) => d >= keepFrom).sort();
     await env.KOVA.put(`rest:${user.uid}`, JSON.stringify(dates));
     return json({ dates, quota: REST_QUOTA_PER_WEEK, today }, 200, cors);
+  }
+
+  // Личные рекорды по сценариям недельной плейлисты. Клиент шлет свои бесты,
+  // воркер хранит их в pb:{uid} (док пишет только сам владелец, гонок нет).
+  // Улучшение существующего беста запускает поиск павших рекордов и пинг
+  // (announceRecords). Первая загрузка целиком тихая: это бэйзлайн истории,
+  // а не событие, иначе в день релиза был бы шторм из старых рекордов.
+  if (path === '/api/scores' && request.method === 'POST') {
+    const body = await request.json().catch(() => null);
+    const incoming = body && body.bests;
+    if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) {
+      return json({ error: 'bests object is required' }, 400, cors);
+    }
+
+    const key = `pb:${user.uid}`;
+    const stored = await env.KOVA.get(key, 'json');
+    const doc = stored || {};
+    const firstUpload = !stored;
+    const improvements = [];
+    let changed = false;
+    let n = 0;
+    for (const [rawName, rawScore] of Object.entries(incoming)) {
+      if (++n > 60) break;
+      const name = String(rawName).trim().slice(0, 120);
+      const score = Number(rawScore);
+      if (!name || !Number.isFinite(score) || score <= 0) continue;
+      const old = doc[name];
+      if (old && score <= old.s) continue;
+      doc[name] = { s: score, at: Date.now() };
+      changed = true;
+      // пингуем только улучшение УЖЕ известного беста: новый сценарий в доке
+      // это тоже бэйзлайн (первая сыгранная неделя с ним), не событие
+      if (!firstUpload && old) improvements.push({ name, oldS: old.s, newS: score });
+    }
+    if (changed) await env.KOVA.put(key, JSON.stringify(doc));
+    if (improvements.length && ctx) ctx.waitUntil(announceRecords(env, user, improvements));
+    return json({ ok: true, improved: improvements.length }, 200, cors);
   }
 
   if (path === '/api/group' && request.method === 'GET') {
@@ -816,8 +865,8 @@ async function announceCompletion(env, user, streak, date) {
     if (!(meIn && meIn.done)) doneCount++;
 
     const variants = [
-      `[Daily quest complete: ${user.name}]`,
-      `[Player ${user.name} has cleared today's playlist.]`,
+      `[Daily quest complete: ${user.name}.]`,
+      `[Player ${user.name} has cleared today's training.]`,
       `[${user.name}: all runs verified. Day secured.]`,
       `[Quest log updated: ${user.name} - daily training complete.]`,
     ];
@@ -827,8 +876,29 @@ async function announceCompletion(env, user, streak, date) {
         ? `[Streak: ${streak} days. Milestone reached.]`
         : `[Streak: ${streak} days.]`);
     }
-    const dayWord = date === groupDate(env) ? 'today' : `for ${date.slice(5).replace('-', '/')}`;
-    if (users.length >= 3) lines.push(`[${doneCount}/${users.length} players complete ${dayWord}.]`);
+    // Признание роста после сухого факта: ротация по дню и позиции в очереди,
+    // чтобы два поста подряд не совпадали. Первый и последний за день получают
+    // свои специальные строки вместо общего пула.
+    const FLAVOR = [
+      '[Growth is recorded. The System is watching.]',
+      '[Consistency compounds. Progress logged.]',
+      '[The System acknowledges your persistence.]',
+      "[Today's work feeds tomorrow's aim.]",
+      '[Another day stronger. The System confirms.]',
+    ];
+    const dayWord = date === groupDate(env) ? 'today' : `for ${shortDate(date)}`;
+    if (users.length >= 3) {
+      if (doneCount >= users.length) {
+        lines.push(`[${doneCount}/${users.length}. Full clear. The System is satisfied.]`);
+      } else {
+        lines.push(`[${doneCount}/${users.length} players complete ${dayWord}.]`);
+        lines.push(doneCount === 1
+          ? '[First clear of the day. The gate is open.]'
+          : FLAVOR[(Number(date.slice(-2)) + doneCount) % FLAVOR.length]);
+      }
+    } else {
+      lines.push(FLAVOR[Number(date.slice(-2)) % FLAVOR.length]);
+    }
 
     await fetch(env.DISCORD_WEBHOOK_URL, {
       method: 'POST',
@@ -838,10 +908,14 @@ async function announceCompletion(env, user, streak, date) {
   } catch { /* пост не критичен */ }
 }
 
-// Дайджест построен на механиках Duolingo: угроза стрику первой строкой
-// (loss aversion сильнее награды), конкретные числа, вехи празднуются,
-// провалившимся - "прогресс важнее идеальности" вместо стыда, и копия
-// ротируется по дню месяца, чтобы не стать обоями.
+// Жесткая строка для молчащих 3+ дней. Кандидаты на выбор Паши, дефолт
+// временный: дайджест все равно на паузе до финального аппрува текста.
+const SILENT_STING = 'Skill is leaving quietly. It will not announce its return.';
+
+// Дневной отчет в голосе Системы. Три уровня тона: выполнившим признание,
+// недоделавшим сегодня легкий укол, молчащим 3+ дней жестче и поименно.
+// Пинг роли живет ВНЕ код-блока (внутри Discord его не резолвит), id роли
+// в KV config:aimChadRoleId, без него дайджест уходит просто без пинга.
 async function postDigest(env) {
   if (!env.DISCORD_WEBHOOK_URL) return;
 
@@ -853,79 +927,97 @@ async function postDigest(env) {
   const done = players.filter((p) => p.doneToday);
   const resting = players.filter((p) => !p.doneToday && p.restToday);
   const missing = players.filter((p) => !p.doneToday && !p.restToday);
-  const atRisk = missing.filter((p) => p.streak >= 1);
-  const partial = missing.filter((p) => p.todayRuns && p.todayRuns.completedRuns > 0);
-  const notStarted = missing.filter((p) => !p.todayRuns || p.todayRuns.completedRuns === 0);
+  // молчуны: ни одного закрытого дня 3 и больше дней подряд (или вообще никогда)
+  const idleDays = (p) => (p.lastDone ? daysBetween(p.lastDone, today) : Infinity);
+  const silent = missing.filter((p) => idleDays(p) >= 3);
+  const incomplete = missing.filter((p) => idleDays(p) < 3);
 
-  const dayNum = Number(today.slice(-2));
-  const pick = (arr) => arr[dayNum % arr.length];
-  const header = new Date(today + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
-  const tag = (p) => (p.streak >= 3 ? `${p.displayName} (${p.streak}d)` : p.displayName);
-
-  const lines = [`[SYSTEM NOTICE - ${header}]`];
+  const names = (list) => list.map((p) => p.displayName).join(', ');
+  const lines = [`[Daily report: ${shortDate(today)}.]`];
 
   if (done.length === players.length) {
-    lines.push(`[All ${players.length} players have completed the daily quest.]`);
-    lines.push(pick([
-      '[No penalties issued today.]',
-      '[Flawless day recorded.]',
-      '[The system approves. Barely.]',
-    ]));
-  } else if (missing.length === 0) {
-    lines.push(`[Complete: ${done.length}/${players.length}. Everyone else is on a scheduled rest day. No penalties.]`);
+    lines.push(`[All ${players.length} players have cleared the daily quest.]`);
+    lines.push('[Full clear. The System has nothing to add.]');
   } else {
-    // угроза стрику: главный крючок, всегда первой строкой
-    if (atRisk.length) {
-      const names = atRisk.map(tag).join(', ');
-      lines.push(pick([
-        `[Warning: streak termination at midnight for: ${names}.]`,
-        `[Unfinished daily detected: ${names}. Consequences apply at midnight.]`,
-        `[Pending streak loss: ${names}. The system does not extend deadlines.]`,
-      ]));
+    lines.push(done.length
+      ? `[Cleared: ${names(done)}. The System acknowledges.]`
+      : '[Cleared: none. The System has no one to acknowledge.]');
+    if (resting.length) lines.push(`[On scheduled leave: ${names(resting)}.]`);
+    if (incomplete.length) lines.push(`[Incomplete: ${names(incomplete)}. The day is not over. The System is watching.]`);
+    for (const p of silent.slice(0, 5)) {
+      lines.push(p.lastDone
+        ? `[No training detected from ${p.displayName} since ${shortDate(p.lastDone)}. ${SILENT_STING}]`
+        : `[${p.displayName} has never entered the training grounds. The System has nothing to measure.]`);
     }
-    if (done.length) {
-      lines.push(`[Complete: ${done.length}/${players.length} - ${done.map(tag).join(', ')}]`);
-    } else {
-      lines.push('[Complete: 0/' + players.length + '. The system is watching.]');
-    }
-    if (resting.length) {
-      lines.push(`[Scheduled rest day: ${resting.map((p) => p.displayName).join(', ')}. Streaks preserved.]`);
-    }
-    // оставшееся считаем до конца, а не от нуля
-    for (const p of partial) {
-      const left = p.todayRuns.requiredRuns - p.todayRuns.completedRuns;
-      lines.push(`[${p.displayName}: ${left} ${left === 1 ? 'run' : 'runs'} remaining.]`);
-    }
-    // после сорванного стрика - прогресс, а не стыд
-    const fresh = notStarted.filter((p) => p.streak === 0 && Object.values(p.byDate).some((d) => d.done));
-    for (const p of fresh.slice(0, 3)) {
-      const goodDays = Object.values(p.byDate).filter((d) => d.done).length;
-      lines.push(`[${p.displayName}: streak reset. ${goodDays} completed ${goodDays === 1 ? 'day' : 'days'} on record this month. A new one starts today.]`);
-    }
+    lines.push(`[${done.length}/${players.length} cleared. Gate closes at midnight.]`);
   }
 
-  // вехи празднуем в день достижения
-  for (const p of done.filter((x) => MILESTONES.has(x.streak))) {
-    lines.push(`[Milestone: ${p.displayName} - ${p.streak} consecutive days.]`);
-  }
-
-  // гонка за призы: только когда есть реальное расслоение
-  const best = players[0].missedDays;
-  const leaders = players.filter((p) => p.missedDays === best).map((p) => p.displayName);
-  if (leaders.length < players.length) {
-    const chasers = players.filter((p) => p.missedDays === best + 1).map((p) => p.displayName);
-    let race = leaders.length === 1
-      ? `[Ranking: ${leaders[0]} leads with ${best} missed.`
-      : `[Ranking: ${leaders.join(', ')} tied at ${best} missed.`;
-    if (chasers.length && chasers.length <= 3) race += ` ${chasers.join(', ')} trail by one.`;
-    lines.push(race + ']');
-  }
-
+  const roleId = await env.KOVA.get('config:aimChadRoleId');
+  const content = (roleId ? `<@&${roleId}>\n` : '') + systemBlock(lines).slice(0, 1900);
   await fetch(env.DISCORD_WEBHOOK_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content: systemBlock(lines).slice(0, 1900), allowed_mentions: { parse: [] } }),
+    body: JSON.stringify({
+      content,
+      allowed_mentions: roleId ? { roles: [roleId] } : { parse: [] },
+    }),
   });
+}
+
+const fmtScore = (s) => (s >= 100 ? Math.round(s) : Math.round(s * 10) / 10);
+
+// Система соперничества: пинг тех, чьи рекорды пали. Условия пинга:
+// пересечение (жертва была не ниже старого беста атакующего, иначе она
+// уже была позади и это не событие) и близкий обгон (новый скор выше
+// беста жертвы не больше чем на 5%: реванш реален, это дуэль, а не
+// доска позора). Одно сообщение на пару игрок+сценарий в день.
+async function announceRecords(env, user, improvements) {
+  if (!env.DISCORD_WEBHOOK_URL) return;
+  try {
+    const today = groupDate(env);
+    const { users } = await loadGroup(env);
+    const meName = (users.find((u) => u.userId === user.uid) || {}).displayName || user.name;
+    const others = users.filter((u) => u.userId !== user.uid);
+    const docs = await Promise.all(others.map((u) => env.KOVA.get(`pb:${u.userId}`, 'json')));
+
+    for (const imp of improvements.slice(0, 5)) {
+      const victims = [];
+      for (let i = 0; i < others.length; i++) {
+        const rec = docs[i] && docs[i][imp.name];
+        if (!rec || !(rec.s > 0)) continue;
+        const crossed = rec.s < imp.newS && rec.s >= imp.oldS;
+        const close = (imp.newS - rec.s) / rec.s <= 0.05;
+        if (crossed && close) victims.push({ ...others[i], best: rec.s });
+      }
+      if (!victims.length) continue;
+
+      const dedupeKey = `pbping:${user.uid}:${imp.name}:${today}`;
+      if (await env.KOVA.get(dedupeKey)) continue;
+      await env.KOVA.put(dedupeKey, '1', { expirationTtl: 172800 });
+
+      victims.sort((a, b) => b.best - a.best);
+      const top = victims.slice(0, 10);
+      const listed = top.map((v) => `${v.displayName} ${fmtScore(v.best)}`);
+      const joined = listed.length === 1
+        ? listed[0]
+        : listed.slice(0, -1).join(', ') + ' and ' + listed[listed.length - 1];
+      const lines = [
+        `[Record broken: ${imp.name}.]`,
+        `[${meName} ${fmtScore(imp.newS)} has overtaken ${joined}.]`,
+        top.length === 1
+          ? '[Your record has fallen. Reclaim what is yours.]'
+          : '[Your records have fallen. Reclaim what is yours.]',
+      ];
+      await fetch(env.DISCORD_WEBHOOK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: top.map((v) => `<@${v.userId}>`).join(' ') + '\n' + systemBlock(lines),
+          allowed_mentions: { users: top.map((v) => v.userId) },
+        }),
+      });
+    }
+  } catch { /* пинг не критичен */ }
 }
 
 // ---------- вход ----------
