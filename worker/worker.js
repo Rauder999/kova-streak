@@ -413,18 +413,24 @@ async function handleApi(request, env, url, cors, ctx) {
       const m = k.metadata || {};
       all[k.name.slice(`completion:${user.uid}:`.length)] = { completedRuns: m.c || 0, requiredRuns: m.r || 0, done: !!m.d };
     }
+    // list после put в KV eventually consistent: свежую запись подкладываем сами
+    if (!(prev && prev.done && !done)) all[body.date] = { completedRuns, requiredRuns, done };
     const profile = await env.KOVA.get(`user:${user.uid}`, 'json');
     const restArr = (await env.KOVA.get(`rest:${user.uid}`, 'json')) || [];
     const rest = new Set(restArr);
-    const streak = computeStreak(all, today, rest);
+    // Якорь стрика = верхний закрытый день игрока. Игрок восточнее группы
+    // живет на день впереди: его "завтра" уже закрыто, стрик идет оттуда.
+    const upD = shiftDate(today, 1);
+    const anchor = all[upD] && all[upD].done ? upD : today;
+    const streak = computeStreak(all, anchor, rest);
 
-    if (firstCompletionToday && ctx) ctx.waitUntil(announceCompletion(env, user, streak));
+    if (firstCompletionToday && ctx) ctx.waitUntil(announceCompletion(env, user, streak, body.date));
 
     return json({
       ok: true,
       done,
       streak,
-      missedDays: computeMissed(all, today.slice(0, 7), today, profile && profile.joinedDate, rest),
+      missedDays: computeMissed(all, anchor.slice(0, 7), anchor, profile && profile.joinedDate, rest),
     }, 200, cors);
   }
 
@@ -793,14 +799,21 @@ function systemBlock(lines) {
 // Мгновенный пост в канал, когда игрок впервые за день закрыл плейлисту.
 // Социальное давление капает весь день, а не одним вечерним залпом.
 // Никогда не ломает сам чек-ин: все ошибки глотаются.
-async function announceCompletion(env, user, streak) {
+// ВАЖНО: счетчик "N/M complete" считается по ДАТЕ ЗАВЕРШЕННОГО ДНЯ игрока,
+// а не по дню группы: европеец, закрывший свое 26-е, открывает счет 26-го
+// (1/15), а не приписывается к хвосту чужого 25-го.
+async function announceCompletion(env, user, streak, date) {
   if (!env.DISCORD_WEBHOOK_URL) return;
   try {
-    const today = groupDate(env);
-    const standings = await buildStandings(env, today.slice(0, 7));
-    const players = standings.players;
-    const meCounted = players.some((p) => p.userId === user.uid && p.doneToday);
-    const doneCount = players.filter((p) => p.doneToday).length + (meCounted ? 0 : 1);
+    const { users, byUser } = await loadGroup(env);
+    let doneCount = 0;
+    for (const u of users) {
+      const rec = (byUser.get(u.userId) || {})[date];
+      if (rec && rec.done) doneCount++;
+    }
+    // read-your-write в KV не гарантирован между колами: себя считаем всегда
+    const meIn = (byUser.get(user.uid) || {})[date];
+    if (!(meIn && meIn.done)) doneCount++;
 
     const variants = [
       `[Daily quest complete: ${user.name}]`,
@@ -814,7 +827,8 @@ async function announceCompletion(env, user, streak) {
         ? `[Streak: ${streak} days. Milestone reached.]`
         : `[Streak: ${streak} days.]`);
     }
-    if (players.length >= 3) lines.push(`[${doneCount}/${players.length} players complete today.]`);
+    const dayWord = date === groupDate(env) ? 'today' : `for ${date.slice(5).replace('-', '/')}`;
+    if (users.length >= 3) lines.push(`[${doneCount}/${users.length} players complete ${dayWord}.]`);
 
     await fetch(env.DISCORD_WEBHOOK_URL, {
       method: 'POST',
