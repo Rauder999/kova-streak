@@ -188,7 +188,14 @@ function computeMissed(byDate, month, today, joinedDate, rest) {
 
 async function buildStandings(env, month) {
   const today = groupDate(env);
-  const { users, byUser } = await loadGroup(env);
+  const { users: allUsers, byUser } = await loadGroup(env);
+  // Зрители скрыты отовсюду (решение Pasha 2026-08-26): кто за всю историю
+  // не сыграл ни одного рана, не существует для лидерборда, календаря и
+  // сообщений. Появляются сами, как только их дашборд запостит первый ран.
+  const users = allUsers.filter((u) => {
+    const recs = byUser.get(u.userId) || {};
+    return Object.values(recs).some((r) => r.done || r.completedRuns > 0);
+  });
   const restLists = await Promise.all(users.map((u) => env.KOVA.get(`rest:${u.userId}`, 'json')));
 
   const players = users.map((u, i) => {
@@ -862,15 +869,23 @@ function systemBlock(lines) {
 async function announceCompletion(env, user, streak, date) {
   if (!env.DISCORD_WEBHOOK_URL) return;
   try {
-    const { users, byUser } = await loadGroup(env);
+    const { users: allUsers, byUser } = await loadGroup(env);
+    // знаменатель N/M: только реально игравшие + сам завершивший (его
+    // свежая запись могла еще не долететь до листинга)
+    const active = allUsers.filter((u) => {
+      if (u.userId === user.uid) return true;
+      const recs = byUser.get(u.userId) || {};
+      return Object.values(recs).some((r) => r.done || r.completedRuns > 0);
+    });
     let doneCount = 0;
-    for (const u of users) {
+    for (const u of active) {
       const rec = (byUser.get(u.userId) || {})[date];
       if (rec && rec.done) doneCount++;
     }
     // read-your-write в KV не гарантирован между колами: себя считаем всегда
     const meIn = (byUser.get(user.uid) || {})[date];
     if (!(meIn && meIn.done)) doneCount++;
+    const users = active;
 
     const variants = [
       `[Daily quest complete: ${user.name}.]`,
@@ -960,10 +975,12 @@ async function postDigest(env) {
       const sting = STING_MILD[Number(today.slice(-2)) % STING_MILD.length];
       lines.push(`[Incomplete: ${names(incomplete)}. The day is not over. ${sting}]`);
     }
+    // lastDone может быть null только у игравших частично (зрители без
+    // единого рана отфильтрованы еще в buildStandings)
     for (const p of silent.slice(0, 5)) {
       lines.push(p.lastDone
         ? `[No training detected from ${p.displayName} since ${shortDate(p.lastDone)}. ${STING_HARSH}]`
-        : `[${p.displayName} has never entered the training grounds. The System has nothing to measure.]`);
+        : `[${p.displayName} has not cleared a single day yet. The System is still waiting.]`);
     }
     lines.push(`[${done.length}/${players.length} cleared. Gate closes at midnight.]`);
   }
