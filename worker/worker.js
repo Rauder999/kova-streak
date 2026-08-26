@@ -104,8 +104,6 @@ function shortDate(date) {
   return new Date(date + 'T12:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
 }
 
-const daysBetween = (a, b) => Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000);
-
 // Понедельник недели, к которой относится дата: ключ недельной квоты выходных
 function weekKeyOf(date) {
   const d = new Date(date + 'T00:00:00Z');
@@ -206,6 +204,15 @@ async function buildStandings(env, month) {
     // "не успел сегодня" от "молчит уже который день"
     let lastDone = null;
     for (const [d, rec] of Object.entries(all)) if (rec.done && (!lastDone || d > lastDone)) lastDone = d;
+    // дней тишины к сегодняшнему дню, НЕ считая запланированные выходные:
+    // легальный отдых не является пропуском и не двигает игрока к жесткому тону
+    let idleDays = null;
+    if (lastDone) {
+      idleDays = 0;
+      for (let d = shiftDate(lastDone, 1), i = 0; d <= today && i < 60; d = shiftDate(d, 1), i++) {
+        if (!rest.has(d)) idleDays++;
+      }
+    }
     return {
       ...u,
       byDate,
@@ -213,6 +220,7 @@ async function buildStandings(env, month) {
       restToday: rest.has(today) && !(all[today] && all[today].done),
       weekDone,
       lastDone,
+      idleDays,
       streak: computeStreak(all, today, rest),
       missedDays: computeMissed(all, month, today, u.joinedDate, rest),
       doneToday: !!(all[today] && all[today].done),
@@ -908,12 +916,18 @@ async function announceCompletion(env, user, streak, date) {
   } catch { /* пост не критичен */ }
 }
 
-// Жесткая строка для молчащих 3+ дней. Кандидаты на выбор Паши, дефолт
-// временный: дайджест все равно на паузе до финального аппрува текста.
-const SILENT_STING = 'Skill is leaving quietly. It will not announce its return.';
+// Жала дайджеста, выбор Паши: до 3 дней тишины ротация двух средних,
+// от 3 дней самое злое. Дни тишины считаются БЕЗ запланированных выходных.
+const STING_HARSH = 'The System issues no penalty. Your aim is the penalty.';
+const STING_MILD = [
+  'The others are training. The gap grows either way.',
+  'Every skipped day is handed to the others.',
+];
 
 // Дневной отчет в голосе Системы. Три уровня тона: выполнившим признание,
-// недоделавшим сегодня легкий укол, молчащим 3+ дней жестче и поименно.
+// недоделавшим (меньше 3 дней тишины) укол из ротации, молчащим 3+ дней
+// жестко и поименно. Выходные прозрачны: сегодняшний отдыхающий уходит в
+// "On scheduled leave", а прошлые выходные не считаются днями тишины.
 // Пинг роли живет ВНЕ код-блока (внутри Discord его не резолвит), id роли
 // в KV config:aimChadRoleId, без него дайджест уходит просто без пинга.
 async function postDigest(env) {
@@ -927,10 +941,9 @@ async function postDigest(env) {
   const done = players.filter((p) => p.doneToday);
   const resting = players.filter((p) => !p.doneToday && p.restToday);
   const missing = players.filter((p) => !p.doneToday && !p.restToday);
-  // молчуны: ни одного закрытого дня 3 и больше дней подряд (или вообще никогда)
-  const idleDays = (p) => (p.lastDone ? daysBetween(p.lastDone, today) : Infinity);
-  const silent = missing.filter((p) => idleDays(p) >= 3);
-  const incomplete = missing.filter((p) => idleDays(p) < 3);
+  const idleOf = (p) => (p.idleDays === null ? Infinity : p.idleDays);
+  const silent = missing.filter((p) => idleOf(p) >= 3);
+  const incomplete = missing.filter((p) => idleOf(p) < 3);
 
   const names = (list) => list.map((p) => p.displayName).join(', ');
   const lines = [`[Daily report: ${shortDate(today)}.]`];
@@ -943,10 +956,13 @@ async function postDigest(env) {
       ? `[Cleared: ${names(done)}. The System acknowledges.]`
       : '[Cleared: none. The System has no one to acknowledge.]');
     if (resting.length) lines.push(`[On scheduled leave: ${names(resting)}.]`);
-    if (incomplete.length) lines.push(`[Incomplete: ${names(incomplete)}. The day is not over. The System is watching.]`);
+    if (incomplete.length) {
+      const sting = STING_MILD[Number(today.slice(-2)) % STING_MILD.length];
+      lines.push(`[Incomplete: ${names(incomplete)}. The day is not over. ${sting}]`);
+    }
     for (const p of silent.slice(0, 5)) {
       lines.push(p.lastDone
-        ? `[No training detected from ${p.displayName} since ${shortDate(p.lastDone)}. ${SILENT_STING}]`
+        ? `[No training detected from ${p.displayName} since ${shortDate(p.lastDone)}. ${STING_HARSH}]`
         : `[${p.displayName} has never entered the training grounds. The System has nothing to measure.]`);
     }
     lines.push(`[${done.length}/${players.length} cleared. Gate closes at midnight.]`);
