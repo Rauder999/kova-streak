@@ -5,7 +5,8 @@ import * as api from './api.js';
 import { localDate, localMonth } from './parser.js';
 import {
   fsSupported, pickStatsFolder, getStoredFolder, forgetFolder,
-  ensurePermission, countRunsForDate, matchPlaylist, indexRunContents,
+  ensurePermission, matchPlaylist, indexRunContents,
+  countRunsAroundMidnight, applyGraceWindow,
 } from './fs.js';
 import { getAllParsedRuns, kvGet, kvSet } from './db.js';
 import { buildDailyReport, coachPayload, buildTrackingLine } from './stats.js';
@@ -33,6 +34,11 @@ export const state = {
   lastPostedRuns: -1,
   lastPostAt: 0,
   posting: false,
+  prevProgress: null,     // прогресс за вчера (с учетом грейс-окна)
+  lastPostedPrevRuns: -1,
+  lastPrevPostAt: 0,
+  postingPrev: false,
+  graceUsed: 0,           // сколько ночных ранов досчитано во вчера
   streak: null,
   group: null,
   tab: 'today',
@@ -216,6 +222,8 @@ async function tick() {
     state.date = today;
     state.lastPostedRuns = -1;
     state.lastPostAt = 0;
+    state.lastPostedPrevRuns = -1;
+    state.lastPrevPostAt = 0;
   }
 
   try {
@@ -227,22 +235,39 @@ async function tick() {
       return;
     }
 
-    const { counts, scanned } = await countRunsForDate(state.handle, state.date);
-    state.progress = matchPlaylist(state.playlist.scenarios, counts);
+    const { prev, grace, cur, scanned } = await countRunsAroundMidnight(state.handle, state.date, prevDateOf(state.date));
+    const split = applyGraceWindow(state.playlist.scenarios, prev, grace, cur);
+    state.progress = split.todayProgress;
     state.progress.scanned = scanned;
+    state.graceUsed = split.graceUsed;
+    // вчерашний прогресс постим, только если там вообще что-то сыграно:
+    // это и грейс-дозачет, и лечение "играл вчера, но вкладка была закрыта"
+    state.prevProgress = split.prevProgress.completedRuns > 0 ? split.prevProgress : null;
     state.scanError = null;
     if (state.progress.done) maybeCelebrate();
-    $('scan-text').textContent = state.progress.done
+    let scanLine = state.progress.done
       ? 'today is done'
       : `${state.progress.completedRuns} / ${state.progress.requiredRuns} runs`;
+    if (split.graceUsed > 0) {
+      scanLine += ` (+${split.graceUsed} night ${split.graceUsed === 1 ? 'run' : 'runs'} counted toward yesterday)`;
+    }
+    $('scan-text').textContent = scanLine;
   } catch (e) {
     state.scanError = 'Scan failed: ' + e.message;
   }
 
   if (state.tab === 'today') renderToday();
   maybePost();
+  maybePostPrev();
   // индексация нужна и без коуча: на ней живет система рекордов
   refreshStatsPipeline();
+}
+
+// Вчерашняя дата в том же локальном формате, что и state.date
+function prevDateOf(date) {
+  const d = new Date(date + 'T12:00:00');
+  d.setDate(d.getDate() - 1);
+  return localDate(d);
 }
 
 // ---------- личная статистика и коуч ----------
@@ -468,6 +493,35 @@ function renderStats() {
 
 function fmtScore(v) {
   return v >= 100 ? String(Math.round(v)) : (Math.round(v * 10) / 10).toString();
+}
+
+// Пост за вчерашний день: грейс-дозачет ночной сессии и лечение случая
+// "вчера играл, но вкладка не была открыта". Сервер принимает вчера в окне
+// дат и никогда не понижает уже закрытый день, так что пост безопасен.
+async function maybePostPrev() {
+  const p = state.prevProgress;
+  if (!p || state.postingPrev) return;
+  if (p.completedRuns === state.lastPostedPrevRuns) return;
+
+  const justFinished = p.done && state.lastPostedPrevRuns < p.requiredRuns;
+  if (!justFinished && Date.now() - state.lastPrevPostAt < POST_DEBOUNCE_MS) return;
+
+  state.postingPrev = true;
+  try {
+    await api.postCompletion({
+      date: prevDateOf(state.date),
+      completedRuns: p.completedRuns,
+      requiredRuns: p.requiredRuns,
+      done: p.done,
+    });
+    state.lastPostedPrevRuns = p.completedRuns;
+    state.lastPrevPostAt = Date.now();
+  } catch (e) {
+    if (handleApiError(e)) return;
+    // не критично: повторим на следующем тике
+  } finally {
+    state.postingPrev = false;
+  }
 }
 
 // Отправляем прогресс, когда он изменился. Полное выполнение шлем немедленно,

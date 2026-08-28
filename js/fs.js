@@ -4,7 +4,7 @@
 // Поэтому скан дешевый (в папке автора 1755 файлов) и его можно гонять
 // раз в несколько секунд, чтобы прогресс полз вживую.
 
-import { parseStatsFileName, parseRunContent, isStatsFile, localDate } from './parser.js';
+import { parseStatsFileName, parseRunContent, isStatsFile } from './parser.js';
 import { kvGet, kvSet, kvDel, putParsedRuns, getParsedFileNames } from './db.js';
 
 const HANDLE_KEY = 'statsDirHandle';
@@ -45,22 +45,57 @@ export async function ensurePermission(handle, { request = false } = {}) {
   return false;
 }
 
-// Считает раны за указанную дату по каждому сценарию.
-// Возвращает Map<scenarioName, count> по ВСЕМ сценариям в папке за этот день,
-// фильтрация по плейлисте происходит уровнем выше.
-export async function countRunsForDate(handle, date = localDate()) {
-  const counts = new Map();
+// Первые часы после полуночи, когда ночные раны еще могут дозакрыть
+// вчерашний день (сессия, переехавшая через полночь).
+export const GRACE_HOURS = 2;
+
+// Один проход по папке, три корзины: вчерашние раны, ночные сегодняшние
+// (первые GRACE_HOURS часов) и остальные сегодняшние.
+export async function countRunsAroundMidnight(handle, today, prevDate) {
+  const prev = new Map();
+  const grace = new Map();
+  const cur = new Map();
   let scanned = 0;
+  const bump = (m, k) => m.set(k, (m.get(k) || 0) + 1);
   for await (const entry of handle.values()) {
     if (entry.kind !== 'file') continue;
     const name = entry.name;
     if (!name.endsWith('.csv')) continue;
     scanned++;
     const parsed = parseStatsFileName(name);
-    if (!parsed || parsed.date !== date) continue;
-    counts.set(parsed.scenario, (counts.get(parsed.scenario) || 0) + 1);
+    if (!parsed) continue;
+    if (parsed.date === prevDate) bump(prev, parsed.scenario);
+    else if (parsed.date === today) {
+      bump(Number(parsed.time.slice(0, 2)) < GRACE_HOURS ? grace : cur, parsed.scenario);
+    }
   }
-  return { counts, scanned };
+  return { prev, grace, cur, scanned };
+}
+
+// Грейс-окно (просьба Pasha 2026-08-28): если вчерашний день НАЧАТ, но не
+// закрыт, ночные раны (до GRACE_HOURS) досчитываются во вчера, а не в
+// сегодня: сессия, переползшая через полночь, закрывает свой день сама.
+// Если вчера закрыт или вообще не начат, ночные раны принадлежат сегодню.
+// Чистая функция, тестируется в node без браузера.
+export function applyGraceWindow(scenarios, prev, grace, cur) {
+  const merge = (a, b) => {
+    const m = new Map(a);
+    for (const [k, v] of b) m.set(k, (m.get(k) || 0) + v);
+    return m;
+  };
+  const prevAlone = matchPlaylist(scenarios, prev);
+  if (!prevAlone.done && prevAlone.completedRuns > 0 && grace.size) {
+    return {
+      prevProgress: matchPlaylist(scenarios, merge(prev, grace)),
+      todayProgress: matchPlaylist(scenarios, cur),
+      graceUsed: [...grace.values()].reduce((a, b) => a + b, 0),
+    };
+  }
+  return {
+    prevProgress: prevAlone,
+    todayProgress: matchPlaylist(scenarios, merge(cur, grace)),
+    graceUsed: 0,
+  };
 }
 
 // Индексация содержимого: парсит еще не разобранные CSV в компактные метрики
