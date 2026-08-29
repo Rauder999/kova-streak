@@ -3,3 +3,4 @@ worker/.wrangler/
 worker/.dev.vars
 .DS_Store
 *.log
+__pycache__/
