@@ -526,11 +526,14 @@ async function handleApi(request, env, url, cors, ctx) {
       if (!name || !Number.isFinite(score) || score <= 0) continue;
       const old = doc[name];
       if (old && score <= old.s) continue;
-      doc[name] = { s: score, at: Date.now() };
+      // i:1 только у настоящих улучшений: бэйзлайны истории и первые раны
+      // нового сценария не считаются рекордами дня в дайджесте
+      const isImp = !firstUpload && !!old;
+      doc[name] = isImp ? { s: score, at: Date.now(), i: 1 } : { s: score, at: Date.now() };
       changed = true;
       // пингуем только улучшение УЖЕ известного беста: новый сценарий в доке
       // это тоже бэйзлайн (первая сыгранная неделя с ним), не событие
-      if (!firstUpload && old) improvements.push({ name, oldS: old.s, newS: score });
+      if (isImp) improvements.push({ name, oldS: old.s, newS: score });
     }
     if (changed) await env.KOVA.put(key, JSON.stringify(doc));
     if (improvements.length && ctx) ctx.waitUntil(announceRecords(env, user, improvements));
@@ -870,12 +873,13 @@ async function announceCompletion(env, user, streak, date) {
   if (!env.DISCORD_WEBHOOK_URL) return;
   try {
     const { users: allUsers, byUser } = await loadGroup(env);
-    // знаменатель N/M: только реально игравшие + сам завершивший (его
-    // свежая запись могла еще не долететь до листинга)
+    // знаменатель N/M: только закрывавшие хоть один день (тот же ростер,
+    // что в дайджесте) + сам завершивший (его свежая запись могла еще не
+    // долететь до листинга)
     const active = allUsers.filter((u) => {
       if (u.userId === user.uid) return true;
       const recs = byUser.get(u.userId) || {};
-      return Object.values(recs).some((r) => r.done || r.completedRuns > 0);
+      return Object.values(recs).some((r) => r.done);
     });
     let doneCount = 0;
     for (const u of active) {
@@ -950,37 +954,63 @@ async function postDigest(env) {
 
   const today = groupDate(env);
   const standings = await buildStandings(env, today.slice(0, 7));
-  const players = standings.players;
+  // В дайджесте существуют только закрывавшие хотя бы один день за всю
+  // историю (решение Pasha 2026-08-29): играющие частично без единого
+  // закрытого дня не получают ни строк, ни места в знаменателе. Появятся
+  // в вечернем отчете сами, как только впервые закроют день.
+  const players = standings.players.filter((p) => p.lastDone !== null);
   if (!players.length) return;
 
   const done = players.filter((p) => p.doneToday);
   const resting = players.filter((p) => !p.doneToday && p.restToday);
   const missing = players.filter((p) => !p.doneToday && !p.restToday);
-  const idleOf = (p) => (p.idleDays === null ? Infinity : p.idleDays);
-  const silent = missing.filter((p) => idleOf(p) >= 3);
-  const incomplete = missing.filter((p) => idleOf(p) < 3);
+  const silent = missing.filter((p) => p.idleDays >= 3);
+  const incomplete = missing.filter((p) => p.idleDays < 3);
+
+  // Отличившийся дня: больше всех НОВЫХ личных рекордов за сегодня
+  // (записи pb с флагом i, бэйзлайны истории не считаются)
+  let distinction = null;
+  try {
+    const pbDocs = await Promise.all(players.map((p) => env.KOVA.get(`pb:${p.userId}`, 'json')));
+    let best = 0;
+    let who = [];
+    players.forEach((p, i) => {
+      let n = 0;
+      for (const rec of Object.values(pbDocs[i] || {})) {
+        if (rec && rec.i && rec.at && groupDate(env, rec.at) === today) n++;
+      }
+      if (n > best) { best = n; who = [p.displayName]; }
+      else if (n > 0 && n === best) who.push(p.displayName);
+    });
+    if (best > 0) {
+      const pbWord = best === 1 ? 'a new personal best' : `${best} new personal bests`;
+      distinction = who.length === 1
+        ? `[Distinction: ${who[0]} set ${pbWord} today. The System took note.]`
+        : who.length === 2
+          ? `[Distinction: ${who.join(' and ')} set ${pbWord} each today. The System took note.]`
+          : `[Distinction: ${who.length} players set ${pbWord} each today. The System took note.]`;
+    }
+  } catch { /* строка опциональна */ }
 
   const names = (list) => list.map((p) => p.displayName).join(', ');
   const lines = [`[Daily report: ${shortDate(today)}.]`];
 
   if (done.length === players.length) {
     lines.push(`[All ${players.length} players have cleared the daily quest.]`);
+    if (distinction) lines.push(distinction);
     lines.push('[Full clear. The System has nothing to add.]');
   } else {
     lines.push(done.length
       ? `[Cleared: ${names(done)}. The System acknowledges.]`
       : '[Cleared: none. The System has no one to acknowledge.]');
+    if (distinction) lines.push(distinction);
     if (resting.length) lines.push(`[On scheduled leave: ${names(resting)}.]`);
     if (incomplete.length) {
       const sting = STING_MILD[Number(today.slice(-2)) % STING_MILD.length];
       lines.push(`[Incomplete: ${names(incomplete)}. The day is not over. ${sting}]`);
     }
-    // lastDone может быть null только у игравших частично (зрители без
-    // единого рана отфильтрованы еще в buildStandings)
     for (const p of silent.slice(0, 5)) {
-      lines.push(p.lastDone
-        ? `[No training detected from ${p.displayName} since ${shortDate(p.lastDone)}. ${STING_HARSH}]`
-        : `[${p.displayName} has not cleared a single day yet. The System is still waiting.]`);
+      lines.push(`[No training detected from ${p.displayName} since ${shortDate(p.lastDone)}. ${STING_HARSH}]`);
     }
     lines.push(`[${done.length}/${players.length} cleared. Gate closes at midnight.]`);
   }
