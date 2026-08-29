@@ -1,5 +1,5 @@
-# Dev server: python http.server с отключенным кешем, чтобы правки было видно
-# по обычной перезагрузке. File System Access API работает на localhost без https.
+# Dev server: python http.server with caching disabled so edits show up on
+# a plain reload. File System Access API works on localhost without https.
 import http.server
 import sys
 
@@ -24,5 +24,5 @@ if __name__ == "__main__":
     try:
         server = _Server(("127.0.0.1", port), NoCacheHandler)
     except OSError:
-        sys.exit(0)  # уже запущен
+        sys.exit(0)  # already running
     server.serve_forever()

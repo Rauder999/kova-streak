@@ -12,19 +12,19 @@
     }
   ],
   "triggers": {
-    // 00:00 UTC = 18:00 в Денвере летом (MDT), 17:00 зимой (MST):
-    // время выбрано Pasha (2026-08-26), после конца летнего времени
-    // в ноябре сдвинуть на "0 1 * * *", если снова захочет ровно 18:00
+    // 00:00 UTC = 18:00 in Denver in summer (MDT), 17:00 in winter (MST):
+    // time chosen by Pasha (2026-08-26), after DST ends in November
+    // shift to "0 1 * * *" if he wants exactly 18:00 again
     "crons": ["0 0 * * *"]
   },
   "vars": {
     "DISCORD_CLIENT_ID": "1539370154792853604",
-    // через запятую, кто видит вкладку Admin
+    // comma-separated, who can see the Admin tab
     "ADMIN_DISCORD_IDS": "614861553790877709",
     "SITE_URL": "https://rauder999.github.io/kova-streak/",
-    // пускаем только участников этого сервера
+    // only members of this server are let in
     "GUILD_ID": "1324116611849916446",
-    // день группы считается по этой таймзоне (машина Rauder, Mountain Time)
+    // the group day is computed in this timezone (Rauder's machine, Mountain Time)
     "TZ_NAME": "America/Denver"
   }
 }

@@ -1,11 +1,11 @@
-// Личная статистика: бейзлайны по сценарию, дельты сегодняшнего дня,
-// диагноз-коды по нишам (clicking / tracking / switching).
+// Personal stats: per-scenario baselines, deltas for the current day,
+// diagnosis codes per niche (clicking / tracking / switching).
 //
-// Главный принцип (выстрадан в AimSama и закреплен фидбеком Rauder):
-// НИ ОДНОЙ абсолютной оценки. Каждая метрика сравнивается только с
-// собственным бейзлайном игрока на том же сценарии. Разброс TTK сам по
-// себе не значит ничего (геометрия спавнов!), "чоки" считаются как хвост
-// против своей же нормы этого сценария.
+// Core principle (hard-earned in AimSama and locked in by Rauder's feedback):
+// NOT A SINGLE absolute judgment. Every metric is compared only against the
+// player's own baseline on the same scenario. TTK spread by itself means
+// nothing (spawn geometry!), "chokes" are counted as a tail against the
+// same scenario's own norm.
 
 function median(arr) {
   if (!arr.length) return null;
@@ -18,7 +18,7 @@ const pickNum = (runs, f) => runs.map(f).filter((v) => v != null && !Number.isNa
 
 const MIN_BASELINE_RUNS = 4;
 
-// Бейзлайн сценария: медианы по истории (без сегодняшнего дня)
+// Scenario baseline: medians over history (excluding today)
 export function scenarioBaseline(historyRuns) {
   if (historyRuns.length < MIN_BASELINE_RUNS) return null;
   return {
@@ -31,10 +31,10 @@ export function scenarioBaseline(historyRuns) {
   };
 }
 
-// Семейство сценария. Имя решает там, где данные слепы: покебол (статичные
-// шары, зажатый М1) и динамик (движущиеся цели под клик: pasu без track/smooth
-// в имени, 3-click и т.п.) по CSV неотличимы от трекинга и статика, а советы
-// им нужны принципиально другие.
+// Scenario family. The name decides where the data is blind: pokeball (static
+// orbs, held-down M1) and dynamic (moving targets to click: pasu without
+// track/smooth in the name, 3-click and the like) look identical in the CSV
+// to tracking and statics, yet they need fundamentally different advice.
 function scenarioKind(name, runs) {
   if (/pokeball/i.test(name)) return 'pokeball';
   if (/\b\d[- ]?click\b|dynamic/i.test(name)) return 'dynamic';
@@ -45,9 +45,9 @@ function scenarioKind(name, runs) {
   return top && top[0] !== 'unknown' ? top[0] : null;
 }
 
-// Ниша для группировки вердикта: покеболы живут в трекинге, динамик в
-// кликинге (семейства ассистирующих скиллов по 4BK), но их KIND остается
-// своим и определяет советы.
+// Niche for verdict grouping: pokeballs live under tracking, dynamic under
+// clicking (families of assisting skills per 4BK), but their KIND remains
+// their own and determines the advice.
 function scenarioNiche(name, runs) {
   const kind = scenarioKind(name, runs);
   if (kind === 'pokeball') return 'tracking';
@@ -55,9 +55,9 @@ function scenarioNiche(name, runs) {
   return kind;
 }
 
-// Отчет дня: по каждому сценарию, сыгранному в выбранную дату, дельты
-// против бейзлайна (только раны ДО этой даты); агрегация в ниши; коды.
-// Работает для любого прошедшего дня, не только сегодняшнего.
+// Daily report: for each scenario played on the chosen date, deltas against
+// the baseline (only runs BEFORE that date); aggregation into niches; codes.
+// Works for any past day, not just today.
 export function buildDailyReport(allRuns, today) {
   const byScenario = new Map();
   for (const r of allRuns) {
@@ -66,7 +66,7 @@ export function buildDailyReport(allRuns, today) {
   }
   const playedNames = new Set(allRuns.filter((r) => r.date === today).map((r) => r.scenario));
 
-  // ржавчина: дней с прошлой сессии до сегодняшней
+  // rust: days from the previous session to today's
   const dates = [...new Set(allRuns.map((r) => r.date))].sort();
   const prevDate = dates.filter((d) => d < today).pop() || null;
   const gapDays = prevDate ? Math.round((new Date(today) - new Date(prevDate)) / 86400000) : null;
@@ -85,7 +85,7 @@ export function buildDailyReport(allRuns, today) {
     const ttkToday = median(pickNum(todayRuns, (r) => r.ttkMed));
     const tailToday = median(pickNum(todayRuns, (r) => r.ttkTail));
     const dropToday = median(pickNum(todayRuns, (r) => r.accDrop));
-    // рекорд "на тот момент": будущее относительно выбранного дня не подглядываем
+    // best "as of that moment": no peeking at the future relative to the chosen day
     const allTimeBest = Math.max(...pickNum(runs.filter((r) => r.date <= today), (r) => r.score));
     scenarios.push({
       name,
@@ -105,7 +105,7 @@ export function buildDailyReport(allRuns, today) {
     });
   }
 
-  // ---------- коды диагнозов по нишам ----------
+  // ---------- diagnosis codes per niche ----------
   const niches = {};
   for (const s of scenarios) {
     if (!s.niche || s.niche === 'unknown') continue;
@@ -122,10 +122,10 @@ export function buildDailyReport(allRuns, today) {
     n.worst = [...withBase].sort((a, b) => (a.scoreDelta ?? 0) - (b.scoreDelta ?? 0))[0] || null;
     n.best = [...withBase].sort((a, b) => (b.scoreDelta ?? 0) - (a.scoreDelta ?? 0))[0] || null;
 
-    // ЧЕСТНОСТЬ (фидбек Rauder): CSV не видит руку в трекинге (инвинсибл и
-    // реген-боты, разная семантика точности), любые "диагнозы" оттуда были
-    // бы гаданием. Трекинг не анализируем: коуч дает общее задание по
-    // доктрине 4BK, скоры остаются только в таблице.
+    // HONESTY (per Rauder's feedback): the CSV cannot see the hand in
+    // tracking (invincible and regen bots, different accuracy semantics),
+    // any "diagnoses" from it would be guesswork. No tracking analysis:
+    // the coach gives a general 4BK-doctrine task, scores stay in the table only.
     if (n.niche === 'tracking') {
       n.codes = ['NO_MEASURE'];
       n.aspects = null;
@@ -134,17 +134,17 @@ export function buildDailyReport(allRuns, today) {
     }
 
     if (n.niche === 'clicking') {
-      // темповые коды только по чистым статикам: на динамике долгий килл
-      // это часто правильная техника (трек перед кликом), а не пересиживание
+      // pacing codes only on pure statics: on dynamic a long kill is often
+      // proper technique (tracking before the click), not overconfirming
       const statics = withBase.filter((s) => s.kind === 'clicking');
-      // стреляет быстрее обычного и попадает хуже = клики на авось
+      // firing faster than usual and hitting worse = hail-mary clicking
       if (n.accDelta != null && n.accDelta <= -0.05 && statics.some((s) => s.ttkRatio != null && s.ttkRatio <= 1.05)) n.codes.add('SPAM');
-      // медленнее обычного при своей же точности = пересиживание
+      // slower than usual while holding one's accuracy = overconfirming
       if (statics.some((s) => s.ttkRatio != null && s.ttkRatio >= 1.15 && (s.accDelta ?? 0) >= -0.01)) n.codes.add('HESITATE');
     }
-    // чоки: хвост длинных киллов заметно выше своей нормы
+    // chokes: the tail of long kills is noticeably above its own norm
     if (withBase.some((s) => s.tailToday != null && s.tailToday > Math.max(0.08, ((s.base && s.base.ttkTail) || 0) * 1.5))) n.codes.add('CHOKES');
-    // к концу ранов точность стабильно проседает = зажим
+    // accuracy steadily fades by the end of runs = tensing up
     const drops = pickNum(n.scenarios, (s) => s.dropToday);
     if (drops.length >= 2 && median(drops) <= -0.06) n.codes.add('FATIGUE');
     if (n.scoreDelta != null && n.scoreDelta <= -0.03) n.codes.add('SOFT');
@@ -152,8 +152,8 @@ export function buildDailyReport(allRuns, today) {
     if (!n.codes.size) n.codes.add('OK');
     n.codes = [...n.codes].sort();
 
-    // аспекты ниши против своей нормы: даже в зеленый день у тренера
-    // должен быть материал для следующего задания
+    // niche aspects vs their own norm: even on a green day the coach must
+    // have material for the next assignment
     n.aspects = {
       accDeltaPp: n.accDelta != null ? Math.round(n.accDelta * 100) : null,
       paceRatio: (() => { const v = pickNum(withBase, (s) => s.ttkRatio); return v.length ? Math.round(median(v) * 100) / 100 : null; })(),
@@ -166,8 +166,8 @@ export function buildDailyReport(allRuns, today) {
     n.pbs = n.scenarios.filter((s) => s.isPB).map((s) => s.name);
   }
 
-  // сортировка ниш: измеренные по проблемности, трекинг всегда последним
-  // (у него нет честных чисел, чтобы претендовать на "худший")
+  // niche ordering: measured ones by how problematic they are, tracking always
+  // last (it has no honest numbers to claim the "worst" spot)
   const measured = Object.values(niches).filter((n) => n.niche !== 'tracking')
     .sort((a, b) => (a.scoreDelta ?? 0) - (b.scoreDelta ?? 0));
   const trackingNiche = Object.values(niches).find((n) => n.niche === 'tracking');
@@ -185,8 +185,8 @@ export function buildDailyReport(allRuns, today) {
   return report;
 }
 
-// Хэш состояния: коды + дельты, огрубленные до 5%. Пока хэш не меняется,
-// новый текст коуча не генерируется, ответ берется из кэша.
+// State hash: codes + deltas coarsened to 5%. While the hash stays the same,
+// no new coach text is generated, the answer comes from the cache.
 function hashReport(report) {
   const bucket = (v) => (v == null ? 'x' : Math.round(v * 20));
   const src = report.niches.map((n) => n.niche === 'tracking'
@@ -198,9 +198,9 @@ function hashReport(report) {
   return h.toString(36) + '-' + src.length;
 }
 
-// Доктринные подсказки трекинга. Ротация детерминирована по номеру дня:
-// соседние дни гарантированно получают разные подсказки, и никакая
-// забывчивость модели этого не сломает.
+// Doctrine cues for tracking. Rotation is deterministic by day number:
+// adjacent days are guaranteed to get different cues, and no model
+// forgetfulness can break that.
 export const TRACKING_CUES = [
   'stay smooth through the strafe and react only at the instant of a direction change',
   'track where the target is going, not where it was a moment ago',
@@ -216,9 +216,9 @@ export function trackingCueForDay(date) {
   return TRACKING_CUES[Number(date.slice(-2)) % TRACKING_CUES.length];
 }
 
-// Трекинг-строка собирается на клиенте, без модели: данных там нет,
-// подсказка доктринная, ротация по дню, якорь на сыгранном сценарии.
-// Модель дважды подменяла выданную подсказку, детерминизм надежнее.
+// The tracking line is assembled on the client, without the model: no data
+// there, the cue is doctrinal, rotation by day, anchored to a played scenario.
+// The model swapped out the given cue twice, determinism is more reliable.
 export function buildTrackingLine(report) {
   const t = report.niches.find((n) => n.niche === 'tracking');
   if (!t || !t.scenarios.length) return null;
@@ -235,7 +235,7 @@ export function buildTrackingLine(report) {
   return `[TRACKING] On ${short}, ${cue}.`;
 }
 
-// Компактный пейлоад для воркера-коуча
+// Compact payload for the coach worker
 export function coachPayload(report) {
   const pct = (v) => (v == null ? null : Math.round(v * 100));
   return {
@@ -243,7 +243,7 @@ export function coachPayload(report) {
     rustyDays: report.rusty ? report.gapDays : null,
     niches: report.niches.map((n) => n.niche === 'tracking'
       ? {
-          // трекинг без диагноза: только что игралось, для общего задания
+          // tracking without a diagnosis: just what was played, for the general assignment
           niche: 'tracking',
           codes: n.codes,
           runsToday: n.scenarios.reduce((a, s) => a + s.runsToday, 0),

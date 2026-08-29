@@ -1,7 +1,7 @@
-// KOVA STREAK API: Discord OAuth2, хранение отметок в KV, ежедневный дайджест
-// в канал Discord через вебхук.
+// KOVA STREAK API: Discord OAuth2, completion marks stored in KV, daily digest
+// posted to a Discord channel via webhook.
 //
-// Биндинги и переменные (см. wrangler.jsonc и README.md):
+// Bindings and variables (see wrangler.jsonc and README.md):
 //   KV      KOVA
 //   vars    DISCORD_CLIENT_ID, ADMIN_DISCORD_IDS, SITE_URL, GUILD_ID, TZ_NAME
 //   secrets DISCORD_CLIENT_SECRET, SESSION_SECRET, DISCORD_WEBHOOK_URL
@@ -14,7 +14,7 @@ const ALLOWED_ORIGINS = [
 
 const SESSION_DAYS = 60;
 
-// ---------- утилиты ----------
+// ---------- utilities ----------
 
 function corsHeaders(origin) {
   const allowed = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
@@ -49,7 +49,7 @@ async function hmacKey(secret) {
   return crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify']);
 }
 
-// Токен: base64url(payload).base64url(подпись). Фронт читает payload, подпись проверяем тут.
+// Token: base64url(payload).base64url(signature). The frontend reads the payload, the signature is verified here.
 async function signToken(payload, secret) {
   const body = b64url.encode(enc.encode(JSON.stringify(payload)));
   const key = await hmacKey(secret);
@@ -72,11 +72,11 @@ async function verifyToken(token, secret) {
   }
 }
 
-// ---------- даты ----------
+// ---------- dates ----------
 
-// Локальная дата группы. Cloudflare живет в UTC, а машина админа в Mountain
-// Time с летним временем, поэтому фиксированный сдвиг не годится: берем
-// настоящую таймзону через Intl (en-CA дает формат YYYY-MM-DD).
+// The group's local date. Cloudflare runs in UTC while the admin's machine is in
+// Mountain Time with DST, so a fixed offset will not do: we take
+// the real timezone via Intl (en-CA gives the YYYY-MM-DD format).
 function groupDate(env, at = Date.now()) {
   const tz = env.TZ_NAME || 'America/Denver';
   return new Date(at).toLocaleDateString('en-CA', { timeZone: tz });
@@ -99,12 +99,12 @@ function monthDays(month) {
 const isDate = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
 const isMonth = (s) => typeof s === 'string' && /^\d{4}-\d{2}$/.test(s);
 
-// "2026-08-22" -> "Aug 22": в сообщениях даты всегда сокращенные
+// "2026-08-22" -> "Aug 22": dates in messages are always abbreviated
 function shortDate(date) {
   return new Date(date + 'T12:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
 }
 
-// Понедельник недели, к которой относится дата: ключ недельной квоты выходных
+// Monday of the week the date belongs to: the key for the weekly rest-day quota
 function weekKeyOf(date) {
   const d = new Date(date + 'T00:00:00Z');
   const dow = (d.getUTCDay() + 6) % 7;
@@ -127,8 +127,8 @@ async function listAll(env, prefix) {
   return out;
 }
 
-// Значения отметок и профилей дублируются в metadata, поэтому групповой вид
-// собирается двумя list-запросами без единого get.
+// Completion and profile values are duplicated into metadata, so the group view
+// is assembled with two list requests and not a single get.
 async function loadGroup(env) {
   const [userKeys, compKeys] = await Promise.all([
     listAll(env, 'user:'),
@@ -157,9 +157,9 @@ async function loadGroup(env) {
   return { users, byUser };
 }
 
-// Стрик: подряд идущие выполненные дни, заканчивая сегодня. Если сегодня еще
-// не закрыт, день не обнуляет стрик, он просто пока не считается. Выходной
-// (rest day) прозрачен: стрик через него проходит, не растя и не обрываясь.
+// Streak: consecutive completed days, ending today. If today is not
+// closed yet, the day does not reset the streak, it just does not count yet. A rest
+// day is transparent: the streak passes through it, neither growing nor breaking.
 function computeStreak(byDate, today, rest) {
   let n = 0;
   if (byDate[today] && byDate[today].done) n++;
@@ -172,8 +172,8 @@ function computeStreak(byDate, today, rest) {
   return n;
 }
 
-// Пропуски за месяц. Сегодняшний день не считается пропуском, пока он не
-// закончился; дни до вступления в группу и объявленные выходные тоже нет.
+// Missed days for the month. Today does not count as missed until it
+// is over; neither do days before joining the group or declared rest days.
 function computeMissed(byDate, month, today, joinedDate, rest) {
   const days = monthDays(month);
   let missed = 0;
@@ -189,9 +189,9 @@ function computeMissed(byDate, month, today, joinedDate, rest) {
 async function buildStandings(env, month) {
   const today = groupDate(env);
   const { users: allUsers, byUser } = await loadGroup(env);
-  // Зрители скрыты отовсюду (решение Pasha 2026-08-26): кто за всю историю
-  // не сыграл ни одного рана, не существует для лидерборда, календаря и
-  // сообщений. Появляются сами, как только их дашборд запостит первый ран.
+  // Spectators are hidden everywhere (per Pasha's decision, 2026-08-26): anyone who has
+  // not played a single run in all of history does not exist for the leaderboard, the calendar
+  // and messages. They appear on their own as soon as their dashboard posts the first run.
   const users = allUsers.filter((u) => {
     const recs = byUser.get(u.userId) || {};
     return Object.values(recs).some((r) => r.done || r.completedRuns > 0);
@@ -203,16 +203,16 @@ async function buildStandings(env, month) {
     const rest = new Set(Array.isArray(restLists[i]) ? restLists[i] : []);
     const byDate = {};
     for (const [d, rec] of Object.entries(all)) if (d.startsWith(month + '-')) byDate[d] = rec;
-    // дней недели, закрытых на текущей неделе (для колонки This week)
+    // days closed during the current week (for the This week column)
     const wk = weekKeyOf(today);
     let weekDone = 0;
     for (let d = wk; d <= today; d = shiftDate(d, 1)) if (all[d] && all[d].done) weekDone++;
-    // последний закрытый день за всю историю: дайджест по нему отличает
-    // "не успел сегодня" от "молчит уже который день"
+    // last closed day in all of history: the digest uses it to tell
+    // "did not make it today" from "has been silent for days"
     let lastDone = null;
     for (const [d, rec] of Object.entries(all)) if (rec.done && (!lastDone || d > lastDone)) lastDone = d;
-    // дней тишины к сегодняшнему дню, НЕ считая запланированные выходные:
-    // легальный отдых не является пропуском и не двигает игрока к жесткому тону
+    // days of silence as of today, NOT counting scheduled rest days:
+    // legitimate rest is not a miss and does not push the player toward the harsh tone
     let idleDays = null;
     if (lastDone) {
       idleDays = 0;
@@ -245,9 +245,9 @@ function discordRedirectUri(request) {
   return new URL('/auth/callback', new URL(request.url).origin).toString();
 }
 
-// Куда возвращать игрока после логина. Проверяем origin по белому списку:
-// иначе ссылку вида /auth/login?redirect=evil.com можно подсунуть жертве
-// и увести ее сессионный токен из фрагмента URL.
+// Where to send the player back after login. The origin is checked against the whitelist:
+// otherwise a link like /auth/login?redirect=evil.com could be slipped to a victim
+// to steal their session token from the URL fragment.
 function safeRedirect(target, env) {
   const fallback = env.SITE_URL || ALLOWED_ORIGINS[0];
   if (!target) return fallback;
@@ -313,7 +313,7 @@ async function handleCallback(request, env) {
   }
   const me = await meRes.json();
 
-  // Пускаем только участников сервера группы, если GUILD_ID задан.
+  // Only members of the group's server are let in, if GUILD_ID is set.
   if (env.GUILD_ID) {
     const gRes = await fetch('https://discord.com/api/v10/users/@me/guilds', {
       headers: { Authorization: `Bearer ${tokens.access_token}` },
@@ -403,9 +403,9 @@ async function handleApi(request, env, url, cors, ctx) {
     const body = await request.json().catch(() => null);
     if (!body || !isDate(body.date)) return json({ error: 'date is required' }, 400, cors);
 
-    // Дату присылает клиент (его локальный день). Принимаем вчера, сегодня
-    // и завтра по времени группы: игрок в часовом поясе восточнее админа
-    // живет на день впереди, а задний ход дальше вчера все равно закрыт.
+    // The client sends the date (its local day). We accept yesterday, today
+    // and tomorrow in group time: a player in a timezone east of the admin
+    // lives a day ahead, and backdating beyond yesterday is closed off anyway.
     const today = groupDate(env);
     if (![shiftDate(today, -1), today, shiftDate(today, 1)].includes(body.date)) {
       return json({ error: 'Date out of range' }, 400, cors);
@@ -417,12 +417,12 @@ async function handleApi(request, env, url, cors, ctx) {
 
     const key = `completion:${user.uid}:${body.date}`;
     const prev = await env.KOVA.get(key, 'json');
-    // Первый переход через 100% за этот день: prev либо не было, либо он
-    // был частичным. Повторные посты того же дня (перезагрузка вкладки)
-    // анонс не триггерят.
+    // First crossing of 100% for this day: prev either did not exist or was
+    // partial. Repeated posts for the same day (a tab reload)
+    // do not trigger the announcement.
     const firstCompletionToday = done && !(prev && prev.done);
-    // День уже закрыт: не даем случайно откатить его частичным сканом
-    // (например, после смены плейлисты в середине дня).
+    // The day is already closed: do not let a partial scan accidentally roll it back
+    // (for example, after a playlist change in the middle of the day).
     if (!(prev && prev.done && !done)) {
       const record = {
         completedRuns,
@@ -440,13 +440,13 @@ async function handleApi(request, env, url, cors, ctx) {
       const m = k.metadata || {};
       all[k.name.slice(`completion:${user.uid}:`.length)] = { completedRuns: m.c || 0, requiredRuns: m.r || 0, done: !!m.d };
     }
-    // list после put в KV eventually consistent: свежую запись подкладываем сами
+    // list after put is eventually consistent in KV: we slot the fresh record in ourselves
     if (!(prev && prev.done && !done)) all[body.date] = { completedRuns, requiredRuns, done };
     const profile = await env.KOVA.get(`user:${user.uid}`, 'json');
     const restArr = (await env.KOVA.get(`rest:${user.uid}`, 'json')) || [];
     const rest = new Set(restArr);
-    // Якорь стрика = верхний закрытый день игрока. Игрок восточнее группы
-    // живет на день впереди: его "завтра" уже закрыто, стрик идет оттуда.
+    // Streak anchor = the player's topmost closed day. A player east of the group
+    // lives a day ahead: their "tomorrow" is already closed, the streak runs from there.
     const upD = shiftDate(today, 1);
     const anchor = all[upD] && all[upD].done ? upD : today;
     const streak = computeStreak(all, anchor, rest);
@@ -461,9 +461,9 @@ async function handleApi(request, env, url, cors, ctx) {
     }, 200, cors);
   }
 
-  // выходные: до 2 в неделю, объявлять СТРОГО до начала дня по времени
-  // группы. Задним числом и в течение дня нельзя: это и есть защита от
-  // "забыл поиграть, оформлю выходной вечером".
+  // rest days: up to 2 per week, declared STRICTLY before the day starts in group
+  // time. Not retroactively and not during the day: that is exactly the guard against
+  // "forgot to play, will file a rest day in the evening".
   if (path === '/api/rest' && request.method === 'GET') {
     const dates = (await env.KOVA.get(`rest:${user.uid}`, 'json')) || [];
     return json({ dates, quota: REST_QUOTA_PER_WEEK, today: groupDate(env) }, 200, cors);
@@ -493,18 +493,18 @@ async function handleApi(request, env, url, cors, ctx) {
     } else {
       dates = dates.filter((d) => d !== body.date);
     }
-    // прошлое старше 4 месяцев не нужно даже для длинных стриков
+    // history older than 4 months is not needed even for long streaks
     const keepFrom = shiftDate(today, -120);
     dates = dates.filter((d) => d >= keepFrom).sort();
     await env.KOVA.put(`rest:${user.uid}`, JSON.stringify(dates));
     return json({ dates, quota: REST_QUOTA_PER_WEEK, today }, 200, cors);
   }
 
-  // Личные рекорды по сценариям недельной плейлисты. Клиент шлет свои бесты,
-  // воркер хранит их в pb:{uid} (док пишет только сам владелец, гонок нет).
-  // Улучшение существующего беста запускает поиск павших рекордов и пинг
-  // (announceRecords). Первая загрузка целиком тихая: это бэйзлайн истории,
-  // а не событие, иначе в день релиза был бы шторм из старых рекордов.
+  // Personal bests for the weekly playlist's scenarios. The client sends its bests,
+  // the worker stores them in pb:{uid} (only the owner writes the doc, no races).
+  // Improving an existing best triggers a search for fallen records and a ping
+  // (announceRecords). The first upload is entirely silent: it is a history baseline,
+  // not an event, otherwise release day would bring a storm of old records.
   if (path === '/api/scores' && request.method === 'POST') {
     const body = await request.json().catch(() => null);
     const incoming = body && body.bests;
@@ -526,13 +526,13 @@ async function handleApi(request, env, url, cors, ctx) {
       if (!name || !Number.isFinite(score) || score <= 0) continue;
       const old = doc[name];
       if (old && score <= old.s) continue;
-      // i:1 только у настоящих улучшений: бэйзлайны истории и первые раны
-      // нового сценария не считаются рекордами дня в дайджесте
+      // i:1 only on real improvements: history baselines and first runs
+      // of a new scenario do not count as records of the day in the digest
       const isImp = !firstUpload && !!old;
       doc[name] = isImp ? { s: score, at: Date.now(), i: 1 } : { s: score, at: Date.now() };
       changed = true;
-      // пингуем только улучшение УЖЕ известного беста: новый сценарий в доке
-      // это тоже бэйзлайн (первая сыгранная неделя с ним), не событие
+      // ping only on improving an ALREADY known best: a new scenario in the doc
+      // is also a baseline (the first week played with it), not an event
       if (isImp) improvements.push({ name, oldS: old.s, newS: score });
     }
     if (changed) await env.KOVA.put(key, JSON.stringify(doc));
@@ -546,9 +546,9 @@ async function handleApi(request, env, url, cors, ctx) {
     return json(await buildStandings(env, month), 200, cors);
   }
 
-  // трехстрочный коуч: правила на клиенте нашли коды диагнозов, ИИ здесь
-  // только формулирует. Кэш по хэшу состояния: пока диагноз не изменился,
-  // повторные запросы не тратят ни токена.
+  // three-line coach: client-side rules found the diagnosis codes, the AI here
+  // only phrases them. Cached by state hash: while the diagnosis has not changed,
+  // repeated requests do not spend a single token.
   if (path === '/api/coach' && request.method === 'POST') {
     if (!(await coachAllowed(env, user))) return json({ error: 'Coach is not enabled for you yet' }, 403, cors);
     if (!env.ANTHROPIC_API_KEY) return json({ error: 'Coach is not configured yet (ANTHROPIC_API_KEY)' }, 503, cors);
@@ -556,7 +556,7 @@ async function handleApi(request, env, url, cors, ctx) {
     if (!body || typeof body.stateHash !== 'string' || !Array.isArray(body.niches) || !body.niches.length) {
       return json({ error: 'stateHash and niches are required' }, 400, cors);
     }
-    // версия в ключе: смена поколения промпта хоронит старые кэшированные вердикты
+    // version in the key: a new prompt generation buries the old cached verdicts
     const cacheKey = `coach:v7:${user.uid}:${body.stateHash.slice(0, 64)}`;
     const cached = await env.KOVA.get(cacheKey, 'json');
     if (cached) return json({ lines: cached.lines, cached: true }, 200, cors);
@@ -567,7 +567,7 @@ async function handleApi(request, env, url, cors, ctx) {
     return json({ lines, cached: false }, 200, cors);
   }
 
-  // ручная отправка дайджеста из админки: тот же текст, что уйдет по крону
+  // manual digest send from the admin panel: the same text the cron will send
   if (path === '/api/digest' && request.method === 'POST') {
     if (!user.admin) return json({ error: 'Admin only' }, 403, cors);
     if (!env.DISCORD_WEBHOOK_URL) return json({ error: 'Webhook is not configured yet (DISCORD_WEBHOOK_URL)' }, 400, cors);
@@ -578,15 +578,15 @@ async function handleApi(request, env, url, cors, ctx) {
   return json({ error: 'Not found' }, 404, cors);
 }
 
-// Обновление профилей бот-токеном: у OAuth-входа снимок аватарки одноразовый,
-// а бот может спрашивать Discord когда угодно. Крон дергает это ежедневно.
+// Profile refresh via the bot token: the OAuth login takes a one-off avatar snapshot,
+// while the bot can ask Discord at any time. The cron calls this daily.
 async function refreshProfiles(env) {
   if (!env.DISCORD_BOT_TOKEN) return;
   try {
     const list = await listAll(env, 'user:');
     for (const k of list) {
       const uid = k.name.slice('user:'.length);
-      // без DiscordBot-UA дискордовский edge молча отдает пустой 403
+      // without a DiscordBot UA the Discord edge silently returns an empty 403
       const res = await fetch(`https://discord.com/api/v10/users/${uid}`, {
         headers: {
           Authorization: `Bot ${env.DISCORD_BOT_TOKEN}`,
@@ -609,14 +609,14 @@ async function refreshProfiles(env) {
   }
 }
 
-// ---------- ежедневный дайджест в Discord ----------
+// ---------- daily digest to Discord ----------
 
 const MILESTONES = new Set([3, 7, 14, 21, 30, 50, 75, 100]);
 
-// ---------- коуч ----------
+// ---------- coach ----------
 
-// Флаг раскатки: KV flag:coach = {"all":true} или {"users":["discordId",...]}.
-// Меняется правкой KV, без передеплоя.
+// Rollout flag: KV flag:coach = {"all":true} or {"users":["discordId",...]}.
+// Changed by editing KV, no redeploy needed.
 async function coachAllowed(env, user) {
   const flag = await env.KOVA.get('flag:coach', 'json');
   if (!flag) return false;
@@ -624,11 +624,11 @@ async function coachAllowed(env, user) {
   return Array.isArray(flag.users) && flag.users.includes(user.uid);
 }
 
-// Общая база знаний, дистиллирована из материалов тренера 4BK и доктрины
-// Voltaic/Aimer7, БЕЗ персонального контекста. Ищут правила на клиенте,
-// модель только формулирует советы человеческим языком.
-// Единственный источник знаний коуча: knowledge/coach-kb.md, вшивается сюда
-// дословно (секция KNOWLEDGE BASE). Меняешь базу - меняй файл и эту константу.
+// Shared knowledge base, distilled from coach 4BK's materials and the
+// Voltaic/Aimer7 doctrine, WITHOUT personal context. The client-side rules do the finding,
+// the model only phrases the advice in human language.
+// The coach's only source of knowledge: knowledge/coach-kb.md, embedded here
+// verbatim (the KNOWLEDGE BASE section). When you change the base, change the file and this constant.
 const COACH_PROMPT = `You are the player's aim coach (KovaaK's, training for The Finals). Every answer must pass through the KNOWLEDGE BASE below: it is the canonical doctrine (distilled from a real aim coach's full body of work). Do not invent theory outside it.
 
 PAYLOAD SEMANTICS:
@@ -840,8 +840,8 @@ async function generateCoachLines(env, body) {
     },
     body: JSON.stringify({
       model: 'claude-sonnet-5',
-      // щедрый лимит: у думающих моделей рассуждение ест бюджет до текста,
-      // 300 токенов обрезали ответ на полуслове (грабли, знакомые по AimSama)
+      // generous limit: with thinking models the reasoning eats the budget before the text,
+      // 300 tokens used to cut the reply off mid-sentence (a pitfall known from AimSama)
       max_tokens: 6000,
       system: COACH_PROMPT,
       messages: [{ role: 'user', content: 'Diagnosis:\n' + JSON.stringify({ rustyDays: body.rustyDays || null, niches: body.niches }) }],
@@ -857,25 +857,25 @@ async function generateCoachLines(env, body) {
   return lines.length ? lines : null;
 }
 
-// Голос "Системы" из манхв: холодные строки в квадратных скобках внутри
-// серого код-блока Discord. Формульность и повторяемость - часть эстетики.
+// The manhwa "System" voice: cold lines in square brackets inside
+// a gray Discord code block. The formulaic, repetitive style is part of the aesthetic.
 function systemBlock(lines) {
   return '```\n' + lines.join('\n') + '\n```';
 }
 
-// Мгновенный пост в канал, когда игрок впервые за день закрыл плейлисту.
-// Социальное давление капает весь день, а не одним вечерним залпом.
-// Никогда не ломает сам чек-ин: все ошибки глотаются.
-// ВАЖНО: счетчик "N/M complete" считается по ДАТЕ ЗАВЕРШЕННОГО ДНЯ игрока,
-// а не по дню группы: европеец, закрывший свое 26-е, открывает счет 26-го
-// (1/15), а не приписывается к хвосту чужого 25-го.
+// Instant post to the channel when a player closes the playlist for the first time that day.
+// Social pressure drips in all day long instead of one evening volley.
+// Never breaks the check-in itself: all errors are swallowed.
+// IMPORTANT: the "N/M complete" counter is computed for the DATE OF THE PLAYER'S COMPLETED DAY,
+// not the group's day: a European closing their 26th opens the count for the 26th
+// (1/15) instead of being tacked onto the tail of someone else's 25th.
 async function announceCompletion(env, user, streak, date) {
   if (!env.DISCORD_WEBHOOK_URL) return;
   try {
     const { users: allUsers, byUser } = await loadGroup(env);
-    // знаменатель N/M: только закрывавшие хоть один день (тот же ростер,
-    // что в дайджесте) + сам завершивший (его свежая запись могла еще не
-    // долететь до листинга)
+    // N/M denominator: only those who have closed at least one day (the same roster
+    // as in the digest) + the completer themselves (their fresh record may not have
+    // reached the listing yet)
     const active = allUsers.filter((u) => {
       if (u.userId === user.uid) return true;
       const recs = byUser.get(u.userId) || {};
@@ -886,7 +886,7 @@ async function announceCompletion(env, user, streak, date) {
       const rec = (byUser.get(u.userId) || {})[date];
       if (rec && rec.done) doneCount++;
     }
-    // read-your-write в KV не гарантирован между колами: себя считаем всегда
+    // read-your-write is not guaranteed in KV across calls: we always count ourselves
     const meIn = (byUser.get(user.uid) || {})[date];
     if (!(meIn && meIn.done)) doneCount++;
     const users = active;
@@ -903,9 +903,9 @@ async function announceCompletion(env, user, streak, date) {
         ? `[Streak: ${streak} days. Milestone reached.]`
         : `[Streak: ${streak} days.]`);
     }
-    // Признание роста после сухого факта: ротация по дню и позиции в очереди,
-    // чтобы два поста подряд не совпадали. Первый и последний за день получают
-    // свои специальные строки вместо общего пула.
+    // Growth recognition after the dry fact: rotated by day and by position in the queue
+    // so that two consecutive posts do not match. The first and the last of the day get
+    // their own special lines instead of the shared pool.
     const FLAVOR = [
       '[Growth is recorded. The System is watching.]',
       '[Consistency compounds. Progress logged.]',
@@ -932,32 +932,32 @@ async function announceCompletion(env, user, streak, date) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content: systemBlock(lines), allowed_mentions: { parse: [] } }),
     });
-  } catch { /* пост не критичен */ }
+  } catch { /* the post is not critical */ }
 }
 
-// Жала дайджеста, выбор Паши: до 3 дней тишины ротация двух средних,
-// от 3 дней самое злое. Дни тишины считаются БЕЗ запланированных выходных.
+// Digest stings, Pasha's pick: under 3 days of silence a rotation of the two medium ones,
+// from 3 days on the meanest one. Days of silence are counted WITHOUT scheduled rest days.
 const STING_HARSH = 'The System issues no penalty. Your aim is the penalty.';
 const STING_MILD = [
   'The others are training. The gap grows either way.',
   'Every skipped day is handed to the others.',
 ];
 
-// Дневной отчет в голосе Системы. Три уровня тона: выполнившим признание,
-// недоделавшим (меньше 3 дней тишины) укол из ротации, молчащим 3+ дней
-// жестко и поименно. Выходные прозрачны: сегодняшний отдыхающий уходит в
-// "On scheduled leave", а прошлые выходные не считаются днями тишины.
-// Пинг роли живет ВНЕ код-блока (внутри Discord его не резолвит), id роли
-// в KV config:aimChadRoleId, без него дайджест уходит просто без пинга.
+// Daily report in the System's voice. Three tone levels: recognition for those who completed,
+// a rotating jab for the incomplete (under 3 days of silence), harsh and by name
+// for those silent 3+ days. Rest days are transparent: today's rester goes into
+// "On scheduled leave", and past rest days do not count as days of silence.
+// The role ping lives OUTSIDE the code block (Discord does not resolve it inside), the role id
+// is in KV config:aimChadRoleId, without it the digest simply goes out without a ping.
 async function postDigest(env) {
   if (!env.DISCORD_WEBHOOK_URL) return;
 
   const today = groupDate(env);
   const standings = await buildStandings(env, today.slice(0, 7));
-  // В дайджесте существуют только закрывавшие хотя бы один день за всю
-  // историю (решение Pasha 2026-08-29): играющие частично без единого
-  // закрытого дня не получают ни строк, ни места в знаменателе. Появятся
-  // в вечернем отчете сами, как только впервые закроют день.
+  // Only those who have closed at least one day in all of history exist in
+  // the digest (per Pasha's decision, 2026-08-29): partial players without a single
+  // closed day get no lines and no place in the denominator. They will appear
+  // in the evening report on their own as soon as they close a day for the first time.
   const players = standings.players.filter((p) => p.lastDone !== null);
   if (!players.length) return;
 
@@ -967,8 +967,8 @@ async function postDigest(env) {
   const silent = missing.filter((p) => p.idleDays >= 3);
   const incomplete = missing.filter((p) => p.idleDays < 3);
 
-  // Отличившийся дня: больше всех НОВЫХ личных рекордов за сегодня
-  // (записи pb с флагом i, бэйзлайны истории не считаются)
+  // Distinction of the day: the most NEW personal bests today
+  // (pb records with the i flag, history baselines do not count)
   let distinction = null;
   try {
     const pbDocs = await Promise.all(players.map((p) => env.KOVA.get(`pb:${p.userId}`, 'json')));
@@ -990,7 +990,7 @@ async function postDigest(env) {
           ? `[Distinction: ${who.join(' and ')} set ${pbWord} each today. The System took note.]`
           : `[Distinction: ${who.length} players set ${pbWord} each today. The System took note.]`;
     }
-  } catch { /* строка опциональна */ }
+  } catch { /* the line is optional */ }
 
   const names = (list) => list.map((p) => p.displayName).join(', ');
   const lines = [`[Daily report: ${shortDate(today)}.]`];
@@ -1029,11 +1029,11 @@ async function postDigest(env) {
 
 const fmtScore = (s) => (s >= 100 ? Math.round(s) : Math.round(s * 10) / 10);
 
-// Система соперничества: пинг тех, чьи рекорды пали. Условия пинга:
-// пересечение (жертва была не ниже старого беста атакующего, иначе она
-// уже была позади и это не событие) и близкий обгон (новый скор выше
-// беста жертвы не больше чем на 5%: реванш реален, это дуэль, а не
-// доска позора). Одно сообщение на пару игрок+сценарий в день.
+// Rivalry system: ping those whose records have fallen. Ping conditions:
+// a crossing (the victim was not below the attacker's old best, otherwise they
+// were already behind and it is not an event) and a close overtake (the new score is above
+// the victim's best by no more than 5%: a rematch is realistic, this is a duel, not a
+// wall of shame). One message per player+scenario pair per day.
 async function announceRecords(env, user, improvements) {
   if (!env.DISCORD_WEBHOOK_URL) return;
   try {
@@ -1080,10 +1080,10 @@ async function announceRecords(env, user, improvements) {
         }),
       });
     }
-  } catch { /* пинг не критичен */ }
+  } catch { /* the ping is not critical */ }
 }
 
-// ---------- вход ----------
+// ---------- entry point ----------
 
 export default {
   async fetch(request, env, ctx) {
@@ -1107,11 +1107,11 @@ export default {
 
   async scheduled(event, env, ctx) {
     ctx.waitUntil((async () => {
-      // раз в день подтягиваем свежие аватарки/имена (смена в Discord
-      // доезжает без перелогина)
+      // once a day we pull fresh avatars/names (a change made in Discord
+      // arrives without a re-login)
       await refreshProfiles(env);
-      // авто-дайджест можно глушить флагом без передеплоя:
-      // flag:digest = {"enabled":false}. Ручная кнопка в админке работает всегда.
+      // the auto-digest can be muted with a flag, no redeploy:
+      // flag:digest = {"enabled":false}. The manual button in the admin panel always works.
       const flag = await env.KOVA.get('flag:digest', 'json');
       if (flag && flag.enabled === false) return;
       await postDigest(env);

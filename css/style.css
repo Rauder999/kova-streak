@@ -1,7 +1,7 @@
-/* KOVA STREAK. Токен-система Obsidian Signal, общая с AIMSOMA:
-   база монохромная, фиолетовый только там, где говорит продукт.
-   Зеленый здесь исключение и работает как основной сигнал: это трекер
-   выполненных дней, зеленая клетка и есть продукт. */
+/* KOVA STREAK. Obsidian Signal token system, shared with AIMSOMA:
+   monochrome base, purple only where the product speaks.
+   Green is the exception here and acts as the primary signal: this is
+   a tracker of completed days, the green cell IS the product. */
 
 :root {
   --bg-0: #08070C;
@@ -26,8 +26,8 @@
 * { box-sizing: border-box; }
 html { color-scheme: dark; }
 
-/* элементы с display в классе (.tabs, .user-chip, .scan-state) иначе
-   переигрывают браузерный [hidden] и остаются на экране */
+/* elements with display set by a class (.tabs, .user-chip, .scan-state)
+   otherwise override the browser's [hidden] and stay on screen */
 [hidden] { display: none !important; }
 
 body {
@@ -40,7 +40,7 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* сетка-горизонт на всю страницу, как в AIMSOMA */
+/* page-wide grid horizon, same as in AIMSOMA */
 body::before {
   content: '';
   position: fixed;
@@ -320,7 +320,7 @@ li.done .scen-count { color: var(--pass); }
 }
 .hero-value { font-size: 26px; font-weight: 500; letter-spacing: -0.02em; }
 
-/* пьедестал стриков: рамки из пака OPERATOR, голографические постаменты */
+/* streak podium: frames from the OPERATOR pack, holographic pedestals */
 .podium {
   display: flex; align-items: flex-end; justify-content: center;
   gap: 26px; padding: 10px 0 4px;
@@ -338,8 +338,8 @@ li.done .scen-count { color: var(--pass); }
 .podium-name { font-weight: 500; font-size: 14px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .podium-streak { display: flex; align-items: center; gap: 5px; font-size: 13px; color: var(--signal-soft); }
 .podium-flame { width: 14px; height: 14px; }
-/* постаменты без цифр: место читается силуэтом, высотой и металлом кромки.
-   1 = монолит с коронной ступенью, 2 = скошенные плечи, 3 = низкая плита */
+/* pedestals carry no digits: place is read from silhouette, height and edge metal.
+   1 = monolith with a crown step, 2 = beveled shoulders, 3 = low slab */
 .podium-pedestal {
   width: 100%;
   background:
@@ -381,7 +381,7 @@ li.done .scen-count { color: var(--pass); }
 
 .cal-cell.is-rest { background: var(--bg-2); border: 1px solid var(--chrome); opacity: .75; }
 .legend-swatch.is-rest { background: var(--bg-2); border: 1px solid var(--chrome); }
-/* разделитель недель тенью, а не отступом: margin сжимал клетку понедельника */
+/* week separator via shadow, not spacing: a margin used to squash Monday's cell */
 .cal-day-head.wk, .cal-cell.wk { box-shadow: -2px 0 0 0 var(--line-1); }
 
 .rest-days { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -452,7 +452,7 @@ li.done .scen-count { color: var(--pass); }
 
 /* ---------- admin ---------- */
 
-/* ---------- личная статистика ---------- */
+/* ---------- personal stats ---------- */
 
 .day-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
 .day-chip {
@@ -465,7 +465,7 @@ li.done .scen-count { color: var(--pass); }
 
 .coach-card { border-left: 2px solid var(--signal); }
 
-/* глоссарий: жаргон подчеркнут пунктиром, клик = объяснение */
+/* glossary: jargon gets a dotted underline, click = explanation */
 .term {
   border-bottom: 1px dotted var(--signal-soft);
   cursor: help;
@@ -512,13 +512,13 @@ li.done .scen-count { color: var(--pass); }
 .delta.up { color: var(--pass); }
 .delta.down { color: var(--fail); }
 
-/* ---------- церемония 100% ---------- */
+/* ---------- 100% ceremony ---------- */
 
 .celebrate-overlay {
   position: fixed; inset: 0; z-index: 100;
   background: rgba(5, 4, 9, 0.94);
   backdrop-filter: blur(4px);
-  /* перекрашенный lmbPlus.png из KovaaK's Pasha, хотспот в центре плюса */
+  /* recolored lmbPlus.png from Pasha's KovaaK's, hotspot at the center of the plus */
   cursor: url('../assets/crosshair.png') 25 25, crosshair;
   animation: cel-fade .9s ease-out;
 }
@@ -552,8 +552,8 @@ li.done .scen-count { color: var(--pass); }
   visibility: hidden;
   transition: transform .13s ease-out, opacity .13s ease-out;
 }
-/* спавн: разгоняется, крутится и тормозит на своем месте; блик на шаре
-   делает вращение видимым */
+/* spawn: speeds up, spins and brakes into its spot; the highlight on the ball
+   makes the rotation visible */
 .celebrate-ball.spawned {
   visibility: visible;
   animation: cel-spin-in .6s cubic-bezier(.55, .05, .15, 1) backwards;

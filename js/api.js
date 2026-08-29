@@ -1,7 +1,7 @@
-// Клиент бэкенда (Cloudflare Worker + KV).
+// Backend client (Cloudflare Worker + KV).
 
-// Адрес воркера. Переопределяется через localStorage['kova-streak-api'],
-// чтобы гонять фронт против `wrangler dev` или мока до деплоя.
+// Worker address. Overridable via localStorage['kova-streak-api'] to run
+// the frontend against `wrangler dev` or a mock before deploy.
 export const API_BASE =
   localStorage.getItem('kova-streak-api') || 'https://kova-streak-api.codebreakerstf.workers.dev';
 
@@ -31,7 +31,7 @@ async function call(path, { method = 'GET', body } = {}) {
   try {
     data = text ? JSON.parse(text) : null;
   } catch {
-    throw new Error(`${method} ${path}: ${res.status}, ответ не JSON: ${text.slice(0, 200)}`);
+    throw new Error(`${method} ${path}: ${res.status}, response is not JSON: ${text.slice(0, 200)}`);
   }
   if (!res.ok) {
     const err = new Error((data && data.error) || `${method} ${path}: ${res.status}`);

@@ -1,6 +1,6 @@
-// Сессия Discord. Воркер выдает подписанный токен и возвращает его во
-// фрагменте URL (#token=...), фрагмент не уходит на сервер в логи.
-// Подпись проверяет воркер, фронт payload только читает.
+// Discord session. The worker issues a signed token and returns it in the
+// URL fragment (#token=...), the fragment never reaches server logs.
+// The worker verifies the signature, the frontend only reads the payload.
 
 import { setToken, loginUrl } from './api.js';
 
@@ -23,7 +23,7 @@ export function initAuth() {
   const fromUrl = hash.get('token');
   if (fromUrl) {
     localStorage.setItem(STORAGE_KEY, fromUrl);
-    // подчищаем адресную строку, чтобы токен не жил в истории и закладках
+    // clean up the address bar so the token does not live on in history and bookmarks
     history.replaceState(null, '', location.pathname + location.search);
   }
 

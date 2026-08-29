@@ -1,16 +1,16 @@
-// Разбор имени файла статистики KovaaK's. Содержимое CSV нам не нужно:
-// имя файла уже содержит и сценарий, и время завершения рана.
+// Parsing KovaaK's stats file names. We do not need the CSV contents:
+// the file name already carries both the scenario and the run finish time.
 //
-// Формат подтвержден на 1755 реальных файлах из папки stats:
+// Format confirmed on 1755 real files from the stats folder:
 //   {Scenario} - Challenge - YYYY.MM.DD-HH.MM.SS Stats.csv
-// Таймстамп это МОМЕНТ ЗАВЕРШЕНИЯ рана (проверено: файл 20.18.33 содержит
-// Challenge Start 20:17:31.871), поэтому ран засчитывается в тот день,
-// когда игрок его дожал. Время локальное, конвертации не требуется.
+// The timestamp is the MOMENT THE RUN FINISHED (verified: the 20.18.33 file
+// contains Challenge Start 20:17:31.871), so a run is credited to the day
+// the player closed it out. Time is local, no conversion needed.
 
 const FILENAME_RE = /^(.*) - Challenge - (\d{4})\.(\d{2})\.(\d{2})-(\d{2})\.(\d{2})\.(\d{2}) Stats\.csv$/;
 
-// Якорь ' - Challenge - ' отделяет имя сценария целиком, поэтому сценарий,
-// чье имя является префиксом другого, ложных срабатываний не дает.
+// The ' - Challenge - ' anchor separates the scenario name in full, so a
+// scenario whose name is a prefix of another gives no false matches.
 export function parseStatsFileName(fileName) {
   const m = FILENAME_RE.exec(fileName);
   if (!m) return null;
@@ -25,8 +25,8 @@ export function isStatsFile(fileName) {
   return FILENAME_RE.test(fileName);
 }
 
-// Локальная дата в формате YYYY-MM-DD. Всегда локальная, не UTC:
-// день игрока это его календарный день, а не гринвичский.
+// Local date as YYYY-MM-DD. Always local, not UTC:
+// the player's day is their calendar day, not Greenwich's.
 export function localDate(d = new Date()) {
   const pad = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -37,10 +37,10 @@ export function localMonth(d = new Date()) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
 }
 
-// ---------- разбор содержимого CSV (для личной статистики) ----------
-// Формат файла: таблица киллов, сводка по оружию, key-value сводка, настройки.
-// Парсер адаптирован из AimSama, но хранит не сырые киллы, а метрики рана:
-// на 1800+ файлах истории это разница между мегабайтами и килобайтами.
+// ---------- CSV content parsing (for personal stats) ----------
+// File format: kill table, per-weapon summary, key-value summary, settings.
+// The parser is adapted from AimSama but stores run metrics, not raw kills:
+// on 1800+ history files that is the difference between megabytes and kilobytes.
 
 function toNum(s) {
   if (s == null) return null;
@@ -81,7 +81,7 @@ export function parseRunContent(fileName, text) {
     if (section === 'kills') {
       const parts = line.split(',');
       if (!killCols || parts.length < killCols.length) continue;
-      // имя бота с запятой сдвигает колонки; лишнее склеиваем в поле Bot
+      // a bot name with a comma shifts the columns; glue the extras into the Bot field
       const extra = parts.length - killCols.length;
       const fixed = extra > 0
         ? [...parts.slice(0, 2), parts.slice(2, 3 + extra).join(','), ...parts.slice(3 + extra)]
@@ -100,8 +100,8 @@ export function parseRunContent(fileName, text) {
   const ttks = kills.map((k) => k.ttk).filter((t) => t != null && t > 0.05);
   const instantKills = kills.filter((k) => k.ttk != null && k.ttk <= 0.05).length;
 
-  // тип рана определяется по данным, не по имени: у трекинга с бессмертными
-  // ботами киллов нет, у кликинга TTK почти нулевые
+  // run type is determined from the data, not the name: tracking with
+  // immortal bots has no kills, clicking has near-zero TTKs
   let type = 'unknown';
   const ttkMed = median(ttks);
   if (kills.length === 0 && shots > 50) type = 'tracking';
@@ -109,7 +109,7 @@ export function parseRunContent(fileName, text) {
   else if (kills.length > 0 && ttkMed != null && ttkMed > 2) type = 'tracking';
   else if (kills.length > 0) type = 'switching';
 
-  // динамика точности: первая против второй половины киллов (зажим/усталость)
+  // accuracy dynamics: first vs second half of kills (tensing up / fatigue)
   let accDrop = null;
   const withShots = kills.filter((k) => k.shots > 0);
   if (withShots.length >= 6) {
@@ -119,10 +119,10 @@ export function parseRunContent(fileName, text) {
     const b = withShots.slice(half);
     const accA = sum(a, (k) => k.hits) / Math.max(1, sum(a, (k) => k.shots));
     const accB = sum(b, (k) => k.hits) / Math.max(1, sum(b, (k) => k.shots));
-    accDrop = accB - accA; // отрицательное = к концу рана хуже
+    accDrop = accB - accA; // negative = worse toward the end of the run
   }
 
-  // чоки: киллы, на которых застрял (TTK втрое дольше своей же медианы рана)
+  // chokes: kills the player got stuck on (TTK three times the run's own median)
   const ttkTail = ttks.length >= 8 && ttkMed > 0
     ? ttks.filter((t) => t > ttkMed * 3).length / ttks.length
     : null;

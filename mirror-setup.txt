@@ -10,9 +10,9 @@ Write-Host ''
 Write-Host '=== KOVA STREAK mirror setup ===' -ForegroundColor Magenta
 
 # --- find the stats folder ---
-# Корень Steam берем из реестра (Steam пишет его туда при установке, где бы
-# он ни стоял), Program Files оставлен только как страховка. Дальше все
-# библиотеки из libraryfolders.vdf каждого корня.
+# The Steam root comes from the registry (Steam writes it there on install,
+# wherever it lives), Program Files is kept only as a fallback. Then all
+# libraries from each root's libraryfolders.vdf.
 $statsTail = 'steamapps\common\FPSAimTrainer\FPSAimTrainer\stats'
 $steamRoots = @()
 foreach ($rk in @('HKCU:\Software\Valve\Steam', 'HKLM:\SOFTWARE\WOW6432Node\Valve\Steam', 'HKLM:\SOFTWARE\Valve\Steam')) {
@@ -87,7 +87,7 @@ $watcher = @'
 $src = '__SRC__'
 $dst = '__DST__'
 
-# exit 99 = другой экземпляр уже жив, лаунчер-сторож поймет и не будет крутить рестарты
+# exit 99 = another instance is already alive, the watchdog launcher understands this and will not loop restarts
 $mutex = New-Object System.Threading.Mutex($false, 'Local\KovaaKStatsMirror')
 try { $acquired = $mutex.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $acquired = $true }
 if (-not $acquired) { exit 99 }
@@ -102,8 +102,8 @@ function Sync-Pass {
 
 Sync-Pass
 
-# Сон/резюм убивает хэндл FileSystemWatcher (WaitForChanged кидает исключение).
-# Поэтому: любое исключение = лог, пересоздание вотчера, синк и жизнь дальше.
+# Sleep/resume kills the FileSystemWatcher handle (WaitForChanged throws).
+# So: any exception = log it, recreate the watcher, sync and keep going.
 $fsw = $null
 while ($true) {
     try {
@@ -126,8 +126,8 @@ while ($true) {
 $watcher = $watcher.Replace('__SRC__', $stats).Replace('__DST__', $mirror)
 [System.IO.File]::WriteAllText($ps1, $watcher, (New-Object System.Text.UTF8Encoding($false)))
 
-# Лаунчер-сторож: держит вотчер живым. Ждет его выхода и перезапускает через
-# 30 секунд, кроме кода 99 (другой экземпляр уже работает, дубль не нужен).
+# Watchdog launcher: keeps the watcher alive. Waits for it to exit and restarts
+# it after 30 seconds, except on code 99 (another instance is already running, no duplicate needed).
 $launcher = "' KOVA STREAK mirror launcher + watchdog (installed by mirror-setup)`r`n" +
   "Set sh = CreateObject(""Wscript.Shell"")`r`n" +
   "Do`r`n" +
@@ -137,8 +137,8 @@ $launcher = "' KOVA STREAK mirror launcher + watchdog (installed by mirror-setup
   "Loop`r`n"
 [System.IO.File]::WriteAllText($vbs, $launcher, (New-Object System.Text.UTF8Encoding($false)))
 
-# restart cleanly if an older copy is running: сначала сторож, потом вотчер,
-# иначе сторож успеет перезапустить убитого
+# restart cleanly if an older copy is running: watchdog first, then watcher,
+# otherwise the watchdog would manage to restart the one we just killed
 foreach ($pname in @('wscript.exe', 'powershell.exe')) {
   Get-CimInstance Win32_Process -Filter "Name='$pname'" -ErrorAction SilentlyContinue |
     Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match 'kovaaks-stats-mirror' } |
@@ -148,10 +148,10 @@ Start-Sleep -Milliseconds 500
 
 Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'KovaaKStatsMirror' -Value ('wscript.exe "' + $vbs + '"')
 
-# Планировщик: перезапуск каждые 15 минут и при логоне. Modern Standby умеет
-# тихо убивать фоновые процессы за ночь, а Run-ключ срабатывает только при
-# логоне, которых на вечно спящих машинах не бывает неделями. Дубликаты
-# гасятся мьютексом мгновенно, так что частые запуски бесплатны.
+# Task Scheduler: restart every 15 minutes and at logon. Modern Standby can
+# quietly kill background processes overnight, and the Run key only fires at
+# logon, which machines that only ever sleep may not see for weeks. Duplicates
+# are killed instantly by the mutex, so frequent launches cost nothing.
 try {
   $action = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument ('"' + $vbs + '"')
   $t1 = New-ScheduledTaskTrigger -AtLogOn
@@ -178,5 +178,5 @@ Write-Host ''
 Write-Host 'If the clipboard gets overwritten, this works in the picker too:'
 Write-Host '  %USERPROFILE%\KovaaK-stats' -ForegroundColor Cyan
 Write-Host ''
-# наглядный якорь: окно проводника с зеркалом, путь виден в адресной строке
+# visual anchor: an Explorer window with the mirror, the path visible in the address bar
 Start-Process explorer.exe -ArgumentList ('"' + $mirror + '"')

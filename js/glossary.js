@@ -1,6 +1,6 @@
-// Кликабельный глоссарий (портирован из AimSama): аим-жаргон в строках коуча
-// подсвечивается, клик показывает объяснение простым английским. Большинство
-// друзей не говорят на аимерском.
+// Clickable glossary (ported from AimSama): aim jargon in the coach lines is
+// highlighted, a click shows an explanation in plain English. Most of the
+// friends do not speak aimer-speak.
 
 const TERMS = {
   'pace': 'How fast you go from kill to kill. Adding pace = playing slightly faster; never at the cost of technique.',
@@ -44,11 +44,11 @@ const TERMS = {
   'eyes first': 'Snap your EYES to the next target before the hand moves; the hand follows the eyes.',
 };
 
-// длинные ключи первыми, чтобы "smooth pathing" выигрывал у "smooth"
+// longest keys first so "smooth pathing" wins over "smooth"
 const NAMES = Object.keys(TERMS).sort((a, b) => b.length - a.length);
 const PATTERN = new RegExp('\\b(' + NAMES.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')\\b', 'gi');
 
-// Оборачивает известные термины в кликабельные спаны. Идемпотентно.
+// Wraps known terms in clickable spans. Idempotent.
 export function annotateTerms(root) {
   if (!root) return;
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
@@ -83,7 +83,7 @@ export function annotateTerms(root) {
   }
 }
 
-// Один общий поповер на все термины.
+// One shared popover for all terms.
 export function initGlossary() {
   const pop = document.createElement('div');
   pop.id = 'term-pop';

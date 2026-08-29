@@ -1,5 +1,5 @@
-// IndexedDB: kv (handle папки, токен, кэш коуча) и runs (распарсенные
-// метрики ранов для личной статистики).
+// IndexedDB: kv (folder handle, token, coach cache) and runs (parsed
+// run metrics for personal stats).
 
 const DB_NAME = 'kova-streak';
 const DB_VERSION = 2;

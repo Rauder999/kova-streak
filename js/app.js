@@ -1,4 +1,4 @@
-// KOVA STREAK: состояние, поллинг папки stats, автоотметка, рендер.
+// KOVA STREAK: state, stats folder polling, auto check-in, rendering.
 
 import { initAuth, currentUser, login, logout, authError } from './auth.js';
 import * as api from './api.js';
@@ -12,18 +12,18 @@ import { getAllParsedRuns, kvGet, kvSet } from './db.js';
 import { buildDailyReport, coachPayload, buildTrackingLine } from './stats.js';
 import { annotateTerms, initGlossary } from './glossary.js';
 
-// Предпросмотр гайда подключения для залогиненного админа: ?setup=test
+// Preview of the setup guide for a logged-in admin: ?setup=test
 const SETUP_PREVIEW = new URLSearchParams(location.search).get('setup') === 'test';
 
-// Однострочник установки/починки зеркала, он же в гайде и в строке помощи
+// One-liner that installs/repairs the mirror; the same one appears in the guide and in the help line
 const MIRROR_CMD = 'irm https://rauder999.github.io/kova-streak/mirror-setup.txt | iex';
 
-const POLL_MS = 5000;          // как часто перечитываем листинг папки
-const POST_DEBOUNCE_MS = 60000; // не чаще раза в минуту шлем частичный прогресс
+const POLL_MS = 5000;          // how often we re-read the folder listing
+const POST_DEBOUNCE_MS = 60000; // partial progress is posted at most once a minute
 const GROUP_REFRESH_MS = 60000;
 
-// state и renderToday экспортируются, чтобы фронт можно было прогнать из
-// консоли на подставном прогрессе, не подключая папку stats.
+// state and renderToday are exported so the frontend can be exercised from
+// the console with fake progress, without connecting the stats folder.
 export const state = {
   user: null,
   playlist: null,
@@ -34,24 +34,24 @@ export const state = {
   lastPostedRuns: -1,
   lastPostAt: 0,
   posting: false,
-  prevProgress: null,     // прогресс за вчера (с учетом грейс-окна)
+  prevProgress: null,     // yesterday's progress (grace window applied)
   lastPostedPrevRuns: -1,
   lastPrevPostAt: 0,
   postingPrev: false,
-  graceUsed: 0,           // сколько ночных ранов досчитано во вчера
+  graceUsed: 0,           // how many night runs were credited to yesterday
   streak: null,
   group: null,
   tab: 'today',
   scanError: null,
   coachEnabled: false,
-  indexProgress: null,   // {done,total} пока идет первичная индексация
-  report: null,          // buildDailyReport для statsDate
-  statsDate: null,       // какой день смотрим на вкладке (null = сегодня)
-  playedDates: [],       // даты, за которые есть раны, свежие первыми
+  indexProgress: null,   // {done,total} while the initial indexing is in progress
+  report: null,          // buildDailyReport for statsDate
+  statsDate: null,       // which day the tab is viewing (null = today)
+  playedDates: [],       // dates that have runs, newest first
   coachLines: null,
   coachHash: null,
   coachError: null,
-  restDates: [],        // запланированные выходные (даты)
+  restDates: [],        // scheduled rest days (dates)
   restError: null,
 };
 
@@ -69,7 +69,7 @@ const el = (tag, cls, text) => {
   return n;
 };
 
-// ---------- запуск ----------
+// ---------- boot ----------
 
 async function boot() {
   initGlossary();
@@ -79,9 +79,9 @@ async function boot() {
     b.addEventListener('click', () => switchTab(b.dataset.tab));
   });
 
-  // вернулся в окно после игры: пересканировать немедленно, не ждать таймер;
-  // и если 100% случились, пока вкладка была спрятана за игрой, встретить
-  // человека церемонией именно сейчас
+  // back in the window after playing: rescan immediately, do not wait for the
+  // timer; and if 100% happened while the tab was hidden behind the game,
+  // greet the person with the celebration right now
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) return;
     if (pollTimer) tick();
@@ -98,8 +98,8 @@ async function boot() {
     box.hidden = false;
   }
 
-  // предпросмотр церемонии: ?celebrate=test, работает и без логина,
-  // настоящую сегодняшнюю церемонию не съедает
+  // celebration preview: ?celebrate=test, works even without login,
+  // does not consume today's real celebration
   if (new URLSearchParams(location.search).get('celebrate') === 'test') {
     startCelebration(true);
   }
@@ -121,18 +121,18 @@ async function boot() {
   }
   renderWeekLabel();
 
-  // флаг коуча: раскатка управляется из KV, фронт просто спрашивает
+  // coach flag: the rollout is controlled from KV, the frontend just asks
   try {
     const me = await api.getMe();
     state.coachEnabled = !!(me && me.coachEnabled);
     $('stats-tab-btn').hidden = !state.coachEnabled;
-  } catch { /* без флага живем как раньше */ }
+  } catch { /* without the flag we behave as before */ }
 
   state.handle = await getStoredFolder();
   if (state.handle) state.granted = await ensurePermission(state.handle);
 
-  // с телефона чек-ин невозможен, зато групповой календарь работает,
-  // так что мобильных встречает сразу он
+  // check-in is impossible from a phone, but the group calendar works,
+  // so mobile users are greeted with it right away
   switchTab(fsSupported() ? 'today' : 'group');
   refreshGroup();
   loadRest().then(() => { if (state.tab === 'today') renderToday(); });
@@ -144,8 +144,8 @@ function avatarFallback(uid) {
   return `https://cdn.discordapp.com/embed/avatars/${i}.png`;
 }
 
-// Хэш аватарки протухает, когда человек меняет ее после логина: CDN отдает
-// 404 и картинка ломается. При ошибке тихо падаем на дефолтную.
+// The avatar hash goes stale when the person changes it after login: the CDN
+// returns 404 and the image breaks. On error, quietly fall back to the default.
 function safeAvatar(img, uid) {
   img.addEventListener('error', () => {
     const fb = avatarFallback(uid);
@@ -154,7 +154,7 @@ function safeAvatar(img, uid) {
   return img;
 }
 
-// ---------- вкладки ----------
+// ---------- tabs ----------
 
 function switchTab(tab) {
   state.tab = tab;
@@ -174,28 +174,28 @@ function renderWeekLabel() {
   $('week-label').textContent = state.playlist && state.playlist.weekLabel ? state.playlist.weekLabel : '';
 }
 
-// ---------- поллинг папки ----------
+// ---------- folder polling ----------
 
 function startPolling() {
   if (pollTimer) return;
   $('scan-state').hidden = false;
   tick();
-  // Поллинг это запасной механизм: в фоне Chrome душит таймеры до раза в
-  // минуту, поэтому основную скорость дают observer и focus/visibility ниже.
+  // Polling is the fallback mechanism: backgrounded Chrome throttles timers
+  // to once a minute, so the real speed comes from the observer and focus/visibility below.
   pollTimer = setInterval(tick, POLL_MS);
   startObserver();
 }
 
-// Нативный наблюдатель за папкой: реагирует на новый CSV сразу, даже когда
-// вкладка спрятана за игрой. Есть не во всех браузерах, поэтому только
-// как ускоритель поверх поллинга.
+// Native folder observer: reacts to a new CSV instantly, even while the tab
+// is hidden behind the game. Not available in every browser, so it is only
+// an accelerator on top of the polling.
 async function startObserver() {
   if (fsObserver || !('FileSystemObserver' in window)) return;
   try {
     fsObserver = new FileSystemObserver(() => tick());
     await fsObserver.observe(state.handle);
   } catch {
-    fsObserver = null; // не дался, остается поллинг
+    fsObserver = null; // failed to start, polling remains
   }
 }
 
@@ -211,12 +211,12 @@ function stopPolling() {
 
 async function tick() {
   if (!state.handle || !state.playlist) return;
-  // observer, focus и интервал могут выстрелить пачкой, скан чаще раза в
-  // секунду смысла не имеет
+  // the observer, focus and the interval can fire in a burst; scanning more
+  // often than once a second makes no sense
   if (Date.now() - lastTickAt < 1000) return;
   lastTickAt = Date.now();
 
-  // полуночный переход: новый день, счетчики с нуля
+  // midnight rollover: a new day, counters from zero
   const today = localDate();
   if (today !== state.date) {
     state.date = today;
@@ -240,8 +240,8 @@ async function tick() {
     state.progress = split.todayProgress;
     state.progress.scanned = scanned;
     state.graceUsed = split.graceUsed;
-    // вчерашний прогресс постим, только если там вообще что-то сыграно:
-    // это и грейс-дозачет, и лечение "играл вчера, но вкладка была закрыта"
+    // yesterday's progress is posted only if anything was played at all:
+    // covers both the grace top-up and fixing "played yesterday but the tab was closed"
     state.prevProgress = split.prevProgress.completedRuns > 0 ? split.prevProgress : null;
     state.scanError = null;
     if (state.progress.done) maybeCelebrate();
@@ -259,18 +259,18 @@ async function tick() {
   if (state.tab === 'today') renderToday();
   maybePost();
   maybePostPrev();
-  // индексация нужна и без коуча: на ней живет система рекордов
+  // indexing is needed even without the coach: the personal records system depends on it
   refreshStatsPipeline();
 }
 
-// Вчерашняя дата в том же локальном формате, что и state.date
+// Yesterday's date in the same local format as state.date
 function prevDateOf(date) {
   const d = new Date(date + 'T12:00:00');
   d.setDate(d.getDate() - 1);
   return localDate(d);
 }
 
-// ---------- личная статистика и коуч ----------
+// ---------- personal stats and coach ----------
 
 let statsBusy = false;
 async function refreshStatsPipeline() {
@@ -283,7 +283,7 @@ async function refreshStatsPipeline() {
     });
     state.indexProgress = null;
     await maybePostScores(res.added);
-    // отчет пересчитываем, когда появились новые файлы или его еще нет
+    // rebuild the report when new files have appeared or there is none yet
     if (state.coachEnabled && (res.added > 0 || !state.report)) {
       await rebuildReport(state.statsDate || state.date);
     }
@@ -294,15 +294,15 @@ async function refreshStatsPipeline() {
   }
 }
 
-// Система соперничества: личные рекорды по сценариям текущей плейлисты
-// уходят на сервер, там решается, чьи рекорды пали и кого пинговать.
-// Кэш последней отправки в localStorage: без изменений запрос не уходит,
-// а тяжелый проход по всем ранам делаем только при новых файлах.
+// Rivalry system: personal bests for the current playlist's scenarios go to
+// the server, which decides whose records fell and who gets pinged.
+// The last submission is cached in localStorage: no changes means no request,
+// and the heavy pass over all runs happens only when there are new files.
 const PB_CACHE_KEY = 'kova-streak-pb-posted';
 async function maybePostScores(added) {
   if (!state.user || !state.playlist) return;
   let cached = null;
-  try { cached = localStorage.getItem(PB_CACHE_KEY); } catch { /* приватный режим */ }
+  try { cached = localStorage.getItem(PB_CACHE_KEY); } catch { /* private browsing mode */ }
   if (!added && cached !== null) return;
 
   const wanted = new Set(state.playlist.scenarios.map((s) => s.name));
@@ -319,10 +319,10 @@ async function maybePostScores(added) {
   try {
     await api.postScores(bests);
     localStorage.setItem(PB_CACHE_KEY, ser);
-  } catch { /* не критично: повторим со следующим новым раном */ }
+  } catch { /* not critical: we retry with the next new run */ }
 }
 
-// Строит отчет за выбранную дату (сегодня или любой прошедший день)
+// Builds the report for the selected date (today or any past day)
 async function rebuildReport(day) {
   const runs = await getAllParsedRuns();
   state.playedDates = [...new Set(runs.map((r) => r.date))].sort().reverse().slice(0, 21);
@@ -331,9 +331,9 @@ async function rebuildReport(day) {
   await maybeCoach();
 }
 
-// ИИ дергается только на смене хэша состояния, иначе текст из кэша.
-// Коуч помнит, что советовал в прошлые дни: история уходит в пейлоад,
-// чтобы не повторять вчерашнюю подсказку без причины.
+// The AI is called only when the state hash changes, otherwise cached text is used.
+// The coach remembers what it advised on previous days: the history goes into
+// the payload so yesterday's tip is not repeated without a reason.
 async function maybeCoach() {
   const r = state.report;
   if (!r || !r.niches.length) return;
@@ -343,7 +343,7 @@ async function maybeCoach() {
     .filter((h) => h.date < r.today)
     .sort((a, b) => b.date.localeCompare(a.date))
     .slice(0, 2);
-  // история влияет на текст, значит должна влиять и на ключ кэша
+  // history affects the text, so it must affect the cache key too
   let hh = 5381;
   const hsrc = recent.map((h) => h.lines.join('|')).join('#');
   for (let i = 0; i < hsrc.length; i++) hh = ((hh << 5) + hh + hsrc.charCodeAt(i)) >>> 0;
@@ -354,10 +354,10 @@ async function maybeCoach() {
     const payload = coachPayload(r);
     payload.stateHash = fullHash;
     payload.recentAdvice = recent.map((h) => ({ date: h.date, lines: h.lines }));
-    // трекинг к модели не ходит: его строку клиент собирает сам из доктрины
+    // tracking does not go to the model: the client builds its line itself from the doctrine
     const trackingLine = buildTrackingLine(r);
     payload.niches = payload.niches.filter((n) => n.niche !== 'tracking');
-    // последняя подсказка по каждой нише, для правила "не повторяйся"
+    // the last tip for each niche, for the "do not repeat yourself" rule
     const lastLines = recent[0] ? recent[0].lines : [];
     for (const n of payload.niches) {
       const prev = lastLines.find((l) => l.toUpperCase().startsWith('[' + n.niche.toUpperCase() + ']'));
@@ -374,7 +374,7 @@ async function maybeCoach() {
     state.coachLines = lines;
     state.coachHash = fullHash;
     state.coachError = null;
-    // запоминаем, что посоветовали за этот день (последняя версия дня побеждает)
+    // remember what was advised for this day (the day's latest version wins)
     const next = history.filter((h) => h.date !== r.today);
     next.push({ date: r.today, lines });
     next.sort((a, b) => a.date.localeCompare(b.date));
@@ -404,7 +404,7 @@ function renderStats() {
     return;
   }
 
-  // выбор дня: сегодняшний и прошлые сыгранные даты
+  // day picker: today and past played dates
   if (state.playedDates.length) {
     const days = el('div', 'day-chips');
     const mk = (label, day, active) => {
@@ -426,7 +426,7 @@ function renderStats() {
     root.append(days);
   }
 
-  // коуч: ответ первым
+  // coach: the answer goes first
   const isPast = (state.statsDate && state.statsDate !== state.date);
   const coach = el('div', 'card coach-card');
   const ch = el('div', 'card-head');
@@ -441,7 +441,7 @@ function renderStats() {
       row.append(el('span', null, m ? m[2] : line));
       coach.append(row);
     }
-    annotateTerms(coach); // жаргон становится кликабельным словариком
+    annotateTerms(coach); // jargon becomes a clickable glossary
   } else if (state.coachError) {
     coach.append(el('p', 'muted', 'Coach is unavailable: ' + state.coachError));
   } else if (!r.scenarios.length) {
@@ -451,7 +451,7 @@ function renderStats() {
   }
   root.append(coach);
 
-  // сценарии дня против своего бейзлайна
+  // the day's scenarios against their own baseline
   const card = el('div', 'card');
   const head = el('div', 'card-head');
   head.append(el('h2', null, isPast ? `${r.today} vs your usual back then` : 'Today vs your usual'));
@@ -495,9 +495,9 @@ function fmtScore(v) {
   return v >= 100 ? String(Math.round(v)) : (Math.round(v * 10) / 10).toString();
 }
 
-// Пост за вчерашний день: грейс-дозачет ночной сессии и лечение случая
-// "вчера играл, но вкладка не была открыта". Сервер принимает вчера в окне
-// дат и никогда не понижает уже закрытый день, так что пост безопасен.
+// Posting for yesterday: the grace top-up for a night session and the fix for
+// "played yesterday but the tab was not open". The server accepts yesterday
+// within its date window and never downgrades an already closed day, so the post is safe.
 async function maybePostPrev() {
   const p = state.prevProgress;
   if (!p || state.postingPrev) return;
@@ -518,14 +518,14 @@ async function maybePostPrev() {
     state.lastPrevPostAt = Date.now();
   } catch (e) {
     if (handleApiError(e)) return;
-    // не критично: повторим на следующем тике
+    // not critical: we retry on the next tick
   } finally {
     state.postingPrev = false;
   }
 }
 
-// Отправляем прогресс, когда он изменился. Полное выполнение шлем немедленно,
-// частичное не чаще раза в минуту, чтобы не жечь записи в KV.
+// Post progress when it has changed. Full completion is sent immediately,
+// partial progress at most once a minute, to avoid burning KV writes.
 async function maybePost() {
   const p = state.progress;
   if (!p || state.posting) return;
@@ -554,10 +554,10 @@ async function maybePost() {
   }
 }
 
-// ---------- вкладка Today ----------
+// ---------- Today tab ----------
 
 async function connectFolder() {
-  // стоп и рестарт, чтобы наблюдатель пересоздался на новом handle
+  // stop and restart so the observer gets recreated on the new handle
   stopPolling();
   try {
     state.handle = await pickStatsFolder();
@@ -582,11 +582,11 @@ export function renderToday() {
 
   if (!fsSupported()) {
     root.append(notice('Check-ins happen on your gaming PC in desktop Chrome or Edge. On this device you can watch the group tab.'));
-    root.append(renderRestCard()); // выходные удобно ставить как раз с телефона
+    root.append(renderRestCard()); // rest days are convenient to schedule right from the phone
     return;
   }
   if (!state.playlist || !state.playlist.scenarios || !state.playlist.scenarios.length) {
-    // настоящая причина (бэкенд лег) важнее, чем "плейлиста не задана"
+    // the real cause (backend down) matters more than "no playlist set"
     root.append(notice(state.scanError || 'No playlist is set for this week yet. Rauder has to import it in Admin.',
       state.scanError ? 'error' : ''));
     return;
@@ -595,7 +595,7 @@ export function renderToday() {
   if (SETUP_PREVIEW || !state.granted) {
     const gate = el('div', 'card gate-card');
     if (state.handle && !SETUP_PREVIEW) {
-      // папка уже выбрана раньше, нужен только клик по разрешению
+      // the folder was already picked before, only the permission click is needed
       gate.append(el('h2', null, 'Grant folder access'));
       gate.append(el('p', 'lede', 'The folder is remembered. In the browser prompt pick "Allow on every visit" and even this click disappears: next time the page will just start watching on its own.'));
       const btn = el('button', 'primary big', 'Grant access');
@@ -605,9 +605,9 @@ export function renderToday() {
       forget.addEventListener('click', async () => { await forgetFolder(); state.handle = null; renderToday(); });
       gate.append(forget);
     } else {
-      // первый раз: четыре шага, путь к папке всегда приезжает из хелпера
-      // через клипборд. Никаких запасных кнопок Copy path: они затирали
-      // клипборд не тем путем, друзья дважды на этом ловились.
+      // first time: four steps, the folder path always arrives from the helper
+      // via the clipboard. No fallback Copy path buttons: they overwrote the
+      // clipboard with the wrong path, friends got caught by that twice.
       gate.append(el('h2', null, 'One-time setup'));
       gate.append(el('p', 'lede', 'Two minutes, once. Then it is fully automatic: you play, the site checks you in.'));
 
@@ -674,8 +674,8 @@ export function renderToday() {
     ? 'done for today - KOVA STREAK'
     : `${Math.round(p.percent * 100)}% today - KOVA STREAK`;
 
-  // скорая помощь первой строкой, до нее не нужно доматывать: если зеркало
-  // на машине игрока умерло, ответ висит прямо над кольцом
+  // first aid as the very first line, no scrolling needed to reach it: if the
+  // mirror on the player's machine died, the answer hangs right above the ring
   const help = el('div', 'help-line');
   help.append(el('span', null, 'Progress not updating while you play? Run this in PowerShell:'));
   const hcode = el('code', 'mono', MIRROR_CMD);
@@ -689,7 +689,7 @@ export function renderToday() {
   help.append(hbtn);
   root.append(help);
 
-  // в папке вообще нет файлов статистики: почти наверняка выбрана не та
+  // no stats files in the folder at all: almost certainly the wrong one was picked
   if (p.scanned === 0) {
     const warn = notice('There are no KovaaK\'s stats files in this folder at all, so it is probably the wrong one. It has to be the "stats" folder inside FPSAimTrainer\\FPSAimTrainer. If the folder is right, check that Statistics Export is set to "Always" in KovaaK\'s Game Options.', 'error');
     const rebtn = el('button', null, 'Pick a different folder');
@@ -698,7 +698,7 @@ export function renderToday() {
     root.append(warn);
   }
 
-  // шапка: кольцо прогресса + стрик
+  // header: progress ring + streak
   const top = el('div', 'today-top');
   top.append(progressRing(p));
 
@@ -725,7 +725,7 @@ export function renderToday() {
 
   if (state.scanError) root.append(notice(state.scanError, 'error'));
 
-  // чеклист сценариев
+  // scenario checklist
   const card = el('div', 'card');
   const head = el('div', 'card-head');
   head.append(el('h2', null, 'What is left to play'));
@@ -748,16 +748,16 @@ export function renderToday() {
   root.append(renderRestCard());
 }
 
-// ---------- выходные ----------
-// До 2 дней в неделю без потери стрика. Планируются строго до начала дня
-// (по времени группы), поэтому сегодняшний день переключить нельзя: это
-// защита от "забыл поиграть, вечером оформлю выходной".
+// ---------- rest days ----------
+// Up to 2 days a week without losing the streak. Scheduled strictly before
+// the day starts (group time), so today cannot be toggled: this guards
+// against "forgot to play, I will file a rest day in the evening".
 
 async function loadRest() {
   try {
     const res = await api.getRest();
     state.restDates = res.dates || [];
-  } catch { /* не критично */ }
+  } catch { /* not critical */ }
 }
 
 function renderRestCard() {
@@ -824,18 +824,18 @@ function notice(text, kind = '') {
   return el('div', 'notice ' + kind, text);
 }
 
-// ---------- церемония 100%: пентагон целей, как в KovaaK's ----------
-// Затемнение ~секунду, пять "3D" шаров появляются по одному с раскруткой
-// и нарастающим спавн-звуком. Клик = звук выстрела (всегда одинаковый) +
-// килл-звук, который с каждым попаданием выше. Пятый: аккорд и карточка.
-// Звуки настоящие, из папки KovaaK's Pasha: 808 perc (спавн), rxSound11
-// (выстрел), kick-deep (килл). Если не загрузились, синтез-фолбэк.
+// ---------- 100% celebration: a pentagon of targets, KovaaK's style ----------
+// Dim for ~a second, five "3D" balls appear one by one with a spin-up and a
+// rising spawn sound. Click = shot sound (always the same) + a kill sound
+// that gets higher with every hit. The fifth: a chord and the card.
+// The sounds are real ones from Pasha's KovaaK's folder: 808 perc (spawn),
+// rxSound11 (shot), kick-deep (kill). If they fail to load, synth fallback.
 
 const CELEBRATED_KEY = 'kova-celebrated';
-const HIT_NOTES = [392.0, 440.0, 493.88, 587.33, 659.25]; // фолбэк: G4 A4 B4 D5 E5
+const HIT_NOTES = [392.0, 440.0, 493.88, 587.33, 659.25]; // fallback: G4 A4 B4 D5 E5
 const FINAL_CHORD = [523.25, 659.25, 783.99, 1046.5];     // C E G C
-const KILL_RATES = [1, 1.19, 1.41, 1.68, 2.0];    // +3 полутона на каждое попадание
-const SPAWN_RATES = [1, 1.12, 1.26, 1.41, 1.59];  // +2 полутона на каждый спавн
+const KILL_RATES = [1, 1.19, 1.41, 1.68, 2.0];    // +3 semitones per hit
+const SPAWN_RATES = [1, 1.12, 1.26, 1.41, 1.59];  // +2 semitones per spawn
 
 let actx = null;
 function ensureCtx() {
@@ -857,10 +857,10 @@ function tone(freq, dur = 0.22, gainV = 0.16) {
     o.connect(g).connect(ctx.destination);
     o.start(t);
     o.stop(t + dur + 0.05);
-  } catch { /* звук опционален */ }
+  } catch { /* sound is optional */ }
 }
 
-let sndBuffers = null; // null = не грузили, false = не вышло, объект = готово
+let sndBuffers = null; // null = not loaded yet, false = failed, object = ready
 async function loadSounds() {
   if (sndBuffers !== null) return;
   try {
@@ -900,7 +900,7 @@ function maybeCelebrate() {
 function startCelebration(test = false) {
   if (document.querySelector('.celebrate-overlay')) return;
   if (!test) localStorage.setItem(CELEBRATED_KEY, state.date);
-  loadSounds(); // декод трех мелких ogg успевает до первого спавна
+  loadSounds(); // decoding the three small ogg files finishes before the first spawn
 
   const overlay = el('div', 'celebrate-overlay');
   const finale = () => {
@@ -916,7 +916,7 @@ function startCelebration(test = false) {
     setTimeout(() => overlay.remove(), 2600);
   };
 
-  // уважение к reduced motion: без тира, сразу карточка
+  // respect reduced motion: no shooting gallery, straight to the card
   if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
     document.body.append(overlay);
     finale();
@@ -938,7 +938,7 @@ function startCelebration(test = false) {
       if (ball.classList.contains('hit') || !ball.classList.contains('spawned')) return;
       ball.classList.add('hit');
       const idx = 5 - left;
-      // выстрел всегда одинаковый, килл-звук поднимается с каждым попаданием
+      // the shot is always the same, the kill sound rises with every hit
       if (!playBuf('shot', 1, 0.5)) tone(660, 0.05, 0.07);
       if (!playBuf('kill', KILL_RATES[idx], 0.6)) tone(HIT_NOTES[idx]);
       hint.classList.add('gone');
@@ -955,10 +955,10 @@ function startCelebration(test = false) {
 
   document.body.append(overlay);
 
-  // затемнение ~0.9с, потом шары по одному: раскрутка + спавн-звук выше и выше
+  // dim for ~0.9s, then balls one by one: spin-up + spawn sound higher and higher
   balls.forEach((b, i) => {
     setTimeout(() => {
-      if (!overlay.isConnected) return; // могли нажать skip во время спавна
+      if (!overlay.isConnected) return; // skip could have been pressed during the spawn
       b.classList.add('spawned');
       if (!playBuf('spawn', SPAWN_RATES[i], 0.45)) tone(280 * SPAWN_RATES[i], 0.14, 0.07);
       if (i === balls.length - 1) hint.classList.add('shown');
@@ -966,7 +966,7 @@ function startCelebration(test = false) {
   });
 }
 
-// Кликабельный чип шер-кода: клик копирует, подпись мигает подтверждением.
+// Clickable share-code chip: a click copies it, the label flashes a confirmation.
 function codeChip(code) {
   const chip = el('button', 'code-chip mono', code);
   chip.title = 'Click to copy';
@@ -979,8 +979,8 @@ function codeChip(code) {
   return chip;
 }
 
-// Клипборд с фолбэком: clipboard API может быть запрещен политикой,
-// execCommand старый, но не требует разрешений.
+// Clipboard with a fallback: the clipboard API can be blocked by policy,
+// execCommand is old but requires no permissions.
 async function copyText(text) {
   try {
     await navigator.clipboard.writeText(text);
@@ -993,16 +993,16 @@ async function copyText(text) {
     document.body.append(ta);
     ta.select();
     let ok = false;
-    try { ok = document.execCommand('copy'); } catch { /* остается ручное выделение */ }
+    try { ok = document.execCommand('copy'); } catch { /* manual selection remains */ }
     ta.remove();
     return ok;
   }
 }
 
-// ---------- вкладка Group ----------
+// ---------- Group tab ----------
 
-// Сессия протухла: чистим токен и возвращаем на экран входа, иначе
-// приложение вечно долбит бэкенд 401-ми поверх устаревших данных.
+// Session expired: clear the token and return to the login screen, otherwise
+// the app hammers the backend with 401s forever on top of stale data.
 function handleApiError(e) {
   if (e && e.status === 401) {
     logout();
@@ -1015,8 +1015,8 @@ function handleApiError(e) {
 async function refreshGroup() {
   try {
     state.group = await api.getGroup(localMonth());
-    // свой стрик и пропуски берем отсюда, чтобы они были на экране Today
-    // сразу после логина, а не только после первой отправки прогресса
+    // own streak and missed days are taken from here so they are on the Today
+    // screen right after login, not only after the first progress post
     const me = state.group.players.find((p) => p.userId === state.user.uid);
     if (me) state.streak = { streak: me.streak, missedDays: me.missedDays };
     if (state.tab === 'group') renderGroup();
@@ -1039,7 +1039,7 @@ export function renderGroup() {
   const today = localDate();
   const days = g.days;
 
-  // пульс группы: главные цифры дня одной полосой
+  // group pulse: the day's key numbers in a single strip
   const doneCnt = g.players.filter((p) => p.doneToday).length;
   const restCnt = g.players.filter((p) => p.restToday).length;
   const runsToday = g.players.reduce((a, p) => a + ((p.todayRuns && p.todayRuns.completedRuns) || 0), 0);
@@ -1058,8 +1058,8 @@ export function renderGroup() {
   if (restCnt) hero.append(tile('On rest today', String(restCnt)));
   root.append(hero);
 
-  // пьедестал стриков: топ-3 большими аватарками в рамках из пака OPERATOR.
-  // Стрик это почет, а не позор: никакой красной доски "не сыграл сегодня".
+  // streak podium: top 3 with big avatars in frames from the OPERATOR pack.
+  // A streak is an honor, not a shame: no red "did not play today" board.
   const streakers = [...g.players].filter((p) => p.streak > 0)
     .sort((a, b) => b.streak - a.streak || a.missedDays - b.missedDays || a.displayName.localeCompare(b.displayName))
     .slice(0, 3);
@@ -1071,7 +1071,7 @@ export function renderGroup() {
     pod.append(ph);
     const stage = el('div', 'podium');
     const metals = ['gold', 'silver', 'bronze'];
-    // классика: второй слева, первый в центре, третий справа
+    // the classic order: second on the left, first in the center, third on the right
     const displayOrder = [1, 0, 2].filter((i) => i < streakers.length);
     for (const i of displayOrder) {
       const p = streakers[i];
@@ -1098,7 +1098,7 @@ export function renderGroup() {
     root.append(pod);
   }
 
-  // лидерборд по количеству пропусков
+  // leaderboard by missed day count
   const lb = el('div', 'card');
   const lbHead = el('div', 'card-head');
   lbHead.append(el('h2', null, 'Fewest missed days'));
@@ -1140,7 +1140,7 @@ export function renderGroup() {
   lb.append(table);
   root.append(lb);
 
-  // календарь месяца, строка на участника
+  // month calendar, one row per player
   const cal = el('div', 'card');
   const calHead = el('div', 'card-head');
   calHead.append(el('h2', null, monthName(g.month)));
@@ -1171,7 +1171,7 @@ export function renderGroup() {
       const rec = pl.byDate[d];
       let cls = cellClass(rec, d, today, pl.joinedDate);
       let title = rec ? `${rec.completedRuns}/${rec.requiredRuns}` : 'nothing';
-      // выходной виден и в прошлом, и как план на будущее
+      // a rest day is visible both in the past and as a plan for the future
       if (!(rec && rec.done) && restSet.has(d)) { cls = 'is-rest'; title = 'scheduled rest day'; }
       const cell = el('div', 'cal-cell ' + cls + (isMonday(d) ? ' wk' : ''));
       cell.title = `${pl.displayName}, ${d}: ` + title;
@@ -1196,7 +1196,7 @@ function monthName(m) {
   return new Date(Number(y), Number(mm) - 1, 1).toLocaleString('en', { month: 'long', year: 'numeric' });
 }
 
-// ---------- вкладка Admin ----------
+// ---------- Admin tab ----------
 
 function renderAdmin() {
   const root = $('view-admin');
@@ -1266,7 +1266,7 @@ function renderAdmin() {
       msg.textContent = 'Published. Everyone checks against this list now.';
       msg.className = 'notice ok';
       msg.hidden = false;
-      state.lastPostedRuns = -1; // требования сменились, пересчитать и переотправить
+      state.lastPostedRuns = -1; // requirements changed, recompute and repost
     } catch (e) {
       msg.textContent = 'Failed: ' + e.message;
       msg.className = 'notice error';
@@ -1277,10 +1277,10 @@ function renderAdmin() {
 
   root.append(card);
 
-  // ручной дайджест: тот же текст, что уходит по крону в 23:00
+  // manual digest: the same text the 18:00 cron sends
   const dig = el('div', 'card');
   dig.append(el('h2', null, 'Discord digest'));
-  dig.append(el('p', 'lede', 'Instant completion shouts are live. The daily 17:00 auto-post is PAUSED for rework; this button still posts the daily digest manually whenever you want to test it.'));
+  dig.append(el('p', 'lede', 'Instant completion shouts and the daily 18:00 auto-digest are live. This button posts an extra digest right now, same text the evening one would send.'));
   const dbtn = el('button', 'primary', 'Post digest now');
   const dmsg = el('p', 'notice');
   dmsg.hidden = true;
