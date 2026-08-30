@@ -639,7 +639,7 @@ export function renderToday() {
         steps.append(li);
         return li;
       };
-      step('KovaaK\'s settings.', 'Game Options -> Main -> Statistics Export = "Always".');
+      step('KovaaK\'s settings.', 'Settings -> Misc -> Statistics Export = "Always".');
       if (state.playlist && state.playlist.shareCode) {
         step('Playlist.', [' Download it in KovaaK\'s with this code: ', codeChip(state.playlist.shareCode)]);
       } else {
@@ -691,7 +691,7 @@ export function renderToday() {
 
   // no stats files in the folder at all: almost certainly the wrong one was picked
   if (p.scanned === 0) {
-    const warn = notice('There are no KovaaK\'s stats files in this folder at all, so it is probably the wrong one. It has to be the "stats" folder inside FPSAimTrainer\\FPSAimTrainer. If the folder is right, check that Statistics Export is set to "Always" in KovaaK\'s Game Options.', 'error');
+    const warn = notice('There are no KovaaK\'s stats files in this folder at all, so it is probably the wrong one. It has to be the "stats" folder inside FPSAimTrainer\\FPSAimTrainer. If the folder is right, check that Statistics Export is set to "Always" in KovaaK\'s settings (Misc tab).', 'error');
     const rebtn = el('button', null, 'Pick a different folder');
     rebtn.addEventListener('click', connectFolder);
     warn.append(rebtn);
