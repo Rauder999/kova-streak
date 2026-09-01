@@ -41,6 +41,7 @@ export const state = {
   graceUsed: 0,           // how many night runs were credited to yesterday
   streak: null,
   group: null,
+  groupMonth: null,       // YYYY-MM when browsing history, null = current month
   tab: 'today',
   scanError: null,
   coachEnabled: false,
@@ -707,7 +708,7 @@ export function renderToday() {
     p.done ? 'checked in for today, automatically' : `${p.items.filter((i) => i.done).length} of ${p.items.length} scenarios finished`));
   if (state.streak) {
     stats.append(statBlock('Streak', `${state.streak.streak} ${state.streak.streak === 1 ? 'day' : 'days'}`, 'consecutive days completed'));
-    stats.append(statBlock('Missed this month', String(state.streak.missedDays), 'this is what the ranking uses'));
+    stats.append(statBlock('Done this month', state.streak.doneDays != null ? String(state.streak.doneDays) : '-', 'this is what the ranking uses'));
   }
   if (state.group && state.group.players.length > 1) {
     const doneCnt = state.group.players.filter((x) => x.doneToday).length;
@@ -1014,11 +1015,19 @@ function handleApiError(e) {
 
 async function refreshGroup() {
   try {
-    state.group = await api.getGroup(localMonth());
-    // own streak and missed days are taken from here so they are on the Today
-    // screen right after login, not only after the first progress post
-    const me = state.group.players.find((p) => p.userId === state.user.uid);
-    if (me) state.streak = { streak: me.streak, missedDays: me.missedDays };
+    // state.groupMonth = null means the current month; a YYYY-MM string means
+    // the history view (month navigation next to the calendar title)
+    const month = state.groupMonth || localMonth();
+    const g = await api.getGroup(month);
+    // ignore a stale response if the user navigated to another month meanwhile
+    if (g.month === (state.groupMonth || localMonth())) state.group = g;
+    // own streak and ranking stats are taken from here so they are on the Today
+    // screen right after login, not only after the first progress post.
+    // Only from the current month: history months carry historical numbers.
+    if (!state.groupMonth) {
+      const me = g.players.find((p) => p.userId === state.user.uid);
+      if (me) state.streak = { streak: me.streak, missedDays: me.missedDays, doneDays: me.doneDays };
+    }
     if (state.tab === 'group') renderGroup();
     if (state.tab === 'today') renderToday();
   } catch (e) {
@@ -1027,6 +1036,21 @@ async function refreshGroup() {
   }
   clearTimeout(groupTimer);
   groupTimer = setTimeout(refreshGroup, GROUP_REFRESH_MS);
+}
+
+// First month with any group data: there is nothing to browse before it
+const GROUP_MIN_MONTH = '2026-08';
+
+function shiftMonth(m, delta) {
+  const [y, mm] = m.split('-').map(Number);
+  return new Date(Date.UTC(y, mm - 1 + delta, 1)).toISOString().slice(0, 7);
+}
+
+function gotoMonth(month) {
+  state.groupMonth = month === localMonth() ? null : month;
+  state.group = null; // show the loading notice instead of the stale month
+  renderGroup();
+  refreshGroup();
 }
 
 export function renderGroup() {
@@ -1038,32 +1062,48 @@ export function renderGroup() {
 
   const today = localDate();
   const days = g.days;
+  // history view: a past month, frozen results; the live blocks are hidden
+  const isHistory = g.month !== localMonth();
+  const doneOf = (pl) => (pl.doneDays != null ? pl.doneDays : Object.values(pl.byDate).filter((r) => r.done).length);
 
-  // group pulse: the day's key numbers in a single strip
-  const doneCnt = g.players.filter((p) => p.doneToday).length;
-  const restCnt = g.players.filter((p) => p.restToday).length;
-  const runsToday = g.players.reduce((a, p) => a + ((p.todayRuns && p.todayRuns.completedRuns) || 0), 0);
-  const topStreak = [...g.players].sort((a, b) => b.streak - a.streak)[0];
-  const hero = el('div', 'group-hero');
-  const tile = (label, value, hint) => {
-    const t = el('div', 'hero-tile');
-    t.append(el('span', 'stat-label', label));
-    t.append(el('span', 'hero-value mono', value));
-    if (hint) t.append(el('span', 'stat-hint', hint));
-    return t;
-  };
-  hero.append(tile('Checked in today', `${doneCnt} / ${g.players.length}`));
-  hero.append(tile('Runs today', String(runsToday)));
-  if (topStreak && topStreak.streak > 0) hero.append(tile('Top streak', `${topStreak.streak}d`, topStreak.displayName));
-  if (restCnt) hero.append(tile('On rest today', String(restCnt)));
-  root.append(hero);
+  if (isHistory) {
+    // slim banner instead of the live hero band
+    const bar = el('div', 'history-bar');
+    bar.append(el('span', null, `${monthName(g.month)}: final results.`));
+    const back = el('button', 'month-back', 'Back to this month');
+    back.addEventListener('click', () => gotoMonth(localMonth()));
+    bar.append(back);
+    root.append(bar);
+  } else {
+    // group pulse: the day's key numbers in a single strip
+    const doneCnt = g.players.filter((p) => p.doneToday).length;
+    const restCnt = g.players.filter((p) => p.restToday).length;
+    const runsToday = g.players.reduce((a, p) => a + ((p.todayRuns && p.todayRuns.completedRuns) || 0), 0);
+    const topStreak = [...g.players].sort((a, b) => b.streak - a.streak)[0];
+    const hero = el('div', 'group-hero');
+    const tile = (label, value, hint) => {
+      const t = el('div', 'hero-tile');
+      t.append(el('span', 'stat-label', label));
+      t.append(el('span', 'hero-value mono', value));
+      if (hint) t.append(el('span', 'stat-hint', hint));
+      return t;
+    };
+    hero.append(tile('Checked in today', `${doneCnt} / ${g.players.length}`));
+    hero.append(tile('Runs today', String(runsToday)));
+    if (topStreak && topStreak.streak > 0) hero.append(tile('Top streak', `${topStreak.streak}d`, topStreak.displayName));
+    if (restCnt) hero.append(tile('On rest today', String(restCnt)));
+    root.append(hero);
+  }
 
-  // streak podium: top 3 with big avatars in frames from the OPERATOR pack.
-  // A streak is an honor, not a shame: no red "did not play today" board.
-  const streakers = [...g.players].filter((p) => p.streak > 0)
-    .sort((a, b) => b.streak - a.streak || a.missedDays - b.missedDays || a.displayName.localeCompare(b.displayName))
-    .slice(0, 3);
-  if (streakers.length) {
+  // streak podium: top 3 DISTINCT streak values with big avatars in frames
+  // from the OPERATOR pack. Players tied on the same streak share the pedestal
+  // (per Pasha, 2026-09-01). A streak is an honor, not a shame: no red board.
+  // Current month only: a streak is a now-thing, history months do not have one.
+  const active = g.players.filter((p) => p.streak > 0);
+  const podiumValues = [...new Set(active.map((p) => p.streak))].sort((a, b) => b - a).slice(0, 3);
+  const podiumGroups = podiumValues.map((v) => active.filter((p) => p.streak === v)
+    .sort((a, b) => a.missedDays - b.missedDays || a.displayName.localeCompare(b.displayName)));
+  if (!isHistory && podiumGroups.length) {
     const pod = el('div', 'card podium-card');
     const ph = el('div', 'card-head');
     ph.append(el('h2', null, 'Streak podium'));
@@ -1072,24 +1112,30 @@ export function renderGroup() {
     const stage = el('div', 'podium');
     const metals = ['gold', 'silver', 'bronze'];
     // the classic order: second on the left, first in the center, third on the right
-    const displayOrder = [1, 0, 2].filter((i) => i < streakers.length);
+    const displayOrder = [1, 0, 2].filter((i) => i < podiumGroups.length);
     for (const i of displayOrder) {
-      const p = streakers[i];
+      const grp = podiumGroups[i];
+      const shown = grp.slice(0, 4); // a wider tie collapses into "+N"
       const slot = el('div', `podium-slot place-${i + 1}`);
-      const frame = el('div', 'podium-frame');
-      frame.style.backgroundImage = `url('assets/frame-${metals[i]}.svg')`;
-      const img = el('img', 'podium-avatar');
-      img.src = p.avatar || avatarFallback(p.userId);
-      img.alt = '';
-      safeAvatar(img, p.userId);
-      frame.append(img);
-      slot.append(frame);
-      slot.append(el('div', 'podium-name', p.displayName));
+      const frames = el('div', 'podium-frames' + (shown.length > 1 ? ' multi' : ''));
+      for (const p of shown) {
+        const frame = el('div', 'podium-frame');
+        frame.style.backgroundImage = `url('assets/frame-${metals[i]}.svg')`;
+        const img = el('img', 'podium-avatar');
+        img.src = p.avatar || avatarFallback(p.userId);
+        img.alt = '';
+        safeAvatar(img, p.userId);
+        frame.append(img);
+        frames.append(frame);
+      }
+      slot.append(frames);
+      const names = shown.map((p) => p.displayName).join(', ') + (grp.length > shown.length ? ` +${grp.length - shown.length}` : '');
+      slot.append(el('div', 'podium-name' + (shown.length > 1 ? ' multi' : ''), names));
       const st = el('div', 'podium-streak mono');
       const fl = el('img', 'podium-flame');
       fl.src = 'assets/flame.svg';
       fl.alt = '';
-      st.append(fl, `${p.streak}d`);
+      st.append(fl, `${podiumValues[i]}d`);
       slot.append(st);
       slot.append(el('div', 'podium-pedestal'));
       stage.append(slot);
@@ -1098,17 +1144,20 @@ export function renderGroup() {
     root.append(pod);
   }
 
-  // leaderboard by missed day count
+  // leaderboard: ranked by days completed this month (the worker sorts)
   const lb = el('div', 'card');
   const lbHead = el('div', 'card-head');
-  lbHead.append(el('h2', null, 'Fewest missed days'));
-  lbHead.append(el('span', 'muted', 'the prize ranking'));
+  lbHead.append(el('h2', null, 'Most days completed'));
+  lbHead.append(el('span', 'muted', isHistory ? 'final standings' : 'the prize ranking'));
   lb.append(lbHead);
 
   const table = el('table', 'leaderboard');
   const thead = el('thead');
   const hr = el('tr');
-  ['#', 'Player', 'Missed', 'Streak', 'This week', 'Today'].forEach((h) => hr.append(el('th', null, h)));
+  const cols = isHistory
+    ? ['#', 'Player', 'Done', 'Missed']
+    : ['#', 'Player', 'Done', 'Missed', 'Streak', 'This week', 'Today'];
+  cols.forEach((h) => hr.append(el('th', null, h)));
   thead.append(hr);
   table.append(thead);
   const tbody = el('tbody');
@@ -1123,17 +1172,20 @@ export function renderGroup() {
     safeAvatar(img, pl.userId);
     nameCell.append(img, el('span', null, pl.displayName));
     tr.append(nameCell);
-    tr.append(el('td', 'mono', String(pl.missedDays)));
-    tr.append(el('td', 'mono', pl.streak > 0 ? pl.streak + 'd' : '-'));
-    tr.append(el('td', 'mono muted', (pl.weekDone != null ? pl.weekDone : 0) + '/7'));
-    const t = pl.byDate[today];
-    const todayCell = el('td', 'mono');
-    if (!(t && t.done) && pl.restToday) {
-      todayCell.append(el('span', 'pill is-rest', 'rest'));
-    } else {
-      todayCell.append(el('span', 'pill ' + cellClass(t), t && t.done ? 'done' : t ? Math.round((t.completedRuns / t.requiredRuns) * 100) + '%' : '-'));
+    tr.append(el('td', 'mono', String(doneOf(pl))));
+    tr.append(el('td', 'mono muted', String(pl.missedDays)));
+    if (!isHistory) {
+      tr.append(el('td', 'mono', pl.streak > 0 ? pl.streak + 'd' : '-'));
+      tr.append(el('td', 'mono muted', (pl.weekDone != null ? pl.weekDone : 0) + '/7'));
+      const t = pl.byDate[today];
+      const todayCell = el('td', 'mono');
+      if (!(t && t.done) && pl.restToday) {
+        todayCell.append(el('span', 'pill is-rest', 'rest'));
+      } else {
+        todayCell.append(el('span', 'pill ' + cellClass(t), t && t.done ? 'done' : t ? Math.round((t.completedRuns / t.requiredRuns) * 100) + '%' : '-'));
+      }
+      tr.append(todayCell);
     }
-    tr.append(todayCell);
     tbody.append(tr);
   });
   table.append(tbody);
@@ -1143,7 +1195,21 @@ export function renderGroup() {
   // month calendar, one row per player
   const cal = el('div', 'card');
   const calHead = el('div', 'card-head');
-  calHead.append(el('h2', null, monthName(g.month)));
+  const titleWrap = el('div', 'cal-title');
+  titleWrap.append(el('h2', null, monthName(g.month)));
+  // quiet history navigation: small chevrons, nothing flashy (per Pasha)
+  const nav = el('div', 'month-nav');
+  const prevBtn = el('button', null, '‹');
+  prevBtn.title = 'Previous month';
+  prevBtn.disabled = g.month <= GROUP_MIN_MONTH;
+  prevBtn.addEventListener('click', () => gotoMonth(shiftMonth(g.month, -1)));
+  const nextBtn = el('button', null, '›');
+  nextBtn.title = 'Next month';
+  nextBtn.disabled = !isHistory;
+  nextBtn.addEventListener('click', () => gotoMonth(shiftMonth(g.month, 1)));
+  nav.append(prevBtn, nextBtn);
+  titleWrap.append(nav);
+  calHead.append(titleWrap);
   const legend = el('div', 'cal-legend');
   [['is-done', 'done'], ['is-partial', 'partial'], ['is-rest', 'rest'], ['is-today-empty', 'today'], ['is-future', 'upcoming']].forEach(([cls, label]) => {
     const item = el('span', 'legend-item');

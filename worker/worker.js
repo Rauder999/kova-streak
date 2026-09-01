@@ -207,6 +207,11 @@ async function buildStandings(env, month) {
     const wk = weekKeyOf(today);
     let weekDone = 0;
     for (let d = wk; d <= today; d = shiftDate(d, 1)) if (all[d] && all[d].done) weekDone++;
+    // days completed within the requested month: the primary ranking metric
+    // (per Pasha, 2026-09-01: most days done beats fewest missed, otherwise a
+    // late joiner with 2 done / 0 missed would outrank a 28-done veteran)
+    let doneDays = 0;
+    for (const rec of Object.values(byDate)) if (rec.done) doneDays++;
     // last closed day in all of history: the digest uses it to tell
     // "did not make it today" from "has been silent for days"
     let lastDone = null;
@@ -226,6 +231,7 @@ async function buildStandings(env, month) {
       restDays: [...rest].filter((d) => d.startsWith(month.slice(0, 7))),
       restToday: rest.has(today) && !(all[today] && all[today].done),
       weekDone,
+      doneDays,
       lastDone,
       idleDays,
       streak: computeStreak(all, today, rest),
@@ -235,7 +241,9 @@ async function buildStandings(env, month) {
     };
   });
 
-  players.sort((a, b) => a.missedDays - b.missedDays || b.streak - a.streak || a.displayName.localeCompare(b.displayName));
+  // ranking: most days completed this month first; fewer missed breaks ties,
+  // then the longer active streak, then the name
+  players.sort((a, b) => b.doneDays - a.doneDays || a.missedDays - b.missedDays || b.streak - a.streak || a.displayName.localeCompare(b.displayName));
   return { month, today, days: monthDays(month), players };
 }
 
