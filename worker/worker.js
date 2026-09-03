@@ -382,7 +382,13 @@ async function handleApi(request, env, url, cors, ctx) {
   if (!user) return json({ error: 'Not signed in' }, 401, cors);
 
   if (path === '/api/me' && request.method === 'GET') {
-    return json({ ...user, coachEnabled: await coachAllowed(env, user) }, 200, cors);
+    const profile = await env.KOVA.get(`user:${user.uid}`, 'json');
+    return json({
+      ...user,
+      coachEnabled: await coachAllowed(env, user),
+      // the frontend fences stats and coach to days from this date on
+      joinedDate: (profile && profile.joinedDate) || null,
+    }, 200, cors);
   }
 
   if (path === '/api/playlist' && request.method === 'PUT') {
@@ -559,11 +565,19 @@ async function handleApi(request, env, url, cors, ctx) {
   // repeated requests do not spend a single token.
   if (path === '/api/coach' && request.method === 'POST') {
     if (!(await coachAllowed(env, user))) return json({ error: 'Coach is not enabled for you yet' }, 403, cors);
-    if (!env.ANTHROPIC_API_KEY) return json({ error: 'Coach is not configured yet (ANTHROPIC_API_KEY)' }, 503, cors);
     const body = await request.json().catch(() => null);
     if (!body || typeof body.stateHash !== 'string' || !Array.isArray(body.niches) || !body.niches.length) {
       return json({ error: 'stateHash and niches are required' }, 400, cors);
     }
+    // days before joining the group never reach the model (per Pasha,
+    // 2026-09-01): a year of pre-join history must not burn tokens
+    if (body.date && isDate(body.date)) {
+      const profile = await env.KOVA.get(`user:${user.uid}`, 'json');
+      if (profile && profile.joinedDate && body.date < profile.joinedDate) {
+        return json({ error: 'Coach covers only days after you joined the group' }, 403, cors);
+      }
+    }
+    if (!env.ANTHROPIC_API_KEY) return json({ error: 'Coach is not configured yet (ANTHROPIC_API_KEY)' }, 503, cors);
     // version in the key: a new prompt generation buries the old cached verdicts
     const cacheKey = `coach:v7:${user.uid}:${body.stateHash.slice(0, 64)}`;
     const cached = await env.KOVA.get(cacheKey, 'json');

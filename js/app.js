@@ -42,6 +42,7 @@ export const state = {
   streak: null,
   group: null,
   groupMonth: null,       // YYYY-MM when browsing history, null = current month
+  joinedDate: null,       // stats and coach are fenced to days from this date on
   tab: 'today',
   scanError: null,
   coachEnabled: false,
@@ -126,6 +127,9 @@ async function boot() {
   try {
     const me = await api.getMe();
     state.coachEnabled = !!(me && me.coachEnabled);
+    // analytics are fenced to the days after joining the group: an old
+    // KovaaK's history must not be browsable and must not burn coach tokens
+    state.joinedDate = (me && me.joinedDate) || null;
     $('stats-tab-btn').hidden = !state.coachEnabled;
   } catch { /* without the flag we behave as before */ }
 
@@ -323,10 +327,16 @@ async function maybePostScores(added) {
   } catch { /* not critical: we retry with the next new run */ }
 }
 
-// Builds the report for the selected date (today or any past day)
+// Builds the report for the selected date (today or any past day).
+// Days before joining the group are not browsable (per Pasha, 2026-09-01):
+// pre-join history still feeds the baselines silently, but gets no day chip,
+// no report and no coach call.
 async function rebuildReport(day) {
   const runs = await getAllParsedRuns();
-  state.playedDates = [...new Set(runs.map((r) => r.date))].sort().reverse().slice(0, 21);
+  if (state.joinedDate && day < state.joinedDate) day = state.date;
+  state.playedDates = [...new Set(runs.map((r) => r.date))]
+    .filter((d) => !state.joinedDate || d >= state.joinedDate)
+    .sort().reverse().slice(0, 21);
   state.report = buildDailyReport(runs, day);
   if (state.tab === 'stats') renderStats();
   await maybeCoach();
@@ -338,6 +348,8 @@ async function rebuildReport(day) {
 async function maybeCoach() {
   const r = state.report;
   if (!r || !r.niches.length) return;
+  // the fence again, in case a pre-join report slipped through: no tokens
+  if (state.joinedDate && r.today < state.joinedDate) return;
 
   const history = (await kvGet('coachHistory')) || [];
   const recent = history
@@ -354,6 +366,7 @@ async function maybeCoach() {
   try {
     const payload = coachPayload(r);
     payload.stateHash = fullHash;
+    payload.date = r.today; // the server rejects pre-join dates
     payload.recentAdvice = recent.map((h) => ({ date: h.date, lines: h.lines }));
     // tracking does not go to the model: the client builds its line itself from the doctrine
     const trackingLine = buildTrackingLine(r);
