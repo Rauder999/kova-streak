@@ -1031,8 +1031,16 @@ async function postDigest(env) {
       const sting = STING_MILD[Number(today.slice(-2)) % STING_MILD.length];
       lines.push(`[Incomplete: ${names(incomplete)}. The day is not over. ${sting}]`);
     }
-    for (const p of silent.slice(0, 5)) {
-      lines.push(`[No training detected from ${p.displayName} since ${shortDate(p.lastDone)}. ${STING_HARSH}]`);
+    // one line for ALL the silent, not a line per player (per Pasha,
+    // 2026-09-04): a single name keeps the "since" form, several collapse
+    // into "Name (date)" pairs so the sting is not spammed
+    if (silent.length === 1) {
+      lines.push(`[No training detected from ${silent[0].displayName} since ${shortDate(silent[0].lastDone)}. ${STING_HARSH}]`);
+    } else if (silent.length > 1) {
+      const shown = silent.slice(0, 8);
+      let listed = shown.map((p) => `${p.displayName} (${shortDate(p.lastDone)})`).join(', ');
+      if (silent.length > shown.length) listed += ` and ${silent.length - shown.length} more`;
+      lines.push(`[No training detected from ${listed}. ${STING_HARSH}]`);
     }
     lines.push(`[${done.length}/${players.length} cleared. Gate closes at midnight.]`);
   }
