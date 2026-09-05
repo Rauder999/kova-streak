@@ -27,6 +27,7 @@ const GROUP_REFRESH_MS = 60000;
 export const state = {
   user: null,
   playlist: null,
+  prevPlaylist: null,     // the playlist that was active before the current one
   handle: null,
   granted: false,
   date: localDate(),
@@ -118,6 +119,11 @@ async function boot() {
 
   try {
     state.playlist = await api.getPlaylist();
+    // the playlist that was active before the current one: yesterday-healing
+    // judges yesterday by it when the swap happened after yesterday ended.
+    // Awaited BEFORE polling starts so the first tick never grades yesterday
+    // against the wrong week.
+    state.prevPlaylist = await api.getPrevPlaylist().catch(() => null);
   } catch (e) {
     state.scanError = 'Backend unreachable: ' + e.message;
   }
@@ -240,8 +246,9 @@ async function tick() {
       return;
     }
 
-    const { prev, grace, cur, scanned } = await countRunsAroundMidnight(state.handle, state.date, prevDateOf(state.date));
-    const split = applyGraceWindow(state.playlist.scenarios, prev, grace, cur);
+    const prevDate = prevDateOf(state.date);
+    const { prev, grace, cur, scanned } = await countRunsAroundMidnight(state.handle, state.date, prevDate);
+    const split = applyGraceWindow(state.playlist.scenarios, prev, grace, cur, prevScenariosFor(prevDate));
     state.progress = split.todayProgress;
     state.progress.scanned = scanned;
     state.graceUsed = split.graceUsed;
@@ -273,6 +280,17 @@ function prevDateOf(date) {
   const d = new Date(date + 'T12:00:00');
   d.setDate(d.getDate() - 1);
   return localDate(d);
+}
+
+// The playlist that was active on prevDate: if the current one replaced it
+// AFTER that day, yesterday is judged by the archived version, so the weekly
+// swap does not burn an unhealed yesterday.
+function prevScenariosFor(prevDate) {
+  const p = state.prevPlaylist;
+  if (p && p.replacedOn && p.replacedOn > prevDate && Array.isArray(p.scenarios) && p.scenarios.length) {
+    return p.scenarios;
+  }
+  return state.playlist.scenarios;
 }
 
 // ---------- personal stats and coach ----------

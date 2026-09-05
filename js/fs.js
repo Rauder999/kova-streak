@@ -76,17 +76,20 @@ export async function countRunsAroundMidnight(handle, today, prevDate) {
 // but not closed, night runs (before GRACE_HOURS) are counted toward
 // yesterday, not today: a session that crawled past midnight closes its own
 // day. If yesterday is closed or never started, night runs belong to today.
+// prevScenarios: the playlist that was ACTIVE yesterday. Across a weekly
+// swap yesterday is judged by its own playlist, not by today's (2026-09-05),
+// otherwise the files stop matching and the day cannot heal.
 // Pure function, tested in node without a browser.
-export function applyGraceWindow(scenarios, prev, grace, cur) {
+export function applyGraceWindow(scenarios, prev, grace, cur, prevScenarios = scenarios) {
   const merge = (a, b) => {
     const m = new Map(a);
     for (const [k, v] of b) m.set(k, (m.get(k) || 0) + v);
     return m;
   };
-  const prevAlone = matchPlaylist(scenarios, prev);
+  const prevAlone = matchPlaylist(prevScenarios, prev);
   if (!prevAlone.done && prevAlone.completedRuns > 0 && grace.size) {
     return {
-      prevProgress: matchPlaylist(scenarios, merge(prev, grace)),
+      prevProgress: matchPlaylist(prevScenarios, merge(prev, grace)),
       todayProgress: matchPlaylist(scenarios, cur),
       graceUsed: [...grace.values()].reduce((a, b) => a + b, 0),
     };

@@ -45,6 +45,7 @@ export const loginUrl = () => `${API_BASE}/auth/login?redirect=${encodeURICompon
 
 export const getMe = () => call('/api/me');
 export const getPlaylist = () => call('/api/playlist');
+export const getPrevPlaylist = () => call('/api/playlist/prev');
 export const setPlaylist = (playlist) => call('/api/playlist', { method: 'PUT', body: playlist });
 export const getGroup = (month) => call(`/api/group?month=${encodeURIComponent(month)}`);
 

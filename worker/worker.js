@@ -409,8 +409,22 @@ async function handleApi(request, env, url, cors, ctx) {
       updatedAt: Date.now(),
       updatedBy: user.name,
     };
+    // Archive the outgoing playlist: yesterday-healing on the client judges
+    // yesterday by the playlist that was ACTIVE yesterday, so a weekly swap
+    // does not burn the previous day (files stop matching the new list).
+    const old = await env.KOVA.get('playlist:current', 'json');
+    if (old && Array.isArray(old.scenarios) && old.scenarios.length) {
+      await env.KOVA.put('playlist:prev', JSON.stringify({ ...old, replacedOn: groupDate(env) }));
+    }
     await env.KOVA.put('playlist:current', JSON.stringify(playlist));
     return json(playlist, 200, cors);
+  }
+
+  // The previously active playlist (with replacedOn): the client uses it to
+  // evaluate yesterday across a weekly playlist swap.
+  if (path === '/api/playlist/prev' && request.method === 'GET') {
+    const prev = await env.KOVA.get('playlist:prev', 'json');
+    return json(prev || { scenarios: [], replacedOn: null }, 200, cors);
   }
 
   if (path === '/api/completion' && request.method === 'POST') {
