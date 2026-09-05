@@ -879,7 +879,10 @@ async function generateCoachLines(env, body) {
       // generous limit: with thinking models the reasoning eats the budget before the text,
       // 300 tokens used to cut the reply off mid-sentence (a pitfall known from AimSama)
       max_tokens: 6000,
-      system: COACH_PROMPT,
+      // the ~4.3k-token prompt is identical in every call and dominates the bill:
+      // prompt caching makes repeat reads ~10x cheaper (2026-09-05, cost review:
+      // 900 calls in 11 days, nearly all of the $7.82 was this prompt re-sent raw)
+      system: [{ type: 'text', text: COACH_PROMPT, cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: 'Diagnosis:\n' + JSON.stringify({ rustyDays: body.rustyDays || null, niches: body.niches }) }],
     }),
   });
