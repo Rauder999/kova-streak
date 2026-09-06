@@ -1187,7 +1187,7 @@ export function renderGroup() {
   const hr = el('tr');
   const cols = isHistory
     ? ['#', 'Player', 'Done', 'Missed']
-    : ['#', 'Player', 'Done', 'Missed', 'Streak', 'This week', 'Today'];
+    : ['#', 'Player', 'Done', 'Missed', 'Streak', 'All time', 'Today'];
   cols.forEach((h) => hr.append(el('th', null, h)));
   thead.append(hr);
   table.append(thead);
@@ -1207,7 +1207,7 @@ export function renderGroup() {
     tr.append(el('td', 'mono muted', String(pl.missedDays)));
     if (!isHistory) {
       tr.append(el('td', 'mono', pl.streak > 0 ? pl.streak + 'd' : '-'));
-      tr.append(el('td', 'mono muted', (pl.weekDone != null ? pl.weekDone : 0) + '/7'));
+      tr.append(el('td', 'mono muted', String(pl.totalDone != null ? pl.totalDone : doneOf(pl))));
       const t = pl.byDate[today];
       const todayCell = el('td', 'mono');
       if (!(t && t.done) && pl.restToday) {

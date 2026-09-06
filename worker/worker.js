@@ -203,10 +203,10 @@ async function buildStandings(env, month) {
     const rest = new Set(Array.isArray(restLists[i]) ? restLists[i] : []);
     const byDate = {};
     for (const [d, rec] of Object.entries(all)) if (d.startsWith(month + '-')) byDate[d] = rec;
-    // days closed during the current week (for the This week column)
-    const wk = weekKeyOf(today);
-    let weekDone = 0;
-    for (let d = wk; d <= today; d = shiftDate(d, 1)) if (all[d] && all[d].done) weekDone++;
+    // days completed over the entire history (the All time column,
+    // replaced This week per Pasha, 2026-09-06)
+    let totalDone = 0;
+    for (const rec of Object.values(all)) if (rec.done) totalDone++;
     // days completed within the requested month: the primary ranking metric
     // (per Pasha, 2026-09-01: most days done beats fewest missed, otherwise a
     // late joiner with 2 done / 0 missed would outrank a 28-done veteran)
@@ -230,7 +230,7 @@ async function buildStandings(env, month) {
       byDate,
       restDays: [...rest].filter((d) => d.startsWith(month.slice(0, 7))),
       restToday: rest.has(today) && !(all[today] && all[today].done),
-      weekDone,
+      totalDone,
       doneDays,
       lastDone,
       idleDays,
