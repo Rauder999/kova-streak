@@ -47,7 +47,9 @@ export async function ensurePermission(handle, { request = false } = {}) {
 
 // The first hours after midnight, when night runs can still close out
 // yesterday's day (a session that rolled over past midnight).
-export const GRACE_HOURS = 2;
+// Widened 2 -> 3 per Pasha (2026-09-06): a real session ended at 02:09
+// and the tail leaked into the new day.
+export const GRACE_HOURS = 3;
 
 // One pass over the folder, three buckets: yesterday's runs, today's night
 // runs (the first GRACE_HOURS hours) and the rest of today's.
