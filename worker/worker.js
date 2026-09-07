@@ -114,6 +114,40 @@ function weekKeyOf(date) {
 
 const REST_QUOTA_PER_WEEK = 2;
 
+// ---------- Chain Protocol constants (see CHAIN_PROTOCOL.md) ----------
+
+const LINKS = { chain: 1, rescueMult: 2, perfect: 2, trialPart: 1, trialWin: 5 };
+const VAULT_PRICES = { frame: 5, voucher: 12, shield: 15 };
+const FRAME_DAYS = 7;
+
+// Half-week chain windows: Monday-Wednesday (A) and Thursday-Sunday (B).
+function windowOf(date) {
+  const wk = weekKeyOf(date);
+  const dowMon = (new Date(date + 'T00:00:00Z').getUTCDay() + 6) % 7; // 0 = Monday
+  const half = dowMon <= 2 ? 'A' : 'B';
+  const start = half === 'A' ? wk : shiftDate(wk, 3);
+  const len = half === 'A' ? 3 : 4;
+  const days = [];
+  for (let i = 0; i < len; i++) days.push(shiftDate(start, i));
+  return { id: `${wk}:${half}`, start, days, last: days[len - 1] };
+}
+
+function prevWindowIdOf(win) {
+  if (win.id.endsWith(':B')) return win.id.slice(0, 10) + ':A';
+  return shiftDate(win.start, -7) + ':B';
+}
+
+// Small deterministic PRNG: the same window id gives the same shuffle
+// everywhere, so pairing needs no coordination.
+function seededRng(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return function () {
+    h ^= h << 13; h ^= h >>> 17; h ^= h << 5; h |= 0;
+    return ((h >>> 0) % 100000) / 100000;
+  };
+}
+
 // ---------- KV ----------
 
 async function listAll(env, prefix) {
@@ -198,6 +232,12 @@ async function buildStandings(env, month) {
   });
   const restLists = await Promise.all(users.map((u) => env.KOVA.get(`rest:${u.userId}`, 'json')));
 
+  // Chain Protocol: link balances and active Frames of Honor ride the
+  // metadata of their keys, so the whole board costs two list calls.
+  const [linkKeys, vaultKeys] = await Promise.all([listAll(env, 'links:'), listAll(env, 'vault:')]);
+  const linksBy = new Map(linkKeys.map((k) => [k.name.slice('links:'.length), (k.metadata && k.metadata.t) || 0]));
+  const frameBy = new Map(vaultKeys.map((k) => [k.name.slice('vault:'.length), (k.metadata && k.metadata.f) || 0]));
+
   const players = users.map((u, i) => {
     const all = byUser.get(u.userId) || {};
     const rest = new Set(Array.isArray(restLists[i]) ? restLists[i] : []);
@@ -232,6 +272,8 @@ async function buildStandings(env, month) {
       restToday: rest.has(today) && !(all[today] && all[today].done),
       totalDone,
       doneDays,
+      links: linksBy.get(u.userId) || 0,
+      frame: (frameBy.get(u.userId) || 0) > Date.now(),
       lastDone,
       idleDays,
       streak: computeStreak(all, today, rest),
@@ -241,10 +283,328 @@ async function buildStandings(env, month) {
     };
   });
 
-  // ranking: most days completed this month first; fewer missed breaks ties,
-  // then the longer active streak, then the name
-  players.sort((a, b) => b.doneDays - a.doneDays || a.missedDays - b.missedDays || b.streak - a.streak || a.displayName.localeCompare(b.displayName));
+  // ranking: most days completed this month first; links break ties (the
+  // Chain Protocol's promise), then fewer missed, longer streak, name
+  players.sort((a, b) => b.doneDays - a.doneDays || b.links - a.links || a.missedDays - b.missedDays || b.streak - a.streak || a.displayName.localeCompare(b.displayName));
   return { month, today, days: monthDays(month), players };
+}
+
+// ---------- Chain Protocol ----------
+
+// Pairs for a window, created lazily on first access and then stored, so a
+// mid-window roster change never reshuffles anyone. Pool = players with at
+// least one run BEFORE the window start (newcomers join at the next window).
+async function getChainPairs(env, date) {
+  const win = windowOf(date);
+  const key = `chain:pairs:${win.id}`;
+  let doc = await env.KOVA.get(key, 'json');
+  if (doc) return { win, doc };
+
+  const { users, byUser } = await loadGroup(env);
+  const pool = users.filter((u) => {
+    const recs = byUser.get(u.userId) || {};
+    return Object.entries(recs).some(([d, r]) => d < win.start && (r.done || r.completedRuns > 0));
+  });
+  if (pool.length < 2) { doc = { groups: [], cold: [] }; return { win, doc }; }
+
+  const uids = pool.map((u) => u.userId).sort();
+  const rand = seededRng(win.id);
+  for (let i = uids.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [uids[i], uids[j]] = [uids[j], uids[i]];
+  }
+
+  // best effort: not the same partner as in the previous two windows
+  const prevPartners = new Map();
+  for (const pid of [prevWindowIdOf(win), prevWindowIdOf({ id: prevWindowIdOf(win), start: win.start })]) {
+    const prev = await env.KOVA.get(`chain:pairs:${pid}`, 'json').catch(() => null);
+    if (!prev) continue;
+    for (const g of prev.groups || []) {
+      for (const a of g) for (const b of g) if (a !== b) {
+        if (!prevPartners.has(a)) prevPartners.set(a, new Set());
+        prevPartners.get(a).add(b);
+      }
+    }
+  }
+  const groups = [];
+  for (let i = 0; i + 1 < uids.length; i += 2) groups.push([uids[i], uids[i + 1]]);
+  if (uids.length % 2 === 1) groups[groups.length - 1].push(uids[uids.length - 1]);
+  const bad = (a, b) => prevPartners.has(a) && prevPartners.get(a).has(b);
+  for (let pass = 0; pass < 3; pass++) {
+    for (let i = 0; i < groups.length; i++) {
+      const g = groups[i];
+      if (g.length === 2 && bad(g[0], g[1]) && groups.length > 1) {
+        const j = (i + 1) % groups.length;
+        [g[1], groups[j][1]] = [groups[j][1], g[1]];
+      }
+    }
+  }
+
+  // cold members at window start (idle 3+ non-rest days): their chains pay double
+  const cold = [];
+  for (const u of pool) {
+    const recs = byUser.get(u.userId) || {};
+    let lastDone = null;
+    for (const [d, r] of Object.entries(recs)) if (r.done && d < win.start && (!lastDone || d > lastDone)) lastDone = d;
+    if (!lastDone) { cold.push(u.userId); continue; }
+    const rest = new Set((await env.KOVA.get(`rest:${u.userId}`, 'json')) || []);
+    let idle = 0;
+    for (let d = shiftDate(lastDone, 1), i = 0; d < win.start && i < 60; d = shiftDate(d, 1), i++) {
+      if (!rest.has(d)) idle++;
+    }
+    if (idle >= 3) cold.push(u.userId);
+  }
+
+  doc = { groups, cold, createdAt: Date.now() };
+  await env.KOVA.put(key, JSON.stringify(doc), { expirationTtl: 60 * 60 * 24 * 45 });
+  return { win, doc };
+}
+
+async function addLinks(env, uid, delta, why) {
+  const key = `links:${uid}`;
+  const doc = (await env.KOVA.get(key, 'json')) || { total: 0, log: [] };
+  doc.total += delta;
+  doc.log.push({ at: Date.now(), d: delta, why });
+  doc.log = doc.log.slice(-40);
+  await env.KOVA.put(key, JSON.stringify(doc), { metadata: { t: doc.total } });
+  return doc.total;
+}
+
+async function getVault(env, uid) {
+  return (await env.KOVA.get(`vault:${uid}`, 'json')) || {};
+}
+
+async function putVault(env, uid, doc) {
+  await env.KOVA.put(`vault:${uid}`, JSON.stringify(doc), {
+    metadata: { f: doc.frameUntil || 0 },
+  });
+}
+
+// A member's end of the chain is held for a date when they completed it,
+// scheduled rest on it, or left the group entirely.
+async function memberDayStatus(env, uid, date, userMap) {
+  if (!userMap.has(uid)) return 'held';
+  const rec = await env.KOVA.get(`completion:${uid}:${date}`, 'json');
+  if (rec && rec.done) return 'done';
+  const rest = (await env.KOVA.get(`rest:${uid}`, 'json')) || [];
+  if (rest.includes(date)) return 'held';
+  return 'waiting';
+}
+
+// Runs after every first completion of a day. Forges the chain when every
+// end is held, pings the laggards when not. Backfilled dates (the grace
+// window, healing) award quietly: links yes, channel noise no.
+async function chainCheck(env, user, date) {
+  try {
+    const today = groupDate(env);
+    const quiet = date !== today;
+    const { win, doc } = await getChainPairs(env, date);
+    const gi = doc.groups.findIndex((g) => g.includes(user.uid));
+    if (gi < 0) return;
+    const group = doc.groups[gi];
+
+    const { users } = await loadGroup(env);
+    const userMap = new Map(users.map((u) => [u.userId, u]));
+
+    const completed = [user.uid];
+    const waiting = [];
+    for (const uid of group) {
+      if (uid === user.uid) continue;
+      const st = await memberDayStatus(env, uid, date, userMap);
+      if (st === 'done') completed.push(uid);
+      else if (st === 'waiting') waiting.push(uid);
+    }
+
+    if (waiting.length > 0) {
+      if (quiet) return;
+      const marker = `chain:wait:${win.id}:${date}:${gi}`;
+      if (await env.KOVA.get(marker)) return;
+      await env.KOVA.put(marker, '1', { expirationTtl: 60 * 60 * 36 });
+      const me = userMap.get(user.uid);
+      await announceChainWaiting(env, (me && me.displayName) || user.name, waiting);
+      return;
+    }
+
+    // forged
+    const marker = `chain:forged:${win.id}:${date}:${gi}`;
+    if (await env.KOVA.get(marker)) return;
+    await env.KOVA.put(marker, '1', { expirationTtl: 60 * 60 * 24 * 21 });
+
+    const rescue = group.some((uid) => doc.cold.includes(uid));
+    const delta = rescue ? LINKS.chain * LINKS.rescueMult : LINKS.chain;
+    for (const uid of completed) await addLinks(env, uid, delta, `chain ${date}`);
+
+    const stKey = `chain:state:${win.id}`;
+    const st = (await env.KOVA.get(stKey, 'json')) || {};
+    st[date] = st[date] || {};
+    st[date][gi] = true;
+
+    // perfect chain: every window day forged, or neutral (all ends resting
+    // or departed with nobody completing). Future days block perfection.
+    let perfectNow = false;
+    const already = st.perfect && st.perfect[gi];
+    if (!already) {
+      let allHeld = true;
+      for (const d of win.days) {
+        if (st[d] && st[d][gi]) continue;
+        if (d > today && d > date) { allHeld = false; break; }
+        let neutral = true;
+        for (const uid of group) {
+          const s = await memberDayStatus(env, uid, d, userMap);
+          if (s !== 'held') { neutral = false; break; }
+        }
+        if (!neutral) { allHeld = false; break; }
+      }
+      if (allHeld) {
+        st.perfect = st.perfect || {};
+        st.perfect[gi] = true;
+        perfectNow = true;
+        for (const uid of group) if (userMap.has(uid)) await addLinks(env, uid, LINKS.perfect, `perfect chain ${win.id}`);
+      }
+    }
+    await env.KOVA.put(stKey, JSON.stringify(st), { expirationTtl: 60 * 60 * 24 * 45 });
+
+    if (!quiet) {
+      const members = group.map((uid) => userMap.get(uid) || { userId: uid, displayName: 'departed', avatar: null });
+      await announceChainForged(env, members, delta, rescue, perfectNow);
+    }
+  } catch { /* цепи никогда не ломают чек-ин */ }
+}
+
+async function announceChainWaiting(env, completerName, laggardIds) {
+  if (!env.DISCORD_WEBHOOK_URL) return;
+  try {
+    const mentions = laggardIds.map((id) => `<@${id}>`).join(' ');
+    const lines = [`[${completerName} has held their end. The chain waits on you.]`];
+    await fetch(env.DISCORD_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content: mentions + '\n' + systemBlock(lines),
+        allowed_mentions: { users: laggardIds },
+      }),
+    });
+  } catch { /* пинг не критичен */ }
+}
+
+async function announceChainForged(env, members, delta, rescue, perfect) {
+  if (!env.DISCORD_WEBHOOK_URL) return;
+  try {
+    const names = members.map((m) => m.displayName).join(' x ');
+    const ids = members.map((m) => m.userId);
+    const endsWord = members.length === 3 ? 'All three ends' : 'Both ends';
+    const lines = [`[${endsWord} held. +${delta} ${delta === 1 ? 'link' : 'links'} each.]`];
+    if (rescue) lines.push('[Rescue chain. Reward doubled.]');
+    if (perfect) lines.push(`[PERFECT CHAIN. Every day of the window. +${LINKS.perfect} bonus.]`);
+    const embed = {
+      color: 0xE8B64A,
+      author: { name: `[CHAIN FORGED // ${names}]` },
+      description: systemBlock(lines),
+    };
+    if (members[0] && members[0].avatar) embed.author.icon_url = members[0].avatar;
+    if (members[1] && members[1].avatar) embed.thumbnail = { url: members[1].avatar };
+    await fetch(env.DISCORD_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content: ids.map((id) => `<@${id}>`).join(' '),
+        embeds: [embed],
+        allowed_mentions: { users: ids },
+      }),
+    });
+  } catch { /* пост не критичен */ }
+}
+
+// 03:30 group time: a held Streak Shield converts yesterday's zero-run day
+// into a rest day. Public: the digest reports every absorb.
+async function shieldSweep(env) {
+  const today = groupDate(env);
+  const target = shiftDate(today, -1);
+  const vaultKeys = await listAll(env, 'vault:');
+  const used = [];
+  for (const k of vaultKeys) {
+    const uid = k.name.slice('vault:'.length);
+    const doc = await env.KOVA.get(k.name, 'json');
+    if (!doc || !doc.shield) continue;
+    const rec = await env.KOVA.get(`completion:${uid}:${target}`, 'json');
+    if (rec && rec.completedRuns > 0) continue; // played something: the day is theirs to own
+    const rest = (await env.KOVA.get(`rest:${uid}`, 'json')) || [];
+    if (rest.includes(target)) continue;
+    rest.push(target);
+    rest.sort();
+    await env.KOVA.put(`rest:${uid}`, JSON.stringify(rest));
+    doc.shield = false;
+    doc.shieldDays = [...(doc.shieldDays || []), target].slice(-12);
+    await putVault(env, uid, doc);
+    used.push(uid);
+  }
+  if (used.length) {
+    await env.KOVA.put(`shieldused:${today}`, JSON.stringify(used), { expirationTtl: 60 * 60 * 72 });
+  }
+  return used;
+}
+
+// The weekly trial: created at playlist publish, resolved in the Sunday
+// digest. Winner = the largest percentage over your own snapshotted PB.
+async function createTrial(env, playlist, publishedOn) {
+  const dowMon = (new Date(publishedOn + 'T00:00:00Z').getUTCDay() + 6) % 7;
+  // a Sunday publish targets the week that starts tomorrow
+  const weekKey = dowMon === 6 ? shiftDate(publishedOn, 1) : weekKeyOf(publishedOn);
+  const existing = await env.KOVA.get('trial:current', 'json');
+  if (existing && existing.weekKey === weekKey) return null; // mid-week republish keeps the trial
+  const rand = seededRng('trial:' + weekKey);
+  const scenario = playlist.scenarios[Math.floor(rand() * playlist.scenarios.length)].name;
+  const { users } = await loadGroup(env);
+  const baselines = {};
+  for (const u of users) {
+    const pb = await env.KOVA.get(`pb:${u.userId}`, 'json');
+    if (pb && pb[scenario] && pb[scenario].s > 0) baselines[u.userId] = pb[scenario].s;
+  }
+  const trial = { scenario, weekKey, baselines, createdAt: Date.now(), resolved: false };
+  await env.KOVA.put('trial:current', JSON.stringify(trial));
+  return trial;
+}
+
+async function announceTrial(env, trial) {
+  if (!env.DISCORD_WEBHOOK_URL || !trial) return;
+  try {
+    const lines = [
+      `[WEEKLY TRIAL // ${trial.scenario}]`,
+      '[Beat your own record. The largest improvement takes the crown on Sunday.]',
+      `[Any new personal best on it earns +${LINKS.trialPart} link. The top improver takes +${LINKS.trialWin}.]`,
+    ];
+    await fetch(env.DISCORD_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: systemBlock(lines), allowed_mentions: { parse: [] } }),
+    });
+  } catch { /* анонс не критичен */ }
+}
+
+async function resolveTrial(env, today) {
+  const trial = await env.KOVA.get('trial:current', 'json');
+  if (!trial || trial.resolved || trial.weekKey !== weekKeyOf(today)) return [];
+  const { users } = await loadGroup(env);
+  const improvers = [];
+  for (const u of users) {
+    const base = trial.baselines[u.userId];
+    if (!base) continue;
+    const pb = await env.KOVA.get(`pb:${u.userId}`, 'json');
+    const cur = pb && pb[trial.scenario] && pb[trial.scenario].s;
+    if (cur && cur > base) improvers.push({ uid: u.userId, name: u.displayName, pct: ((cur - base) / base) * 100 });
+  }
+  trial.resolved = true;
+  await env.KOVA.put('trial:current', JSON.stringify(trial));
+  if (!improvers.length) return [`[TRIAL COMPLETE // ${trial.scenario}. No records fell this week.]`];
+  improvers.sort((a, b) => b.pct - a.pct);
+  const top = improvers[0];
+  for (const im of improvers) {
+    const win = im.pct === top.pct;
+    await addLinks(env, im.uid, LINKS.trialPart + (win ? LINKS.trialWin : 0), `trial ${trial.weekKey}`);
+  }
+  const lines = [`[TRIAL COMPLETE // ${top.name} improved ${top.pct.toFixed(1)}%. The System took note. +${LINKS.trialWin + LINKS.trialPart} links.]`];
+  if (improvers.length > 1) lines.push(`[${improvers.length} players beat their record. +${LINKS.trialPart} link each.]`);
+  return lines;
 }
 
 // ---------- Discord OAuth ----------
@@ -417,6 +777,11 @@ async function handleApi(request, env, url, cors, ctx) {
       await env.KOVA.put('playlist:prev', JSON.stringify({ ...old, replacedOn: groupDate(env) }));
     }
     await env.KOVA.put('playlist:current', JSON.stringify(playlist));
+    // the weekly trial rides the playlist publish (see CHAIN_PROTOCOL.md)
+    if (ctx) ctx.waitUntil((async () => {
+      const trial = await createTrial(env, playlist, groupDate(env));
+      await announceTrial(env, trial);
+    })());
     return json(playlist, 200, cors);
   }
 
@@ -479,7 +844,9 @@ async function handleApi(request, env, url, cors, ctx) {
     const anchor = all[upD] && all[upD].done ? upD : today;
     const streak = computeStreak(all, anchor, rest);
 
-    if (firstCompletionToday && ctx) ctx.waitUntil(announceCompletion(env, user, streak, body.date));
+    // Chain Protocol: individual completion announces are gone (channel
+    // noise); the chain does the talking now. Backfilled dates award quietly.
+    if (firstCompletionToday && ctx) ctx.waitUntil(chainCheck(env, user, body.date));
 
     return json({
       ok: true,
@@ -512,9 +879,20 @@ async function handleApi(request, env, url, cors, ctx) {
     let dates = (await env.KOVA.get(`rest:${user.uid}`, 'json')) || [];
     if (body.on) {
       if (!dates.includes(body.date)) {
-        const sameWeek = dates.filter((d) => weekKeyOf(d) === weekKeyOf(body.date)).length;
+        // shield-converted days are emergencies, they never eat the weekly quota
+        const vault = await getVault(env, user.uid);
+        const shieldDays = new Set(vault.shieldDays || []);
+        const sameWeek = dates.filter((d) => weekKeyOf(d) === weekKeyOf(body.date) && !shieldDays.has(d)).length;
         if (sameWeek >= REST_QUOTA_PER_WEEK) {
-          return json({ error: `Only ${REST_QUOTA_PER_WEEK} rest days per week` }, 400, cors);
+          // a held Vault voucher buys ONE day over the quota, once a calendar month
+          const month = body.date.slice(0, 7);
+          if (vault.voucher && vault.voucherUsedMonth !== month) {
+            vault.voucher = false;
+            vault.voucherUsedMonth = month;
+            await putVault(env, user.uid, vault);
+          } else {
+            return json({ error: `Only ${REST_QUOTA_PER_WEEK} rest days per week` }, 400, cors);
+          }
         }
         dates.push(body.date);
       }
@@ -572,6 +950,86 @@ async function handleApi(request, env, url, cors, ctx) {
     const month = url.searchParams.get('month');
     if (!isMonth(month)) return json({ error: 'month must be YYYY-MM' }, 400, cors);
     return json(await buildStandings(env, month), 200, cors);
+  }
+
+  // Chain map data for the current window + the caller's link balance
+  if (path === '/api/chains' && request.method === 'GET') {
+    const today = groupDate(env);
+    const { win, doc } = await getChainPairs(env, today);
+    const st = (await env.KOVA.get(`chain:state:${win.id}`, 'json')) || {};
+    const { users, byUser } = await loadGroup(env);
+    const userMap = new Map(users.map((u) => [u.userId, u]));
+    const groups = doc.groups.map((g, gi) => ({
+      members: g.map((uid) => {
+        const u = userMap.get(uid);
+        return u
+          ? { userId: uid, displayName: u.displayName, avatar: u.avatar }
+          : { userId: uid, displayName: 'departed', avatar: null };
+      }),
+      rescue: g.some((uid) => doc.cold.includes(uid)),
+      perfect: !!(st.perfect && st.perfect[gi]),
+      days: win.days.map((d) => {
+        let state;
+        if (st[d] && st[d][gi]) state = 'forged';
+        else if (d > today) state = 'upcoming';
+        else if (d < today) state = 'broken';
+        else state = g.some((uid) => { const r = (byUser.get(uid) || {})[d]; return r && r.done; }) ? 'waiting' : 'open';
+        return { date: d, state };
+      }),
+    }));
+    const linksDoc = await env.KOVA.get(`links:${user.uid}`, 'json');
+    return json({
+      windowId: win.id, start: win.start, last: win.last,
+      groups, myLinks: (linksDoc && linksDoc.total) || 0,
+    }, 200, cors);
+  }
+
+  // The Vault
+  if (path === '/api/vault' && request.method === 'GET') {
+    const [vault, linksDoc] = await Promise.all([getVault(env, user.uid), env.KOVA.get(`links:${user.uid}`, 'json')]);
+    return json({
+      links: (linksDoc && linksDoc.total) || 0,
+      prices: VAULT_PRICES,
+      shield: !!vault.shield,
+      voucher: !!vault.voucher,
+      voucherUsedMonth: vault.voucherUsedMonth || null,
+      frameUntil: vault.frameUntil || 0,
+    }, 200, cors);
+  }
+
+  if (path === '/api/vault' && request.method === 'POST') {
+    const body = await request.json().catch(() => null);
+    const item = body && body.item;
+    if (!['frame', 'voucher', 'shield'].includes(item)) return json({ error: 'Unknown item' }, 400, cors);
+    const vault = await getVault(env, user.uid);
+    if (item === 'shield' && vault.shield) return json({ error: 'You already hold a Streak Shield' }, 400, cors);
+    if (item === 'voucher' && vault.voucher) return json({ error: 'You already hold a rest voucher' }, 400, cors);
+    const linksDoc = (await env.KOVA.get(`links:${user.uid}`, 'json')) || { total: 0, log: [] };
+    const price = VAULT_PRICES[item];
+    if (linksDoc.total < price) return json({ error: `Not enough links: ${linksDoc.total}/${price}` }, 400, cors);
+    await addLinks(env, user.uid, -price, `vault ${item}`);
+    if (item === 'frame') {
+      const base = Math.max(Date.now(), vault.frameUntil || 0);
+      vault.frameUntil = base + FRAME_DAYS * 86400000;
+    }
+    if (item === 'voucher') vault.voucher = true;
+    if (item === 'shield') vault.shield = true;
+    await putVault(env, user.uid, vault);
+    return json({ ok: true, links: linksDoc.total - price, item }, 200, cors);
+  }
+
+  // manual shield sweep (the 03:30 cron does this on its own)
+  if (path === '/api/admin/shield-sweep' && request.method === 'POST') {
+    if (!user.admin) return json({ error: 'Admin only' }, 403, cors);
+    const used = await shieldSweep(env);
+    return json({ ok: true, absorbed: used }, 200, cors);
+  }
+
+  // manual trial resolution (the Sunday digest does this on its own)
+  if (path === '/api/admin/resolve-trial' && request.method === 'POST') {
+    if (!user.admin) return json({ error: 'Admin only' }, 403, cors);
+    const lines = await resolveTrial(env, groupDate(env));
+    return json({ ok: true, lines }, 200, cors);
   }
 
   // three-line coach: client-side rules found the diagnosis codes, the AI here
@@ -646,8 +1104,6 @@ async function refreshProfiles(env) {
 }
 
 // ---------- daily digest to Discord ----------
-
-const MILESTONES = new Set([3, 7, 14, 21, 30, 50, 75, 100]);
 
 // ---------- coach ----------
 
@@ -902,77 +1358,9 @@ function systemBlock(lines) {
   return '```\n' + lines.join('\n') + '\n```';
 }
 
-// Instant post to the channel when a player closes the playlist for the first time that day.
-// Social pressure drips in all day long instead of one evening volley.
-// Never breaks the check-in itself: all errors are swallowed.
-// IMPORTANT: the "N/M complete" counter is computed for the DATE OF THE PLAYER'S COMPLETED DAY,
-// not the group's day: a European closing their 26th opens the count for the 26th
-// (1/15) instead of being tacked onto the tail of someone else's 25th.
-async function announceCompletion(env, user, streak, date) {
-  if (!env.DISCORD_WEBHOOK_URL) return;
-  try {
-    const { users: allUsers, byUser } = await loadGroup(env);
-    // N/M denominator: only those who have closed at least one day (the same roster
-    // as in the digest) + the completer themselves (their fresh record may not have
-    // reached the listing yet)
-    const active = allUsers.filter((u) => {
-      if (u.userId === user.uid) return true;
-      const recs = byUser.get(u.userId) || {};
-      return Object.values(recs).some((r) => r.done);
-    });
-    let doneCount = 0;
-    for (const u of active) {
-      const rec = (byUser.get(u.userId) || {})[date];
-      if (rec && rec.done) doneCount++;
-    }
-    // read-your-write is not guaranteed in KV across calls: we always count ourselves
-    const meIn = (byUser.get(user.uid) || {})[date];
-    if (!(meIn && meIn.done)) doneCount++;
-    const users = active;
-
-    const variants = [
-      `[Daily quest complete: ${user.name}.]`,
-      `[Player ${user.name} has cleared today's training.]`,
-      `[${user.name}: all runs verified. Day secured.]`,
-      `[Quest log updated: ${user.name} - daily training complete.]`,
-    ];
-    const lines = [variants[Math.floor(Math.random() * variants.length)]];
-    if (streak >= 3) {
-      lines.push(MILESTONES.has(streak)
-        ? `[Streak: ${streak} days. Milestone reached.]`
-        : `[Streak: ${streak} days.]`);
-    }
-    // Growth recognition after the dry fact: rotated by day and by position in the queue
-    // so that two consecutive posts do not match. The first and the last of the day get
-    // their own special lines instead of the shared pool.
-    const FLAVOR = [
-      '[Growth is recorded. The System is watching.]',
-      '[Consistency compounds. Progress logged.]',
-      '[The System acknowledges your persistence.]',
-      "[Today's work feeds tomorrow's aim.]",
-      '[Another day stronger. The System confirms.]',
-    ];
-    const dayWord = date === groupDate(env) ? 'today' : `for ${shortDate(date)}`;
-    if (users.length >= 3) {
-      if (doneCount >= users.length) {
-        lines.push(`[${doneCount}/${users.length}. Full clear. The System is satisfied.]`);
-      } else {
-        lines.push(`[${doneCount}/${users.length} players complete ${dayWord}.]`);
-        lines.push(doneCount === 1
-          ? '[First clear of the day. The gate is open.]'
-          : FLAVOR[(Number(date.slice(-2)) + doneCount) % FLAVOR.length]);
-      }
-    } else {
-      lines.push(FLAVOR[Number(date.slice(-2)) % FLAVOR.length]);
-    }
-
-    await fetch(env.DISCORD_WEBHOOK_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: systemBlock(lines), allowed_mentions: { parse: [] } }),
-    });
-  } catch { /* the post is not critical */ }
-}
+// Individual completion announces were removed with the Chain Protocol
+// (2026-09-07, Rauder's call): the chain messages and the digest carry the
+// channel now. chainCheck() is what runs on every first completion.
 
 // Digest stings, Pasha's pick: under 3 days of silence a rotation of the two medium ones,
 // from 3 days on the meanest one. Days of silence are counted WITHOUT scheduled rest days.
@@ -1044,6 +1432,20 @@ async function postDigest(env) {
       : '[Cleared: none. The System has no one to acknowledge.]');
     if (distinction) lines.push(distinction);
     if (resting.length) lines.push(`[On scheduled leave: ${names(resting)}.]`);
+    // Chain Protocol lines: forged count and shield absorbs
+    try {
+      const { win, doc: pairsDoc } = await getChainPairs(env, today);
+      if (pairsDoc.groups.length) {
+        const st = (await env.KOVA.get(`chain:state:${win.id}`, 'json')) || {};
+        const forged = pairsDoc.groups.filter((g, gi) => st[today] && st[today][gi]).length;
+        lines.push(`[Chains forged today: ${forged}/${pairsDoc.groups.length}.]`);
+      }
+      const shieldUsers = (await env.KOVA.get(`shieldused:${today}`, 'json')) || [];
+      for (const uid of shieldUsers) {
+        const p = players.find((x) => x.userId === uid);
+        if (p) lines.push(`[${p.displayName}'s Streak Shield absorbed the miss. The chain of days holds.]`);
+      }
+    } catch { /* цепи не роняют дайджест */ }
     if (incomplete.length) {
       const sting = STING_MILD[Number(today.slice(-2)) % STING_MILD.length];
       lines.push(`[Incomplete: ${names(incomplete)}. The day is not over. ${sting}]`);
@@ -1061,6 +1463,12 @@ async function postDigest(env) {
     }
     lines.push(`[${done.length}/${players.length} cleared. Gate closes at midnight.]`);
   }
+
+  // Sunday: the weekly trial resolves inside the digest
+  try {
+    const dowMon = (new Date(today + 'T00:00:00Z').getUTCDay() + 6) % 7;
+    if (dowMon === 6) lines.push(...await resolveTrial(env, today));
+  } catch { /* триал не роняет дайджест */ }
 
   const roleId = await env.KOVA.get('config:aimChadRoleId');
   const content = (roleId ? `<@&${roleId}>\n` : '') + systemBlock(lines).slice(0, 1900);
@@ -1153,6 +1561,12 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
+    // 09:30 UTC = 03:30 Denver in summer: the Streak Shield sweep, after the
+    // 3h night grace window has fully closed
+    if (event.cron === '30 9 * * *') {
+      ctx.waitUntil(shieldSweep(env));
+      return;
+    }
     ctx.waitUntil((async () => {
       // once a day we pull fresh avatars/names (a change made in Discord
       // arrives without a re-login)

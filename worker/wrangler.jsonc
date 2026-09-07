@@ -15,7 +15,8 @@
     // 00:00 UTC = 18:00 in Denver in summer (MDT), 17:00 in winter (MST):
     // time chosen by Pasha (2026-08-26), after DST ends in November
     // shift to "0 1 * * *" if he wants exactly 18:00 again
-    "crons": ["0 0 * * *"]
+    // second cron: 09:30 UTC = 03:30 Denver (MDT), the Streak Shield sweep
+    "crons": ["0 0 * * *", "30 9 * * *"]
   },
   "vars": {
     "DISCORD_CLIENT_ID": "1539370154792853604",

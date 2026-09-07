@@ -55,3 +55,7 @@ export const postDigest = () => call('/api/digest', { method: 'POST' });
 export const postCoach = (payload) => call('/api/coach', { method: 'POST', body: payload });
 export const getRest = () => call('/api/rest');
 export const postRest = (date, on) => call('/api/rest', { method: 'POST', body: { date, on } });
+
+export const getChains = () => call('/api/chains');
+export const getVault = () => call('/api/vault');
+export const buyVault = (item) => call('/api/vault', { method: 'POST', body: { item } });

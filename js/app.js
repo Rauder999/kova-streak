@@ -56,6 +56,9 @@ export const state = {
   coachError: null,
   restDates: [],        // scheduled rest days (dates)
   restError: null,
+  chains: null,         // current chain window (map data + my links)
+  vault: null,          // Vault state for the Today tab card
+  vaultMsg: null,
 };
 
 let pollTimer = null;
@@ -63,6 +66,7 @@ let groupTimer = null;
 let fsObserver = null;
 let lastTickAt = 0;
 let celebrationPending = false;
+let vaultLoading = false;
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
@@ -778,6 +782,66 @@ export function renderToday() {
   root.append(card);
 
   root.append(renderRestCard());
+  root.append(renderVaultCard());
+}
+
+// The Vault: spend chain links on perks (see CHAIN_PROTOCOL.md)
+function renderVaultCard() {
+  const card = el('div', 'card');
+  const head = el('div', 'card-head');
+  head.append(el('h2', null, 'The Vault'));
+  head.append(el('span', 'muted', state.vault ? `your links: ${state.vault.links}` : 'earn links by forging chains'));
+  card.append(head);
+
+  if (!state.vault) {
+    card.append(el('p', 'lede', 'Forge chains with your partner to earn links, then spend them here.'));
+    if (!vaultLoading) { vaultLoading = true; loadVault(); }
+    return card;
+  }
+
+  const v = state.vault;
+  const items = [
+    { id: 'frame', name: 'Frame of Honor', desc: 'A golden frame around your avatar on the leaderboard for 7 days.', state: v.frameUntil > Date.now() ? 'active until ' + new Date(v.frameUntil).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null },
+    { id: 'voucher', name: 'Extra rest day', desc: 'One rest day over the weekly limit. One use per calendar month.', state: v.voucher ? 'held' : (v.voucherUsedMonth === localMonth() ? 'used this month' : null) },
+    { id: 'shield', name: 'Streak Shield', desc: 'If a day ends with nothing played, it becomes a rest day at 03:30. Automatic.', state: v.shield ? 'held' : null },
+  ];
+  const list = el('div', 'vault-list');
+  for (const it of items) {
+    const row = el('div', 'vault-row');
+    const info = el('div', 'vault-info');
+    info.append(el('div', 'vault-name', it.name));
+    info.append(el('div', 'vault-desc', it.desc));
+    row.append(info);
+    const right = el('div', 'vault-right');
+    if (it.state) right.append(el('span', 'pill is-rest', it.state));
+    const btn = el('button', 'vault-buy mono', `${v.prices[it.id]} links`);
+    btn.disabled = v.links < v.prices[it.id] || (it.id === 'shield' && v.shield) || (it.id === 'voucher' && v.voucher);
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      try {
+        await api.buyVault(it.id);
+        state.vaultMsg = null;
+      } catch (e) {
+        if (handleApiError(e)) return;
+        state.vaultMsg = e.message;
+      }
+      await loadVault();
+      if (state.tab === 'today') renderToday();
+    });
+    right.append(btn);
+    row.append(right);
+    list.append(row);
+  }
+  card.append(list);
+  if (state.vaultMsg) card.append(notice(state.vaultMsg, 'error'));
+  return card;
+}
+
+async function loadVault() {
+  try {
+    state.vault = await api.getVault();
+    if (state.tab === 'today') renderToday();
+  } catch { /* витрина опциональна */ }
 }
 
 // ---------- rest days ----------
@@ -1065,6 +1129,13 @@ async function refreshGroup() {
     if (handleApiError(e)) return;
     state.scanError = e.message;
   }
+  // the chain map lives on the current-month view only
+  if (!state.groupMonth) {
+    try {
+      state.chains = await api.getChains();
+      if (state.tab === 'group') renderGroup();
+    } catch { /* карта цепей опциональна */ }
+  }
   clearTimeout(groupTimer);
   groupTimer = setTimeout(refreshGroup, GROUP_REFRESH_MS);
 }
@@ -1187,7 +1258,7 @@ export function renderGroup() {
   const hr = el('tr');
   const cols = isHistory
     ? ['#', 'Player', 'Done', 'Missed']
-    : ['#', 'Player', 'Done', 'Missed', 'Streak', 'All time', 'Today'];
+    : ['#', 'Player', 'Done', 'Missed', 'Streak', 'All time', 'Links', 'Today'];
   cols.forEach((h) => hr.append(el('th', null, h)));
   thead.append(hr);
   table.append(thead);
@@ -1200,6 +1271,7 @@ export function renderGroup() {
     const img = el('img');
     img.src = pl.avatar || avatarFallback(pl.userId);
     img.width = 22; img.height = 22; img.alt = '';
+    if (pl.frame) img.className = 'honor-frame'; // an active Frame of Honor from the Vault
     safeAvatar(img, pl.userId);
     nameCell.append(img, el('span', null, pl.displayName));
     tr.append(nameCell);
@@ -1208,6 +1280,7 @@ export function renderGroup() {
     if (!isHistory) {
       tr.append(el('td', 'mono', pl.streak > 0 ? pl.streak + 'd' : '-'));
       tr.append(el('td', 'mono muted', String(pl.totalDone != null ? pl.totalDone : doneOf(pl))));
+      tr.append(el('td', 'mono muted', String(pl.links || 0)));
       const t = pl.byDate[today];
       const todayCell = el('td', 'mono');
       if (!(t && t.done) && pl.restToday) {
@@ -1277,6 +1350,68 @@ export function renderGroup() {
   }
   cal.append(grid);
   root.append(cal);
+
+  if (!isHistory && state.chains && state.chains.groups && state.chains.groups.length) {
+    root.append(renderChainMap(state.chains));
+  }
+}
+
+// The chain map: the current half-week window's pairs, their day states and
+// the window arc. Full constellation treatment arrives with the redesign;
+// this renders in the current card language.
+function renderChainMap(ch) {
+  const card = el('div', 'card');
+  const head = el('div', 'card-head');
+  head.append(el('h2', null, 'Chain map'));
+  head.append(el('span', 'muted', `${monthDayShort(ch.start)} - ${monthDayShort(ch.last)} · your links: ${ch.myLinks}`));
+  card.append(head);
+
+  const wrap = el('div', 'chain-wrap');
+  for (const g of ch.groups) {
+    const todayState = (g.days.find((d) => d.state === 'waiting' || d.state === 'open') || g.days[g.days.length - 1]).state;
+    const forgedCount = g.days.filter((d) => d.state === 'forged').length;
+    const node = el('div', 'chain-node' + (g.perfect ? ' perfect' : ''));
+    node.title = g.members.map((m) => m.displayName).join(' x ');
+
+    const row = el('div', 'chain-avatars');
+    g.members.forEach((m, i) => {
+      if (i > 0) {
+        const thread = el('span', 'chain-thread ' + threadClass(g, todayState));
+        thread.style.height = (2 + forgedCount) + 'px';
+        row.append(thread);
+      }
+      const img = el('img');
+      img.src = m.avatar || avatarFallback(m.userId);
+      img.width = 30; img.height = 30; img.alt = '';
+      safeAvatar(img, m.userId);
+      row.append(img);
+    });
+    node.append(row);
+
+    const names = el('div', 'chain-names');
+    names.textContent = g.members.map((m) => m.displayName).join(' x ');
+    node.append(names);
+
+    const dots = el('div', 'chain-days');
+    for (const d of g.days) dots.append(el('span', 'chain-day is-' + d.state));
+    if (g.rescue) dots.append(el('span', 'chain-rescue mono', 'x2'));
+    node.append(dots);
+    wrap.append(node);
+  }
+  card.append(wrap);
+  return card;
+}
+
+function threadClass(g, todayState) {
+  const today = g.days.find((d) => d.state !== 'upcoming' && d.state !== 'forged' && d.state !== 'broken');
+  const forgedToday = g.days.some((d) => d.state === 'forged' && d.date === localDate());
+  if (forgedToday || g.perfect) return 'is-forged';
+  if (today && today.state === 'waiting') return 'is-waiting';
+  return 'is-open';
+}
+
+function monthDayShort(d) {
+  return new Date(d + 'T12:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
 }
 
 function cellClass(rec, date, today, joinedDate) {

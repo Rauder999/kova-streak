@@ -106,8 +106,9 @@ shows who holds which end and the window tally.
 
 ## 7. Edge rules
 
-- New joiner enters the pairing pool on their first group day (they
-  are part of "all participants" immediately).
+- The pairing pool freezes at the window start (players with at least
+  one run BEFORE it): a mid-window newcomer never reshuffles anyone's
+  partner and joins at the next window boundary, 1-3 days later.
 - A removed player breaks out of the pool instantly; their partner
   that day gets the chain task auto-credited (not the day itself).
 - Pairing pool = the digest roster (players with at least one
