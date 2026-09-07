@@ -6,15 +6,46 @@
   <title>KOVA STREAK - daily aim training streak</title>
   <meta name="theme-color" content="#08070C">
   <meta property="og:title" content="KOVA STREAK">
-  <meta property="og:description" content="Group daily aim-training streak for KovaaK's. Play the week's playlist, the site checks you in by itself. Fewest missed days wins.">
+  <meta property="og:description" content="Group daily aim-training streak for KovaaK's. Play the week's playlist, the site checks you in by itself. Most days completed wins.">
   <meta property="og:type" content="website">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%237C6CF0'/><path d='M8.5 17.5l6 6 9-13' stroke='%23fff' stroke-width='3.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
+  <!-- The System's dimension: layered ambience behind every screen -->
+  <div class="dimension" aria-hidden="true">
+    <div class="nebula"></div>
+    <div class="nebula b"></div>
+    <div class="gridlines"></div>
+    <div class="stars"><div class="s1"></div><div class="s2"></div></div>
+    <div class="sigil">
+      <svg viewBox="0 0 980 980">
+        <g class="ring-a" fill="none" stroke="#7C6CF0" opacity="0.12">
+          <circle cx="490" cy="490" r="470" stroke-width="1"/>
+          <circle cx="490" cy="490" r="430" stroke-width="1" stroke-dasharray="4 14"/>
+          <circle cx="490" cy="490" r="360" stroke-width="18" opacity="0.35" stroke-dasharray="2 26"/>
+          <path d="M490 24 L502 58 L478 58 Z" fill="#7C6CF0" stroke="none"/>
+          <path d="M490 956 L502 922 L478 922 Z" fill="#7C6CF0" stroke="none"/>
+          <path d="M24 490 L58 478 L58 502 Z" fill="#7C6CF0" stroke="none"/>
+          <path d="M956 490 L922 478 L922 502 Z" fill="#7C6CF0" stroke="none"/>
+        </g>
+        <g class="ring-b" fill="none" opacity="0.15">
+          <circle cx="490" cy="490" r="300" stroke="#E8B64A" stroke-width="1"/>
+          <circle cx="490" cy="490" r="272" stroke="#E8B64A" stroke-width="1" stroke-dasharray="60 22 8 22"/>
+          <g stroke="#B7AEF7" stroke-width="2">
+            <path d="M490 178 v34"/><path d="M490 768 v34"/><path d="M178 490 h34"/><path d="M768 490 h34"/>
+            <path d="M279 279 l24 24"/><path d="M677 677 l24 24"/><path d="M701 279 l-24 24"/><path d="M303 677 l-24 24"/>
+          </g>
+        </g>
+      </svg>
+    </div>
+    <div class="grain"></div>
+    <div class="vignette"></div>
+  </div>
+
   <header>
     <div class="brand">
       <span class="brand-mark"></span>
@@ -43,11 +74,12 @@
   <main>
     <section id="view-login" class="view active">
       <div class="gate">
+        <div class="sys-eyebrow">[KOVA STREAK // GROUP TRAINING PROTOCOL]</div>
         <h2>Show up every day.</h2>
         <p class="lede">
           Play this week's playlist, the site sees it in your KovaaK's stats folder
-          and checks you in by itself. No submit button. Ranking is fewest missed
-          days, never score, so nobody loses for aiming worse.
+          and checks you in by itself. No submit button. Ranking is most days
+          completed, never skill, so nobody loses for aiming worse.
         </p>
         <button id="login-btn" class="primary big">Sign in with Discord</button>
         <p id="login-error" class="error" hidden></p>
@@ -60,6 +92,8 @@
     <section id="view-group" class="view"></section>
     <section id="view-admin" class="view"></section>
   </main>
+
+  <footer class="sys-footer">[KOVA STREAK // THE SYSTEM IS WATCHING]</footer>
 
   <script type="module" src="js/app.js"></script>
 </body>

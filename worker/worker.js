@@ -301,9 +301,12 @@ async function getChainPairs(env, date) {
   if (doc) return { win, doc };
 
   const { users, byUser } = await loadGroup(env);
+  // Pool rule (tightened per Rauder, 2026-09-08): only players who have
+  // FULLY closed at least one day before the window start. Partial-only
+  // players stay out of the chains entirely.
   const pool = users.filter((u) => {
     const recs = byUser.get(u.userId) || {};
-    return Object.entries(recs).some(([d, r]) => d < win.start && (r.done || r.completedRuns > 0));
+    return Object.entries(recs).some(([d, r]) => d < win.start && r.done);
   });
   if (pool.length < 2) { doc = { groups: [], cold: [] }; return { win, doc }; }
 
