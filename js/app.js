@@ -1265,7 +1265,9 @@ export function renderGroup() {
   const tbody = el('tbody');
   g.players.forEach((pl, i) => {
     const medal = i === 0 ? ' rank-1' : i === 1 ? ' rank-2' : i === 2 ? ' rank-3' : '';
-    const tr = el('tr', (pl.userId === state.user.uid ? 'me' : '') + medal);
+    // the red zone: not a single fully completed day in all of history
+    const redzone = !isHistory && (pl.totalDone || 0) === 0 ? ' redzone' : '';
+    const tr = el('tr', (pl.userId === state.user.uid ? 'me' : '') + medal + redzone);
     tr.append(el('td', 'rank mono', String(i + 1)));
     const nameCell = el('td', 'player');
     const img = el('img');
@@ -1274,13 +1276,22 @@ export function renderGroup() {
     if (pl.frame) img.className = 'honor-frame'; // an active Frame of Honor from the Vault
     safeAvatar(img, pl.userId);
     nameCell.append(img, el('span', null, pl.displayName));
+    if (redzone) nameCell.append(el('span', 'redzone-tag mono', '[NO RECORD]'));
     tr.append(nameCell);
-    tr.append(el('td', 'mono', String(doneOf(pl))));
+    const doneN = doneOf(pl);
+    tr.append(el('td', 'mono' + (doneN > 0 ? ' done-pos' : ''), String(doneN)));
     tr.append(el('td', 'mono muted', String(pl.missedDays)));
     if (!isHistory) {
-      tr.append(el('td', 'mono', pl.streak > 0 ? pl.streak + 'd' : '-'));
-      tr.append(el('td', 'mono muted', String(pl.totalDone != null ? pl.totalDone : doneOf(pl))));
-      tr.append(el('td', 'mono muted', String(pl.links || 0)));
+      const stCell = el('td', 'mono' + (pl.streak >= 7 ? ' streak-hot' : ''));
+      if (pl.streak >= 3) {
+        const fl = el('img', 'row-flame');
+        fl.src = 'assets/flame.svg'; fl.alt = '';
+        stCell.append(fl);
+      }
+      stCell.append(pl.streak > 0 ? pl.streak + 'd' : '-');
+      tr.append(stCell);
+      tr.append(el('td', 'mono muted', String(pl.totalDone != null ? pl.totalDone : doneN)));
+      tr.append(el('td', 'mono' + ((pl.links || 0) > 0 ? ' links-pos' : ' muted'), String(pl.links || 0)));
       const t = pl.byDate[today];
       const todayCell = el('td', 'mono');
       if (!(t && t.done) && pl.restToday) {

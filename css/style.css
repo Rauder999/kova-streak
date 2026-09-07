@@ -824,3 +824,87 @@ header, .tabs, main, .sys-footer { position: relative; z-index: 1; }
   letter-spacing: .09em; color: var(--signal-soft);
   margin-bottom: 14px;
 }
+
+/* ---- leaderboard zones and life (per Rauder, 2026-09-08) ---- */
+.leaderboard tbody tr { transition: background .18s ease; }
+.leaderboard tbody tr:hover { background: rgba(124, 108, 240, 0.05); }
+.leaderboard tr.rank-1 { background: linear-gradient(90deg, rgba(232, 182, 74, 0.08), transparent 62%); }
+.leaderboard tr.rank-2 { background: linear-gradient(90deg, rgba(199, 199, 204, 0.06), transparent 62%); }
+.leaderboard tr.rank-3 { background: linear-gradient(90deg, rgba(176, 141, 87, 0.07), transparent 62%); }
+.leaderboard tr.rank-1 .rank { font-size: 15px; text-shadow: 0 0 12px rgba(232, 182, 74, 0.65); }
+.leaderboard tr.rank-2 .rank { font-size: 15px; text-shadow: 0 0 10px rgba(199, 199, 204, 0.5); }
+.leaderboard tr.rank-3 .rank { font-size: 15px; text-shadow: 0 0 10px rgba(176, 141, 87, 0.55); }
+.leaderboard td.done-pos { color: #8fc79c; font-weight: 600; }
+.leaderboard td.links-pos { color: var(--signal-soft); text-shadow: 0 0 8px rgba(124, 108, 240, 0.45); }
+.leaderboard td.streak-hot { color: #E8B64A; }
+.row-flame { width: 12px; height: 12px; margin-right: 5px; vertical-align: -1px; transform-origin: 50% 90%; }
+
+/* the red zone: not a single fully completed day in all of history */
+.leaderboard tr.redzone {
+  background: linear-gradient(90deg, rgba(201, 106, 94, 0.06), transparent 55%);
+  box-shadow: inset 3px 0 0 rgba(201, 106, 94, 0.75);
+}
+.leaderboard tr.redzone .rank { color: var(--fail); }
+.leaderboard tr.redzone .player span { color: var(--text-1); }
+.leaderboard tr.redzone img { filter: grayscale(.5) brightness(.8); }
+.redzone-tag {
+  font-size: 9.5px; letter-spacing: .07em; color: var(--fail);
+  border: 1px solid rgba(201, 106, 94, 0.45); border-radius: 999px;
+  padding: 1px 7px; margin-left: 8px; opacity: .85;
+}
+
+/* ---- side constellations and meteors (full-size monitors) ---- */
+.dimension .consts { display: none; }
+.dimension .meteor { display: none; }
+@media (min-width: 1280px) {
+  .dimension .consts { display: block; }
+  .dimension .const { position: absolute; opacity: .55; }
+  .dimension .const.c1 { left: 2vw; top: 170px; width: 150px; }
+  .dimension .const.c2 { left: 4.5vw; top: 640px; width: 130px; }
+  .dimension .const.c3 { right: 2.5vw; top: 260px; width: 160px; }
+  .dimension .const.c4 { right: 5vw; top: 780px; width: 140px; }
+  .dimension .meteor {
+    display: block; position: absolute; top: 0; left: 0;
+    width: 3px; height: 3px; border-radius: 50%;
+    background: #F2F2F2; opacity: 0;
+    box-shadow: 0 0 10px rgba(183, 174, 247, 0.9);
+  }
+  .dimension .meteor::after {
+    content: ''; position: absolute; right: 1px; top: 1px;
+    width: 130px; height: 1px;
+    background: linear-gradient(90deg, rgba(183, 174, 247, 0.85), transparent);
+    transform-origin: left center; transform: rotate(160deg);
+  }
+}
+@media (prefers-reduced-motion: no-preference) and (min-width: 1280px) {
+  .dimension .const { animation: const-float 18s ease-in-out infinite alternate; }
+  .dimension .const.c2 { animation-duration: 23s; animation-direction: alternate-reverse; }
+  .dimension .const.c3 { animation-duration: 20s; }
+  .dimension .const.c4 { animation-duration: 26s; animation-direction: alternate-reverse; }
+  .dimension .meteor.m1 { animation: meteor-a 26s linear infinite; animation-delay: 4s; }
+  .dimension .meteor.m2 { animation: meteor-b 41s linear infinite; animation-delay: 18s; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .row-flame { animation: sys-flick 2.6s ease-in-out infinite; }
+  .leaderboard tr.redzone { animation: red-breathe 5s ease-in-out infinite; }
+}
+@keyframes const-float {
+  from { transform: translateY(0); opacity: .45; }
+  to { transform: translateY(-16px); opacity: .65; }
+}
+@keyframes meteor-a {
+  0% { transform: translate3d(-6vw, 90px, 0); opacity: 0; }
+  1.5% { opacity: .95; }
+  6% { transform: translate3d(52vw, 470px, 0); opacity: 0; }
+  100% { transform: translate3d(52vw, 470px, 0); opacity: 0; }
+}
+@keyframes meteor-b {
+  0% { transform: translate3d(105vw, 160px, 0) scaleX(-1); opacity: 0; }
+  1.2% { opacity: .85; }
+  5% { transform: translate3d(45vw, 560px, 0) scaleX(-1); opacity: 0; }
+  100% { transform: translate3d(45vw, 560px, 0) scaleX(-1); opacity: 0; }
+}
+@keyframes red-breathe {
+  0%, 100% { box-shadow: inset 3px 0 0 rgba(201, 106, 94, 0.45); }
+  50% { box-shadow: inset 3px 0 0 rgba(201, 106, 94, 0.9); }
+}
