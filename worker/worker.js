@@ -122,7 +122,7 @@ const REST_QUOTA_PER_WEEK = 2;
 // ---------- Chain Protocol constants (see CHAIN_PROTOCOL.md) ----------
 
 const LINKS = { chain: 1, rescueMult: 2, perfect: 2, trialPart: 1, trialWin: 5 };
-const VAULT_PRICES = { frame: 5, voucher: 12, shield: 15 };
+const VAULT_PRICES = { frame: 5, voucher: 12, shield: 15, score: 30 };
 const FRAME_DAYS = 7;
 
 // Half-week chain windows: Monday-Wednesday (A) and Thursday-Sunday (B).
@@ -242,6 +242,8 @@ async function buildStandings(env, month) {
   const [linkKeys, vaultKeys] = await Promise.all([listAll(env, 'links:'), listAll(env, 'vault:')]);
   const linksBy = new Map(linkKeys.map((k) => [k.name.slice('links:'.length), (k.metadata && k.metadata.t) || 0]));
   const frameBy = new Map(vaultKeys.map((k) => [k.name.slice('vault:'.length), (k.metadata && k.metadata.f) || 0]));
+  // score points bought in the Vault land in the requested month's Done count
+  const bonusBy = new Map(vaultKeys.map((k) => [k.name.slice('vault:'.length), (k.metadata && k.metadata.sb && k.metadata.sb[month]) || 0]));
 
   const players = users.map((u, i) => {
     const all = byUser.get(u.userId) || {};
@@ -254,8 +256,11 @@ async function buildStandings(env, month) {
     for (const rec of Object.values(all)) if (rec.done) totalDone++;
     // days completed within the requested month: the primary ranking metric
     // (per Pasha, 2026-09-01: most days done beats fewest missed, otherwise a
-    // late joiner with 2 done / 0 missed would outrank a 28-done veteran)
-    let doneDays = 0;
+    // late joiner with 2 done / 0 missed would outrank a 28-done veteran).
+    // Score points bought in the Vault add on top (per Pasha, 2026-09-07);
+    // All time stays real played days only.
+    const scoreBonus = bonusBy.get(u.userId) || 0;
+    let doneDays = scoreBonus;
     for (const rec of Object.values(byDate)) if (rec.done) doneDays++;
     // last closed day in all of history: the digest uses it to tell
     // "did not make it today" from "has been silent for days"
@@ -277,6 +282,7 @@ async function buildStandings(env, month) {
       restToday: rest.has(today) && !(all[today] && all[today].done),
       totalDone,
       doneDays,
+      scoreBonus,
       links: linksBy.get(u.userId) || 0,
       frame: (frameBy.get(u.userId) || 0) > Date.now(),
       lastDone,
@@ -383,9 +389,11 @@ async function getVault(env, uid) {
 }
 
 async function putVault(env, uid, doc) {
-  await env.KOVA.put(`vault:${uid}`, JSON.stringify(doc), {
-    metadata: { f: doc.frameUntil || 0 },
-  });
+  // metadata mirrors what the leaderboard needs without a per-user GET:
+  // f = Frame of Honor expiry, sb = bought score points per month
+  const metadata = { f: doc.frameUntil || 0 };
+  if (doc.scoreBonus) metadata.sb = doc.scoreBonus;
+  await env.KOVA.put(`vault:${uid}`, JSON.stringify(doc), { metadata });
 }
 
 // A member's end of the chain is held for a date when they completed it,
@@ -1103,13 +1111,14 @@ async function handleApi(request, env, url, cors, ctx) {
       voucher: !!vault.voucher,
       voucherUsedMonth: vault.voucherUsedMonth || null,
       frameUntil: vault.frameUntil || 0,
+      scoreBonus: (vault.scoreBonus && vault.scoreBonus[groupDate(env).slice(0, 7)]) || 0,
     }, 200, cors);
   }
 
   if (path === '/api/vault' && request.method === 'POST') {
     const body = await request.json().catch(() => null);
     const item = body && body.item;
-    if (!['frame', 'voucher', 'shield'].includes(item)) return json({ error: 'Unknown item' }, 400, cors);
+    if (!['frame', 'voucher', 'shield', 'score'].includes(item)) return json({ error: 'Unknown item' }, 400, cors);
     const vault = await getVault(env, user.uid);
     if (item === 'shield' && vault.shield) return json({ error: 'You already hold a Streak Shield' }, 400, cors);
     if (item === 'voucher' && vault.voucher) return json({ error: 'You already hold a rest voucher' }, 400, cors);
@@ -1123,6 +1132,13 @@ async function handleApi(request, env, url, cors, ctx) {
     }
     if (item === 'voucher') vault.voucher = true;
     if (item === 'shield') vault.shield = true;
+    if (item === 'score') {
+      // +1 to this month's Done count on the leaderboard; stacks, priced so
+      // only real grinders reach it (per Pasha, 2026-09-07)
+      const m = groupDate(env).slice(0, 7);
+      vault.scoreBonus = vault.scoreBonus || {};
+      vault.scoreBonus[m] = (vault.scoreBonus[m] || 0) + 1;
+    }
     await putVault(env, user.uid, vault);
     return json({ ok: true, links: linksDoc.total - price, item }, 200, cors);
   }

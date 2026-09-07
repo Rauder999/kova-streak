@@ -837,6 +837,7 @@ function renderVaultCard() {
     { id: 'frame', name: 'Frame of Honor', desc: 'A golden frame around your avatar on the leaderboard for 7 days.', state: v.frameUntil > Date.now() ? 'active until ' + new Date(v.frameUntil).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null },
     { id: 'voucher', name: 'Extra rest day', desc: 'One rest day over the weekly limit. One use per calendar month.', state: v.voucher ? 'held' : (v.voucherUsedMonth === localMonth() ? 'used this month' : null) },
     { id: 'shield', name: 'Streak Shield', desc: 'If a day ends with nothing played, it becomes a rest day at 03:30. Automatic.', state: v.shield ? 'held' : null },
+    { id: 'score', name: 'Score point', desc: "+1 day to this month's Done score, straight into the ranking. Stacks.", state: v.scoreBonus ? `+${v.scoreBonus} this month` : null },
   ];
   const list = el('div', 'vault-list');
   for (const it of items) {
@@ -1322,7 +1323,15 @@ export function renderGroup() {
     // stats live in chips, not raw text: each value is a small status cell
     const chip = (cls, text) => { const td = el('td'); td.append(el('span', 'stat-chip mono ' + cls, text)); return td; };
     const doneN = doneOf(pl);
-    tr.append(chip(doneN > 0 ? 'sc-done' : 'sc-zero', String(doneN)));
+    const doneTd = el('td');
+    const doneChip = el('span', 'stat-chip mono ' + (doneN > 0 ? 'sc-done' : 'sc-zero'), String(doneN));
+    if (pl.scoreBonus > 0) {
+      // bought score points are public: a gold mark keeps the board honest
+      doneChip.append(el('sup', 'score-bought', '+' + pl.scoreBonus));
+      doneChip.title = `includes ${pl.scoreBonus} score point${pl.scoreBonus > 1 ? 's' : ''} from The Vault`;
+    }
+    doneTd.append(doneChip);
+    tr.append(doneTd);
     tr.append(chip(pl.missedDays > 0 ? 'sc-miss' : 'sc-zero', String(pl.missedDays)));
     if (!isHistory) {
       const stTd = el('td');

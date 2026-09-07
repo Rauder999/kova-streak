@@ -945,6 +945,11 @@ header, .tabs, main, .sys-footer { position: relative; z-index: 1; }
 .stat-chip.sc-streak { color: #F2F2F2; border-color: rgba(124, 108, 240, 0.4); background: rgba(124, 108, 240, 0.08); }
 .stat-chip.sc-hot { color: #E8B64A; border-color: rgba(232, 182, 74, 0.55); background: rgba(232, 182, 74, 0.10); box-shadow: 0 0 10px rgba(232, 182, 74, 0.22); }
 .stat-chip.sc-links { color: var(--signal-soft); border-color: rgba(124, 108, 240, 0.5); background: rgba(124, 108, 240, 0.10); box-shadow: 0 0 8px rgba(124, 108, 240, 0.18); }
+/* score points bought in the Vault: a public gold mark on the Done chip */
+.score-bought {
+  font-size: 9.5px; line-height: 1; margin-left: 1px;
+  color: #E8B64A; text-shadow: 0 0 6px rgba(232, 182, 74, 0.5);
+}
 .rank-badge {
   display: inline-flex; align-items: center; justify-content: center;
   width: 26px; height: 26px; border-radius: 50%;
