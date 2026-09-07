@@ -1268,7 +1268,11 @@ export function renderGroup() {
     // the red zone: not a single fully completed day in all of history
     const redzone = !isHistory && (pl.totalDone || 0) === 0 ? ' redzone' : '';
     const tr = el('tr', (pl.userId === state.user.uid ? 'me' : '') + medal + redzone);
-    tr.append(el('td', 'rank mono', String(i + 1)));
+    // rank: a metal badge coin for the top three, plain numeral below
+    const rankTd = el('td', 'rank mono');
+    if (i < 3) rankTd.append(el('span', 'rank-badge rb-' + (i + 1), String(i + 1)));
+    else rankTd.textContent = String(i + 1);
+    tr.append(rankTd);
     const nameCell = el('td', 'player');
     const img = el('img');
     img.src = pl.avatar || avatarFallback(pl.userId);
@@ -1278,20 +1282,24 @@ export function renderGroup() {
     nameCell.append(img, el('span', null, pl.displayName));
     if (redzone) nameCell.append(el('span', 'redzone-tag mono', '[NO RECORD]'));
     tr.append(nameCell);
+    // stats live in chips, not raw text: each value is a small status cell
+    const chip = (cls, text) => { const td = el('td'); td.append(el('span', 'stat-chip mono ' + cls, text)); return td; };
     const doneN = doneOf(pl);
-    tr.append(el('td', 'mono' + (doneN > 0 ? ' done-pos' : ''), String(doneN)));
-    tr.append(el('td', 'mono muted', String(pl.missedDays)));
+    tr.append(chip(doneN > 0 ? 'sc-done' : 'sc-zero', String(doneN)));
+    tr.append(chip(pl.missedDays > 0 ? 'sc-miss' : 'sc-zero', String(pl.missedDays)));
     if (!isHistory) {
-      const stCell = el('td', 'mono' + (pl.streak >= 7 ? ' streak-hot' : ''));
+      const stTd = el('td');
+      const stChip = el('span', 'stat-chip mono ' + (pl.streak >= 7 ? 'sc-hot' : pl.streak > 0 ? 'sc-streak' : 'sc-zero'));
       if (pl.streak >= 3) {
         const fl = el('img', 'row-flame');
         fl.src = 'assets/flame.svg'; fl.alt = '';
-        stCell.append(fl);
+        stChip.append(fl);
       }
-      stCell.append(pl.streak > 0 ? pl.streak + 'd' : '-');
-      tr.append(stCell);
-      tr.append(el('td', 'mono muted', String(pl.totalDone != null ? pl.totalDone : doneN)));
-      tr.append(el('td', 'mono' + ((pl.links || 0) > 0 ? ' links-pos' : ' muted'), String(pl.links || 0)));
+      stChip.append(pl.streak > 0 ? pl.streak + 'd' : '-');
+      stTd.append(stChip);
+      tr.append(stTd);
+      tr.append(chip('sc-dim', String(pl.totalDone != null ? pl.totalDone : doneN)));
+      tr.append(chip((pl.links || 0) > 0 ? 'sc-links' : 'sc-zero', String(pl.links || 0)));
       const t = pl.byDate[today];
       const todayCell = el('td', 'mono');
       if (!(t && t.done) && pl.restToday) {
@@ -1384,18 +1392,24 @@ function renderChainMap(ch) {
     const node = el('div', 'chain-node' + (g.perfect ? ' perfect' : ''));
     node.title = g.members.map((m) => m.displayName).join(' x ');
 
+    const connCls = threadClass(g, todayState);
+    const honored = connCls === 'is-forged' || g.perfect;
     const row = el('div', 'chain-avatars');
     g.members.forEach((m, i) => {
-      if (i > 0) {
-        const thread = el('span', 'chain-thread ' + threadClass(g, todayState));
-        thread.style.height = (2 + forgedCount) + 'px';
-        row.append(thread);
+      if (i > 0) row.append(chainConnector(connCls));
+      const av = el('span', 'chain-av');
+      // a forged chain earns the guild frame for the day (visual only)
+      if (honored) {
+        const fr = el('img', 'chain-honor');
+        fr.src = 'assets/frame-gold.svg'; fr.alt = '';
+        av.append(fr);
       }
       const img = el('img');
       img.src = m.avatar || avatarFallback(m.userId);
       img.width = 30; img.height = 30; img.alt = '';
       safeAvatar(img, m.userId);
-      row.append(img);
+      av.append(img);
+      row.append(av);
     });
     node.append(row);
 
@@ -1411,6 +1425,19 @@ function renderChainMap(ch) {
   }
   card.append(wrap);
   return card;
+}
+
+// Interlocked chain links drawn inline: alternating wide and tall ovals.
+// Color and motion come from the state class on the wrapper.
+function chainConnector(stateCls) {
+  const s = el('span', 'chain-conn ' + stateCls);
+  s.innerHTML = '<svg viewBox="0 0 58 20" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.7">'
+    + '<ellipse cx="10" cy="10" rx="8.5" ry="5"/>'
+    + '<ellipse cx="23" cy="10" rx="5" ry="8"/>'
+    + '<ellipse cx="36" cy="10" rx="8.5" ry="5"/>'
+    + '<ellipse cx="49" cy="10" rx="5" ry="8"/>'
+    + '</g></svg>';
+  return s;
 }
 
 function threadClass(g, todayState) {

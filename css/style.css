@@ -853,9 +853,9 @@ header, .tabs, main, .sys-footer { position: relative; z-index: 1; }
   padding: 1px 7px; margin-left: 8px; opacity: .85;
 }
 
-/* ---- side constellations and meteors (full-size monitors) ---- */
+/* ---- side ambience: constellations + ghost status windows (holograms) ---- */
 .dimension .consts { display: none; }
-.dimension .meteor { display: none; }
+.dimension .holo { display: none; }
 @media (min-width: 1280px) {
   .dimension .consts { display: block; }
   .dimension .const { position: absolute; opacity: .55; }
@@ -863,26 +863,44 @@ header, .tabs, main, .sys-footer { position: relative; z-index: 1; }
   .dimension .const.c2 { left: 4.5vw; top: 640px; width: 130px; }
   .dimension .const.c3 { right: 2.5vw; top: 260px; width: 160px; }
   .dimension .const.c4 { right: 5vw; top: 780px; width: 140px; }
-  .dimension .meteor {
-    display: block; position: absolute; top: 0; left: 0;
-    width: 3px; height: 3px; border-radius: 50%;
-    background: #F2F2F2; opacity: 0;
-    box-shadow: 0 0 10px rgba(183, 174, 247, 0.9);
+  /* ghost windows: the System keeps faint panels open in the periphery */
+  .dimension .holo {
+    display: block; position: absolute;
+    width: 150px; height: 58px;
+    border: 1px solid rgba(124, 108, 240, 0.30);
+    background: rgba(18, 18, 22, 0.22);
+    opacity: .45;
   }
-  .dimension .meteor::after {
-    content: ''; position: absolute; right: 1px; top: 1px;
-    width: 130px; height: 1px;
-    background: linear-gradient(90deg, rgba(183, 174, 247, 0.85), transparent);
-    transform-origin: left center; transform: rotate(160deg);
+  .dimension .holo::before, .dimension .holo::after {
+    content: ''; position: absolute; width: 10px; height: 10px;
   }
+  .dimension .holo::before { top: -1px; left: -1px; border-top: 1.5px solid rgba(124, 108, 240, 0.6); border-left: 1.5px solid rgba(124, 108, 240, 0.6); }
+  .dimension .holo::after { bottom: -1px; right: -1px; border-bottom: 1.5px solid rgba(124, 108, 240, 0.6); border-right: 1.5px solid rgba(124, 108, 240, 0.6); }
+  .holo-tab {
+    position: absolute; top: 6px; left: 10px;
+    font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .1em;
+    color: rgba(183, 174, 247, 0.75);
+  }
+  .holo-line {
+    position: absolute; left: 10px; right: 10px; bottom: 14px; height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(183, 174, 247, 0.7), transparent);
+    background-size: 60px 1px; background-repeat: no-repeat; background-position: -60px 0;
+  }
+  .dimension .holo.h1 { left: 2.2vw; top: 430px; transform: rotate(-2deg); }
+  .dimension .holo.h2 { right: 3vw; top: 600px; transform: rotate(1.6deg); }
+  .dimension .holo.h3 { left: 3.6vw; top: 1010px; transform: rotate(1deg); }
 }
 @media (prefers-reduced-motion: no-preference) and (min-width: 1280px) {
   .dimension .const { animation: const-float 18s ease-in-out infinite alternate; }
   .dimension .const.c2 { animation-duration: 23s; animation-direction: alternate-reverse; }
   .dimension .const.c3 { animation-duration: 20s; }
   .dimension .const.c4 { animation-duration: 26s; animation-direction: alternate-reverse; }
-  .dimension .meteor.m1 { animation: meteor-a 26s linear infinite; animation-delay: 4s; }
-  .dimension .meteor.m2 { animation: meteor-b 41s linear infinite; animation-delay: 18s; }
+  .dimension .holo { animation: holo-flick 9s steps(1) infinite; }
+  .dimension .holo.h2 { animation-delay: 3s; }
+  .dimension .holo.h3 { animation-delay: 6s; }
+  .holo-line { animation: holo-scan 4.5s ease-in-out infinite; }
+  .holo.h2 .holo-line { animation-delay: 1.4s; }
+  .holo.h3 .holo-line { animation-delay: 2.8s; }
 }
 @media (prefers-reduced-motion: no-preference) {
   .row-flame { animation: sys-flick 2.6s ease-in-out infinite; }
@@ -892,19 +910,66 @@ header, .tabs, main, .sys-footer { position: relative; z-index: 1; }
   from { transform: translateY(0); opacity: .45; }
   to { transform: translateY(-16px); opacity: .65; }
 }
-@keyframes meteor-a {
-  0% { transform: translate3d(-6vw, 90px, 0); opacity: 0; }
-  1.5% { opacity: .95; }
-  6% { transform: translate3d(52vw, 470px, 0); opacity: 0; }
-  100% { transform: translate3d(52vw, 470px, 0); opacity: 0; }
+@keyframes holo-flick {
+  0%, 100% { opacity: .45; }
+  7% { opacity: .58; }
+  8% { opacity: .3; }
+  9% { opacity: .55; }
+  46% { opacity: .4; }
+  47% { opacity: .58; }
+  76% { opacity: .45; }
+  77% { opacity: .32; }
+  78% { opacity: .5; }
 }
-@keyframes meteor-b {
-  0% { transform: translate3d(105vw, 160px, 0) scaleX(-1); opacity: 0; }
-  1.2% { opacity: .85; }
-  5% { transform: translate3d(45vw, 560px, 0) scaleX(-1); opacity: 0; }
-  100% { transform: translate3d(45vw, 560px, 0) scaleX(-1); opacity: 0; }
+@keyframes holo-scan {
+  0% { background-position: -60px 0; }
+  55% { background-position: 150px 0; }
+  100% { background-position: 150px 0; }
 }
 @keyframes red-breathe {
   0%, 100% { box-shadow: inset 3px 0 0 rgba(201, 106, 94, 0.45); }
   50% { box-shadow: inset 3px 0 0 rgba(201, 106, 94, 0.9); }
 }
+
+/* ---- leaderboard chips: stats live in status cells, not raw text ---- */
+.stat-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2.5px 11px; border-radius: 6px;
+  font-size: 12.5px; font-variant-numeric: tabular-nums;
+  border: 1px solid var(--line-0); background: rgba(26, 26, 32, 0.6);
+}
+.stat-chip.sc-zero { color: #6E6E74; }
+.stat-chip.sc-dim { color: var(--text-1); }
+.stat-chip.sc-done { color: #8fc79c; border-color: rgba(111, 163, 122, 0.45); background: rgba(111, 163, 122, 0.10); }
+.stat-chip.sc-miss { color: #d9928a; border-color: rgba(201, 106, 94, 0.4); background: rgba(201, 106, 94, 0.08); }
+.stat-chip.sc-streak { color: #F2F2F2; border-color: rgba(124, 108, 240, 0.4); background: rgba(124, 108, 240, 0.08); }
+.stat-chip.sc-hot { color: #E8B64A; border-color: rgba(232, 182, 74, 0.55); background: rgba(232, 182, 74, 0.10); box-shadow: 0 0 10px rgba(232, 182, 74, 0.22); }
+.stat-chip.sc-links { color: var(--signal-soft); border-color: rgba(124, 108, 240, 0.5); background: rgba(124, 108, 240, 0.10); box-shadow: 0 0 8px rgba(124, 108, 240, 0.18); }
+.rank-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: 50%;
+  font-weight: 700; font-size: 13px;
+}
+.rank-badge.rb-1 { background: radial-gradient(circle at 32% 28%, #f7dc9a, #E8B64A 55%, #8a6a20); color: #1a1206; box-shadow: 0 0 14px rgba(232, 182, 74, 0.55); }
+.rank-badge.rb-2 { background: radial-gradient(circle at 32% 28%, #f0f0f2, #C7C7CC 55%, #6f6f76); color: #17171a; box-shadow: 0 0 10px rgba(199, 199, 204, 0.4); }
+.rank-badge.rb-3 { background: radial-gradient(circle at 32% 28%, #d8b58a, #B08D57 55%, #6a4f2a); color: #1c1206; box-shadow: 0 0 10px rgba(176, 141, 87, 0.45); }
+
+/* ---- chain map connectors: real links, honored frames ---- */
+.chain-conn { display: inline-flex; margin: 0 3px; }
+.chain-conn svg { width: 52px; height: 18px; display: block; }
+.chain-conn.is-forged { color: #E8B64A; filter: drop-shadow(0 0 5px rgba(232, 182, 74, 0.7)); }
+.chain-conn.is-waiting { color: var(--signal); filter: drop-shadow(0 0 4px rgba(124, 108, 240, 0.55)); }
+.chain-conn.is-open { color: var(--line-1); }
+.chain-av { position: relative; display: inline-flex; width: 30px; height: 30px; }
+.chain-av img { border-radius: 50%; display: block; }
+.chain-honor { position: absolute; left: -8px; top: -8px; width: 46px; height: 47px; max-width: none; pointer-events: none; filter: drop-shadow(0 0 8px rgba(232, 182, 74, 0.5)); }
+.chain-av .chain-honor + img { position: relative; z-index: 1; }
+@media (prefers-reduced-motion: no-preference) {
+  .chain-conn.is-forged ellipse { stroke-dasharray: 5 4; animation: linkflow 1.8s linear infinite; }
+  .chain-conn.is-waiting { animation: waitpulse 2.4s ease-in-out infinite; }
+}
+@keyframes linkflow { to { stroke-dashoffset: -18; } }
+@keyframes waitpulse { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
+
+/* the old AIMSOMA perspective horizon is superseded by the dimension */
+body::before { content: none; }
