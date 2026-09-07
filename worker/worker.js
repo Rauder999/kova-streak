@@ -6,6 +6,11 @@
 //   vars    DISCORD_CLIENT_ID, ADMIN_DISCORD_IDS, SITE_URL, GUILD_ID, TZ_NAME
 //   secrets DISCORD_CLIENT_SECRET, SESSION_SECRET, DISCORD_WEBHOOK_URL
 
+// Chain art: resvg renders the CHAIN FORGED PNG right in the worker.
+// The wasm module is ~2.4MB and loads lazily, only when a chain forges.
+import { initWasm, Resvg } from '@resvg/resvg-wasm';
+import resvgWasm from './node_modules/@resvg/resvg-wasm/index_bg.wasm';
+
 const ALLOWED_ORIGINS = [
   'https://rauder999.github.io',
   'http://localhost:8080',
@@ -490,19 +495,120 @@ async function announceChainWaiting(env, completerName, laggardIds) {
   } catch { /* пинг не критичен */ }
 }
 
+// ---------- chain art (resvg) ----------
+
+let resvgReady = null;
+function ensureResvg() {
+  if (!resvgReady) {
+    resvgReady = initWasm(resvgWasm).catch((e) => { resvgReady = null; throw e; });
+  }
+  return resvgReady;
+}
+
+async function avatarDataUri(url) {
+  try {
+    if (!url) return null;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const buf = new Uint8Array(await res.arrayBuffer());
+    if (buf.byteLength > 400000) return null;
+    let bin = '';
+    for (let i = 0; i < buf.length; i += 8192) bin += String.fromCharCode(...buf.subarray(i, i + 8192));
+    const ct = (res.headers.get('content-type') || 'image/png').split(';')[0];
+    return `data:${ct};base64,${btoa(bin)}`;
+  } catch {
+    return null;
+  }
+}
+
+// A run of interlocked gold links between two circle edges.
+function chainRun(x1, x2, y) {
+  const parts = [];
+  const span = x2 - x1;
+  const n = Math.max(3, Math.round(span / 34));
+  for (let i = 0; i < n; i++) {
+    const cx = x1 + (span * (i + 0.5)) / n;
+    if (i % 2 === 0) parts.push(`<ellipse cx="${cx.toFixed(1)}" cy="${y}" rx="17" ry="10"/>`);
+    else parts.push(`<ellipse cx="${cx.toFixed(1)}" cy="${y}" rx="10" ry="16"/>`);
+  }
+  return parts.join('');
+}
+
+// The CHAIN FORGED card: avatars linked by a glowing gold chain on a
+// status-window panel. Shapes only, no text (no fonts ship with the worker).
+async function buildChainArt(members) {
+  await ensureResvg();
+  const n = members.length;
+  const W = n === 3 ? 880 : 640;
+  const H = 260;
+  const y = 130;
+  const xs = n === 3 ? [150, 440, 730] : [160, 480];
+  const r = 62;
+
+  const avatars = await Promise.all(members.map((m) => avatarDataUri(m.avatar)));
+  const discs = members.map((m, i) => {
+    const cx = xs[i];
+    if (avatars[i]) {
+      return `<clipPath id="c${i}"><circle cx="${cx}" cy="${y}" r="${r}"/></clipPath>`
+        + `<image href="${avatars[i]}" x="${cx - r}" y="${y - r}" width="${r * 2}" height="${r * 2}" clip-path="url(#c${i})" preserveAspectRatio="xMidYMid slice"/>`
+        + `<circle cx="${cx}" cy="${y}" r="${r}" fill="none" stroke="#E8B64A" stroke-width="3"/>`;
+    }
+    const hue = 20 + (Number(BigInt(m.userId || '0') % 300n));
+    return `<circle cx="${cx}" cy="${y}" r="${r}" fill="hsl(${hue} 30% 32%)" stroke="#E8B64A" stroke-width="3"/>`;
+  }).join('');
+
+  const chains = xs.slice(1).map((x, i) => chainRun(xs[i] + r + 10, x - r - 10, y)).join('');
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+  <rect width="${W}" height="${H}" fill="#08070C"/>
+  <g stroke="#7C6CF0" stroke-opacity="0.06" stroke-width="1">
+    ${Array.from({ length: Math.floor(W / 64) }, (_, i) => `<line x1="${(i + 1) * 64}" y1="0" x2="${(i + 1) * 64}" y2="${H}"/>`).join('')}
+    ${Array.from({ length: Math.floor(H / 64) }, (_, i) => `<line x1="0" y1="${(i + 1) * 64}" x2="${W}" y2="${(i + 1) * 64}"/>`).join('')}
+  </g>
+  <radialGradient id="glow" cx="50%" cy="50%" r="60%">
+    <stop offset="0%" stop-color="#E8B64A" stop-opacity="0.16"/>
+    <stop offset="100%" stop-color="#E8B64A" stop-opacity="0"/>
+  </radialGradient>
+  <rect width="${W}" height="${H}" fill="url(#glow)"/>
+  <rect x="6" y="6" width="${W - 12}" height="${H - 12}" fill="#121216" fill-opacity="0.5" stroke="#3A3A3E" stroke-width="1"/>
+  <g stroke="#7C6CF0" stroke-width="3" fill="none">
+    <path d="M6 22 V6 H22"/><path d="M${W - 22} 6 H${W - 6} V22"/>
+    <path d="M6 ${H - 22} V${H - 6} H22"/><path d="M${W - 22} ${H - 6} H${W - 6} V${H - 22}"/>
+  </g>
+  <g fill="none" stroke="#E8B64A" stroke-opacity="0.35" stroke-width="7">${chains}</g>
+  <g fill="none" stroke="#E8B64A" stroke-width="2.6">${chains}</g>
+  ${discs}
+</svg>`;
+
+  const resvg = new Resvg(svg, { fitTo: { mode: 'width', value: W * 2 } });
+  return resvg.render().asPng();
+}
+
 async function announceChainForged(env, members, delta, rescue, perfect) {
   if (!env.DISCORD_WEBHOOK_URL) return;
   try {
     const names = members.map((m) => m.displayName).join(' x ');
     const ids = members.map((m) => m.userId);
     const endsWord = members.length === 3 ? 'All three ends' : 'Both ends';
-    const lines = [`[${endsWord} held. +${delta} ${delta === 1 ? 'link' : 'links'} each.]`];
+    const lines = [`[CHAIN FORGED // ${names}]`, `[${endsWord} held. +${delta} ${delta === 1 ? 'link' : 'links'} each.]`];
     if (rescue) lines.push('[Rescue chain. Reward doubled.]');
     if (perfect) lines.push(`[PERFECT CHAIN. Every day of the window. +${LINKS.perfect} bonus.]`);
+    const content = ids.map((id) => `<@${id}>`).join(' ') + '\n' + systemBlock(lines);
+
+    // v2: the rendered chain card. Any failure falls back to the plain embed.
+    try {
+      const png = await buildChainArt(members);
+      const fd = new FormData();
+      fd.append('payload_json', JSON.stringify({ content, allowed_mentions: { users: ids } }));
+      fd.append('files[0]', new Blob([png], { type: 'image/png' }), 'chain.png');
+      const res = await fetch(env.DISCORD_WEBHOOK_URL, { method: 'POST', body: fd });
+      if (res.ok) return;
+    } catch { /* падаем в embed-фолбэк */ }
+
     const embed = {
       color: 0xE8B64A,
       author: { name: `[CHAIN FORGED // ${names}]` },
-      description: systemBlock(lines),
+      description: systemBlock(lines.slice(1)),
     };
     if (members[0] && members[0].avatar) embed.author.icon_url = members[0].avatar;
     if (members[1] && members[1].avatar) embed.thumbnail = { url: members[1].avatar };

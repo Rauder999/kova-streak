@@ -973,3 +973,63 @@ header, .tabs, main, .sys-footer { position: relative; z-index: 1; }
 
 /* the old AIMSOMA perspective horizon is superseded by the dimension */
 body::before { content: none; }
+
+/* ---- Today: the day-status window, split checklist, footer help ---- */
+.day-window { border-color: #4A4260; box-shadow: 0 0 34px rgba(124, 108, 240, 0.13), inset 0 1px 0 rgba(183, 174, 247, 0.07); }
+.day-window.day-done { border-color: rgba(111, 163, 122, 0.55); box-shadow: 0 0 34px rgba(111, 163, 122, 0.16); }
+.day-window .card-head .muted.mono { letter-spacing: .07em; color: var(--signal-soft); }
+.day-window.day-done .card-head .muted.mono { color: var(--pass); }
+.ring-fg { filter: drop-shadow(0 0 8px rgba(124, 108, 240, 0.55)); }
+.secured-details { margin-top: 10px; }
+.secured-details summary {
+  cursor: pointer; list-style: none;
+  font-size: 11.5px; letter-spacing: .08em; color: var(--text-1);
+  padding: 8px 0 4px; border-top: 1px solid var(--line-0);
+}
+.secured-details summary::-webkit-details-marker { display: none; }
+.secured-details summary:hover { color: var(--signal-soft); }
+.secured-list li { opacity: .55; }
+.help-footer { margin-top: 6px; opacity: .75; }
+
+/* ---- coach diagnostic window ---- */
+.coach-card { border-color: #4A4260; box-shadow: 0 0 28px rgba(124, 108, 240, 0.10), inset 0 1px 0 rgba(183, 174, 247, 0.06); }
+.coach-line { display: flex; gap: 14px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--line-0); }
+.coach-line:first-of-type { border-top: 0; }
+.coach-chips { display: flex; flex-direction: column; gap: 5px; min-width: 92px; }
+.coach-niche {
+  font-size: 10.5px; letter-spacing: .08em; text-align: center;
+  padding: 3px 8px; border-radius: 6px;
+  border: 1px solid rgba(124, 108, 240, 0.45);
+  background: rgba(124, 108, 240, 0.10);
+  color: var(--signal-soft);
+}
+.coach-line.cn-tracking .coach-niche { border-color: var(--line-1); background: rgba(26, 26, 32, 0.6); color: var(--text-1); }
+.coach-repeat {
+  font-size: 9.5px; letter-spacing: .08em; text-align: center;
+  padding: 2px 7px; border-radius: 999px;
+  border: 1px solid rgba(201, 164, 94, 0.5); color: var(--warn, #C9A45E);
+}
+.coach-text { flex: 1; }
+
+/* ---- celebration pass ---- */
+.celebrate-hint { font-size: 15px; letter-spacing: .22em; color: var(--signal-soft); text-shadow: 0 0 16px rgba(124, 108, 240, 0.6); }
+.celebrate-ball {
+  background: radial-gradient(circle at 32% 28%, #4a4658, #23212e 55%, #14121c) !important;
+  box-shadow: 0 0 18px rgba(124, 108, 240, 0.35), inset 0 2px 6px rgba(242, 242, 242, 0.10) !important;
+}
+.celebrate-final { position: relative; }
+.final-frame {
+  position: absolute; left: 50%; top: 42%;
+  width: 240px; height: 248px; transform: translate(-50%, -50%);
+  pointer-events: none;
+  filter: drop-shadow(0 0 30px rgba(232, 182, 74, 0.6));
+  animation: frame-flash .7s ease-out;
+}
+.final-sys { font-size: 13px; letter-spacing: .18em; color: #E8B64A; text-shadow: 0 0 14px rgba(232, 182, 74, 0.6); margin: 6px 0 4px; }
+@keyframes frame-flash {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(1.25); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+.ring-fill { filter: drop-shadow(0 0 8px rgba(124, 108, 240, 0.55)); }
+.ring.is-done .ring-fill { filter: drop-shadow(0 0 10px rgba(111, 163, 122, 0.65)); }

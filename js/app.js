@@ -462,19 +462,28 @@ function renderStats() {
     root.append(days);
   }
 
-  // coach: the answer goes first
+  // coach: the diagnostic window, the answer goes first
   const isPast = (state.statsDate && state.statsDate !== state.date);
   const coach = el('div', 'card coach-card');
   const ch = el('div', 'card-head');
-  ch.append(el('h2', null, isPast ? `Verdict for ${r.today}` : 'Next session'));
-  if (r.rusty) ch.append(el('span', 'muted', `${r.gapDays} days off before that day`));
+  ch.append(el('h2', null, 'Coach diagnostic'));
+  ch.append(el('span', 'muted mono', isPast ? r.today.toUpperCase() : (r.rusty ? `${r.gapDays} DAYS OFF BEFORE THIS` : 'NEXT SESSION')));
   coach.append(ch);
   if (state.coachLines && state.coachLines.length) {
     for (const line of state.coachLines) {
       const m = /^\[(CLICKING|TRACKING|SWITCHING)\]\s*(.*)$/.exec(line);
-      const row = el('div', 'coach-line');
-      row.append(el('span', 'coach-niche mono', m ? m[1] : '•'));
-      row.append(el('span', null, m ? m[2] : line));
+      const niche = m ? m[1] : null;
+      let text = m ? m[2] : line;
+      const row = el('div', 'coach-line' + (niche ? ' cn-' + niche.toLowerCase() : ''));
+      const chipCol = el('div', 'coach-chips');
+      chipCol.append(el('span', 'coach-niche mono', niche || '•'));
+      // the repeat marker becomes a visible badge instead of buried prose
+      if (/^Same focus as yesterday:?\s*/i.test(text)) {
+        text = text.replace(/^Same focus as yesterday:?\s*/i, '');
+        chipCol.append(el('span', 'coach-repeat mono', 'REPEAT'));
+      }
+      row.append(chipCol);
+      row.append(el('span', 'coach-text', text));
       coach.append(row);
     }
     annotateTerms(coach); // jargon becomes a clickable glossary
@@ -483,7 +492,7 @@ function renderStats() {
   } else if (!r.scenarios.length) {
     coach.append(el('p', 'muted', isPast ? 'No runs on that day.' : 'Play something and the verdict appears here.'));
   } else {
-    coach.append(el('p', 'muted', 'Thinking...'));
+    coach.append(el('p', 'muted mono', '[ ANALYZING... ]'));
   }
   root.append(coach);
 
@@ -710,21 +719,6 @@ export function renderToday() {
     ? 'done for today - KOVA STREAK'
     : `${Math.round(p.percent * 100)}% today - KOVA STREAK`;
 
-  // first aid as the very first line, no scrolling needed to reach it: if the
-  // mirror on the player's machine died, the answer hangs right above the ring
-  const help = el('div', 'help-line');
-  help.append(el('span', null, 'Progress not updating while you play? Run this in PowerShell:'));
-  const hcode = el('code', 'mono', MIRROR_CMD);
-  help.append(hcode);
-  const hbtn = el('button', 'ghost', 'Copy');
-  hbtn.addEventListener('click', async () => {
-    const ok = await copyText(MIRROR_CMD);
-    hbtn.textContent = ok ? 'Copied' : 'Copy';
-    if (ok) setTimeout(() => { hbtn.textContent = 'Copy'; }, 1500);
-  });
-  help.append(hbtn);
-  root.append(help);
-
   // no stats files in the folder at all: almost certainly the wrong one was picked
   if (p.scanned === 0) {
     const warn = notice('There are no KovaaK\'s stats files in this folder at all, so it is probably the wrong one. It has to be the "stats" folder inside FPSAimTrainer\\FPSAimTrainer. If the folder is right, check that Statistics Export is set to "Always" in KovaaK\'s settings (Misc tab).', 'error');
@@ -734,7 +728,7 @@ export function renderToday() {
     root.append(warn);
   }
 
-  // header: progress ring + streak
+  // the hero: the day lives inside its own status window
   const top = el('div', 'today-top');
   top.append(progressRing(p));
 
@@ -757,32 +751,71 @@ export function renderToday() {
     stats.append(pc);
   }
   top.append(stats);
-  root.append(top);
+  const dayWin = el('div', 'card day-window' + (p.done ? ' day-done' : ''));
+  const dwHead = el('div', 'card-head');
+  dwHead.append(el('h2', null, 'Day status'));
+  dwHead.append(el('span', 'muted mono', p.done ? 'DAY SECURED' : `${Math.round(p.percent * 100)}% // ${p.completedRuns} OF ${p.requiredRuns} RUNS`));
+  dayWin.append(dwHead);
+  dayWin.append(top);
+  root.append(dayWin);
 
   if (state.scanError) root.append(notice(state.scanError, 'error'));
 
-  // scenario checklist
+  // scenario checklist: what remains carries the meaning, done rows collapse
   const card = el('div', 'card');
   const head = el('div', 'card-head');
   head.append(el('h2', null, 'What is left to play'));
   head.append(el('span', 'muted mono', state.date + ' · resets at your local midnight'));
   card.append(head);
 
-  const list = el('ul', 'checklist');
-  for (const item of p.items) {
+  const rowFor = (item) => {
     const li = el('li', item.done ? 'done' : '');
     li.append(el('span', 'check', item.done ? '✓' : ''));
     li.append(el('span', 'scen-name', item.name));
     const count = el('span', 'scen-count mono', `${item.credited} / ${item.required}`);
     if (item.played > item.required) count.title = `${item.played} runs played, ${item.required} required`;
     li.append(count);
-    list.append(li);
+    return li;
+  };
+
+  const remaining = p.items.filter((i) => !i.done);
+  const secured = p.items.filter((i) => i.done);
+  if (remaining.length) {
+    const list = el('ul', 'checklist');
+    for (const item of remaining) list.append(rowFor(item));
+    card.append(list);
+  } else {
+    card.append(el('p', 'lede', 'Every scenario is secured. The day is yours.'));
   }
-  card.append(list);
+  if (secured.length) {
+    const det = el('details', 'secured-details');
+    if (!remaining.length) det.open = true;
+    const sum = el('summary', 'mono', `[ ${secured.length} ${secured.length === 1 ? 'SCENARIO' : 'SCENARIOS'} SECURED ]`);
+    det.append(sum);
+    const doneList = el('ul', 'checklist secured-list');
+    for (const item of secured) doneList.append(rowFor(item));
+    det.append(doneList);
+    card.append(det);
+  }
   root.append(card);
 
   root.append(renderRestCard());
   root.append(renderVaultCard());
+
+  // first aid moved to the quiet bottom (audit: a healthy player should not
+  // meet repair instructions as the first thing on the page)
+  const help = el('div', 'help-line help-footer');
+  help.append(el('span', null, 'Progress not updating while you play? Run this in PowerShell:'));
+  const hcode = el('code', 'mono', MIRROR_CMD);
+  help.append(hcode);
+  const hbtn = el('button', 'ghost', 'Copy');
+  hbtn.addEventListener('click', async () => {
+    const ok = await copyText(MIRROR_CMD);
+    hbtn.textContent = ok ? 'Copied' : 'Copy';
+    if (ok) setTimeout(() => { hbtn.textContent = 'Copy'; }, 1500);
+  });
+  help.append(hbtn);
+  root.append(help);
 }
 
 // The Vault: spend chain links on perks (see CHAIN_PROTOCOL.md)
@@ -1003,13 +1036,17 @@ function startCelebration(test = false) {
     FINAL_CHORD.forEach((f, i) => setTimeout(() => tone(f, 0.7, 0.14), i * 70));
     overlay.replaceChildren();
     const fin = el('div', 'celebrate-final');
+    // the guild frame flashes in behind the number: ceremony meets terminal
+    const fr = el('img', 'final-frame');
+    fr.src = 'assets/frame-gold.svg'; fr.alt = '';
+    fin.append(fr);
     fin.append(el('div', 'final-pct mono', '100%'));
-    fin.append(el('div', 'final-title', 'Day complete'));
+    fin.append(el('div', 'final-sys mono', '[DAY SECURED]'));
     fin.append(el('div', 'final-sub', state.streak && state.streak.streak
       ? `${state.streak.streak} day streak, checked in automatically`
       : 'checked in automatically'));
     overlay.append(fin);
-    setTimeout(() => overlay.remove(), 2600);
+    setTimeout(() => overlay.remove(), 3200);
   };
 
   // respect reduced motion: no shooting gallery, straight to the card
