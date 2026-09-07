@@ -5,23 +5,30 @@ document is the source of truth for the mechanics. Design language for
 all of it lives in KOVA_design_brief.md (System voice, chain map as a
 constellation on the dimension background).
 
-## 1. Daily chains
+## 1. Half-week chains
 
-- Every group day, ALL participants (actives and ghosts alike) are
-  paired. Pairing is a deterministic shuffle seeded by the date, so
+- ALL participants (actives and ghosts alike) are paired in HALF-WEEK
+  windows: Monday-Wednesday (3 days) and Thursday-Sunday (4 days).
+  Two shuffles a week (the middle ground Rauder asked for: daily was
+  too short to actually pressure a partner, weekly too stale).
+- Pairing is a deterministic shuffle seeded by the window key, so
   every client and the worker derive the same pairs with no stored
-  state. Constraint: never the same partner as the previous two days
-  (derivable from the previous days' seeds).
-- Odd headcount: exactly one TRIPLE that day (never a bye). A triple
-  completes only when all three complete.
-- A chain FORGES when every member completes their playlist that day.
-  Reward: +1 link each (see the ledger).
-- Rescue bonus: if a member was silent 3+ days before today (same
-  idleDays logic as the digest), the chain pays DOUBLE to everyone in
-  it. Reviving a ghost is a jackpot, not a burden.
-- A partner on a scheduled rest day counts as holding their end: the
-  playing member can still forge the chain (no rescue bonus from
-  resting partners).
+  state. Constraint: never the same partner as in the previous two
+  windows (derivable from the previous window seeds).
+- Odd headcount: exactly one TRIPLE that window (never a bye). A
+  triple's day forges only when all three complete.
+- Within a window the pair is fixed. EACH DAY both members complete,
+  the chain forges that day: +1 link each.
+- Perfect chain: every day of the window forged together pays a bonus
+  +2 each at window close.
+- Rescue bonus: if a member was silent 3+ days at the window's start
+  (same idleDays logic as the digest), every forged day of that chain
+  pays DOUBLE. Reviving a ghost is a jackpot, not a burden, and a
+  multi-day window gives the rescuer real time to hound them.
+- A partner on a scheduled rest day counts as holding their end for
+  that day: the playing member can still forge it (rest days do not
+  count toward the perfect-chain requirement; a window day resting
+  on BOTH sides simply does not count against perfection either).
 - Nothing is lost on a broken chain. No penalties, only missed upside.
 
 ## 2. Links (the currency)
@@ -42,8 +49,8 @@ inventory in KV. Launch catalog:
 | Perk | Effect | Price (launch) |
 | --- | --- | --- |
 | Frame of Honor | An OPERATOR frame around your avatar on the leaderboard for 7 days. Pure prestige. | 5 links |
-| Extra rest day | One additional rest day usable in a week where both weekly rest days are spent. Cap: 1 per month. | 12 links |
-| Streak Shield | Held in inventory (max 1). If a day ends with NOTHING played, at 03:30 group time the shield auto-converts that day into a rest day: streak survives, day is not credited as done. Consumption is public: the digest reports it. | 25 links |
+| Extra rest day | A one-use voucher: schedule ONE rest day ignoring the 2-per-week quota. At most one voucher used per calendar month, so a single week of the month can reach 3 rest days and no week can ever exceed that. | 12 links |
+| Streak Shield | Held in inventory (max 1). If a day ends with NOTHING played, at 03:30 group time the shield auto-converts that day into a rest day: streak survives, day is not credited as done. Consumption is public: the digest reports it. | 15 links |
 
 Shield notes: it fires only after the 3-hour night grace window has
 closed (no double-crediting confusion), it is consumed automatically
@@ -69,13 +76,14 @@ closed (no double-crediting confusion), it is consumed automatically
 
 ## 5. The chain map (site)
 
-Bottom of the Group page: `[CHAIN MAP // <date>]`. Today's chains as a
-constellation on the dimension background: avatar nodes joined by a
-thread. Thread states: forged = gold glow, waiting (some ends done) =
-purple ember, open = dim, broken (day over, incomplete) = gray. Triples
-draw as triangles. Hover shows who holds which end. No pair streak
-exists (pairs rotate daily), so no size scaling by streak; motion and
-glow carry the states.
+Bottom of the Group page: `[CHAIN MAP // <window>]`. The current
+window's chains as a constellation on the dimension background: avatar
+nodes joined by a thread. Today's thread states: forged = gold glow,
+waiting (some ends done) = purple ember, open = dim, broken (day over,
+incomplete) = gray. The window arc is visible too: the thread thickens
+and brightens with each forged day of the window (1/3, 2/3...), a
+perfect-chain-so-far pair burns gold. Triples draw as triangles. Hover
+shows who holds which end and the window tally.
 
 ## 6. The weekly trial (challenge)
 
