@@ -91,10 +91,17 @@ rounded card as the default panel.
 Everything else on the screen is visibly subordinate: smaller, quieter,
 denser.
 
-**Kill the voids.** Content column widens to ~960px. The grid horizon
-background either earns its place (visible near the header, fading by
-mid-screen) or leaves. Pages end with a System footer line
-(`[KOVA STREAK // SEASON 1]`) instead of trailing black.
+**Kill the voids: the background is the System's dimension.** (Upgraded
+per Rauder, 2026-09-07: the first pass felt too same-y; the page must
+feel expensive, not flat.) Layered atmosphere instead of flat black:
+a deep #060509 ground, slow-drifting purple nebulae, two layers of
+twinkling star dust, a faint grid fading with depth, film grain at ~5%
+opacity and a vignette focusing the center. Behind the honor stage the
+System's sigil: a huge rune circle (purple outer rings, gold inner ring)
+rotating over minutes. Ambience never fights content: content sits on
+translucent surfaces above it, and no atmosphere layer exceeds ~16%
+opacity. Content column widens to ~960-1000px. Pages end with a System
+footer line instead of trailing black.
 
 **Density.** Cards sit closer (16-20px gaps, not 40), padding tightens,
 done-scenario rows compress. The terminal feel comes from crisp density,
@@ -147,16 +154,27 @@ viewer.
 
 ## 7. Motion
 
-Three ideas maximum, all subtle, all behind `prefers-reduced-motion`:
+Revised per Rauder (2026-09-07): richer than the first draft, but
+ambient, never casino. Two motion classes, all behind
+`prefers-reduced-motion`:
 
-1. System lines decode on first paint (fast scramble-to-text, 300ms,
-   once per page load, eyebrows only).
-2. Scanline shimmer drifting through active status-window headers,
-   barely visible.
-3. Green pulse on the moment a day completes (calendar cell / ring).
+AMBIENT (always on, slow, loops measured in seconds to minutes):
+- The sigil rotates (outer ring ~110s, inner counter ~70s).
+- Nebulae drift, star layers twinkle on long alternating cycles.
+- A scan beam sweeps the active status window's top edge (~5s cycle).
+- Pedestal metals get a sheen sweep (~6s), podium flames flicker,
+  gold embers rise over the champion pedestal.
+- The System's caret blinks after the last event line.
+- Today's completed calendar cells pulse green softly.
 
-Nothing else moves. The podium does not float, cards do not lift on
-hover beyond a border brightening.
+EVENT (fires once on a real moment):
+- System lines decode on first paint (fast scramble-to-text, ~300ms,
+  eyebrows only).
+- Green burst the moment a day completes (ring + cell).
+
+Rules: nothing jumps or bounces, UI elements never move position,
+hover feedback stays a border brightening, and ambience frequencies
+stay slow enough that a screenshot at any moment still composes.
 
 ## 8. Craft floors
 
