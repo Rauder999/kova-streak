@@ -14,6 +14,13 @@ Write-Host '=== KOVA STREAK mirror setup ===' -ForegroundColor Magenta
 # wherever it lives), Program Files is kept only as a fallback. Then all
 # libraries from each root's libraryfolders.vdf.
 $statsTail = 'steamapps\common\FPSAimTrainer\FPSAimTrainer\stats'
+# Join-Path validates the drive and dies on stale entries (an unplugged
+# external drive still listed in libraryfolders.vdf), so join by string
+# and let Test-Path sort out what actually exists.
+function Join-Loose([string]$base, [string]$tail) {
+  if (-not $base) { return $null }
+  return ($base.TrimEnd('\') + '\' + $tail)
+}
 $steamRoots = @()
 foreach ($rk in @('HKCU:\Software\Valve\Steam', 'HKLM:\SOFTWARE\WOW6432Node\Valve\Steam', 'HKLM:\SOFTWARE\Valve\Steam')) {
   try {
@@ -24,22 +31,26 @@ foreach ($rk in @('HKCU:\Software\Valve\Steam', 'HKLM:\SOFTWARE\WOW6432Node\Valv
   } catch { }
 }
 foreach ($pf in @(${env:ProgramFiles(x86)}, $env:ProgramFiles)) {
-  if ($pf) { $steamRoots += (Join-Path $pf 'Steam') }
+  if ($pf) { $steamRoots += (Join-Loose $pf 'Steam') }
 }
 $candidates = @()
 foreach ($root in ($steamRoots | Select-Object -Unique)) {
-  $candidates += (Join-Path $root $statsTail)
-  $vdf = Join-Path $root 'steamapps\libraryfolders.vdf'
-  if (Test-Path $vdf) {
+  $candidates += (Join-Loose $root $statsTail)
+  $vdf = Join-Loose $root 'steamapps\libraryfolders.vdf'
+  $hasVdf = $false
+  try { $hasVdf = Test-Path -LiteralPath $vdf } catch { }
+  if ($hasVdf) {
     foreach ($m in [regex]::Matches((Get-Content $vdf -Raw), '"path"\s+"([^"]+)"')) {
       $lib = $m.Groups[1].Value -replace '\\\\', '\'
-      $candidates += (Join-Path $lib $statsTail)
+      $candidates += (Join-Loose $lib $statsTail)
     }
   }
 }
 $stats = $null
 foreach ($c in ($candidates | Select-Object -Unique)) {
-  if (Test-Path $c) { $stats = $c; break }
+  $ok = $false
+  try { $ok = ($c -and (Test-Path -LiteralPath $c)) } catch { }
+  if ($ok) { $stats = $c; break }
 }
 if (-not $stats) {
   Write-Host ''
@@ -51,7 +62,9 @@ if (-not $stats) {
   Write-Host '  4. Come back here, RIGHT-CLICK to paste it, press Enter.'
   $stats = Read-Host 'Path'
   $stats = $stats.Trim('"').Trim()
-  if (-not (Test-Path $stats)) { Write-Host 'That path does not exist. Aborting, nothing was changed.' -ForegroundColor Red; exit 1 }
+  $ok = $false
+  try { $ok = ($stats -and (Test-Path -LiteralPath $stats)) } catch { }
+  if (-not $ok) { Write-Host 'That path does not exist. Aborting, nothing was changed.' -ForegroundColor Red; exit 1 }
 }
 Write-Host "Found KovaaK's stats: $stats"
 
