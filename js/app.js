@@ -1257,6 +1257,20 @@ export function renderGroup() {
       const grp = podiumGroups[i];
       const shown = grp.slice(0, 4); // a wider tie collapses into "+N"
       const slot = el('div', `podium-slot place-${i + 1}`);
+
+      // the ceremony stage: light beam and ritual ring project behind the
+      // frames, the champion additionally stands on a floor sigil
+      const stagebox = el('div', 'podium-stage');
+      stagebox.append(el('span', 'podium-beam'));
+      const ring = el('img', 'podium-ring');
+      ring.src = `assets/ornament-ring-${metals[i]}.svg`; ring.alt = '';
+      stagebox.append(ring);
+      if (i === 0) {
+        const sigil = el('img', 'podium-sigil');
+        sigil.src = 'assets/sigil-base-gold.svg'; sigil.alt = '';
+        stagebox.append(sigil);
+        stagebox.append(el('span', 'podium-sparks'));
+      }
       const frames = el('div', 'podium-frames' + (shown.length > 1 ? ' multi' : ''));
       for (const p of shown) {
         const frame = el('div', 'podium-frame');
@@ -1268,7 +1282,9 @@ export function renderGroup() {
         frame.append(img);
         frames.append(frame);
       }
-      slot.append(frames);
+      stagebox.append(frames);
+      slot.append(stagebox);
+
       const names = shown.map((p) => p.displayName).join(', ') + (grp.length > shown.length ? ` +${grp.length - shown.length}` : '');
       slot.append(el('div', 'podium-name' + (shown.length > 1 ? ' multi' : ''), names));
       const st = el('div', 'podium-streak mono');
@@ -1277,7 +1293,14 @@ export function renderGroup() {
       fl.alt = '';
       st.append(fl, `${podiumValues[i]}d`);
       slot.append(st);
-      slot.append(el('div', 'podium-pedestal'));
+
+      // the pedestal face carries the rank numeral and an etched ornament
+      const ped = el('div', 'podium-pedestal');
+      const etch = el('span', 'ped-etch');
+      etch.style.backgroundImage = `url('assets/pedestal-etch-${metals[i]}.svg')`;
+      ped.append(el('span', 'ped-rank mono', ['01', '02', '03'][i]));
+      ped.append(etch);
+      slot.append(ped);
       stage.append(slot);
     }
     pod.append(stage);
@@ -1306,9 +1329,9 @@ export function renderGroup() {
     // the red zone: not a single fully completed day in all of history
     const redzone = !isHistory && (pl.totalDone || 0) === 0 ? ' redzone' : '';
     const tr = el('tr', (pl.userId === state.user.uid ? 'me' : '') + medal + redzone);
-    // rank: a metal badge coin for the top three, plain numeral below
+    // rank: a holographic hex emblem for the top three, plain numeral below
     const rankTd = el('td', 'rank mono');
-    if (i < 3) rankTd.append(el('span', 'rank-badge rb-' + (i + 1), String(i + 1)));
+    if (i < 3) rankTd.append(rankEmblem(i + 1));
     else rankTd.textContent = String(i + 1);
     tr.append(rankTd);
     const nameCell = el('td', 'player');
@@ -1473,17 +1496,36 @@ function renderChainMap(ch) {
   return card;
 }
 
-// Interlocked chain links drawn inline: alternating wide and tall ovals.
-// Color and motion come from the state class on the wrapper.
+// A real chain in profile (per Rauder's reference): stadium rings joined by
+// edge-on links, waisted where they turn away from the viewer. Color and
+// motion come from the state class; forged chains run an energy spark.
 function chainConnector(stateCls) {
   const s = el('span', 'chain-conn ' + stateCls);
-  s.innerHTML = '<svg viewBox="0 0 58 20" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.7">'
-    + '<ellipse cx="10" cy="10" rx="8.5" ry="5"/>'
-    + '<ellipse cx="23" cy="10" rx="5" ry="8"/>'
-    + '<ellipse cx="36" cy="10" rx="8.5" ry="5"/>'
-    + '<ellipse cx="49" cy="10" rx="5" ry="8"/>'
-    + '</g></svg>';
+  const edge = (cx) => `M${cx - 4.6} 4.8 C${cx - 1.5} 7.1 ${cx + 1.5} 7.1 ${cx + 4.6} 4.8 `
+    + `L${cx + 4.6} 15.2 C${cx + 1.5} 12.9 ${cx - 1.5} 12.9 ${cx - 4.6} 15.2 Z`;
+  s.innerHTML = '<svg viewBox="0 0 62 20" aria-hidden="true">'
+    + '<g class="link-run" fill="none" stroke="currentColor" stroke-width="2.1">'
+    + '<rect x="2" y="5.4" width="16" height="9.2" rx="4.6"/>'
+    + '<rect x="23" y="5.4" width="16" height="9.2" rx="4.6"/>'
+    + '<rect x="44" y="5.4" width="16" height="9.2" rx="4.6"/>'
+    + '</g>'
+    + `<g class="link-edge" fill="currentColor"><path d="${edge(20.5)}"/><path d="${edge(41.5)}"/></g>`
+    + '<circle class="link-spark" cx="0" cy="10" r="2.1" fill="currentColor"/>'
+    + '</svg>';
   return s;
+}
+
+// Holographic rank emblem: a double hex outline with a glassy core and a
+// glowing numeral. Metal tint and sheen come from the rb-N class.
+function rankEmblem(place) {
+  const b = el('span', 'rank-badge rb-' + place);
+  b.innerHTML = '<svg viewBox="0 0 32 32" aria-hidden="true">'
+    + '<polygon class="hex-core" points="16,2.6 27.6,9.3 27.6,22.7 16,29.4 4.4,22.7 4.4,9.3"/>'
+    + '<polygon class="hex-rim" points="16,1.2 28.8,8.6 28.8,23.4 16,30.8 3.2,23.4 3.2,8.6"/>'
+    + '<polygon class="hex-inner" points="16,5.6 24.9,10.8 24.9,21.2 16,26.4 7.1,21.2 7.1,10.8"/>'
+    + '</svg>';
+  b.append(el('span', 'rank-num', String(place)));
+  return b;
 }
 
 function threadClass(g, todayState) {

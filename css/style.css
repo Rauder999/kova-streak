@@ -1038,3 +1038,198 @@ body::before { content: none; }
 
 .ring-fill { filter: drop-shadow(0 0 8px rgba(124, 108, 240, 0.55)); }
 .ring.is-done .ring-fill { filter: drop-shadow(0 0 10px rgba(111, 163, 122, 0.65)); }
+
+/* ==== holo ceremony pass (per Rauder, 2026-09-08): real chain links,
+   hex rank emblems, red zone spacing, the ceremonial podium ==== */
+
+/* -- chain map: profile chain -- */
+.chain-conn svg { width: 60px; height: 20px; }
+.chain-conn .link-edge { opacity: .85; }
+.chain-conn .link-spark { display: none; }
+.chain-conn.is-forged {
+  color: #E8B64A;
+  filter: drop-shadow(0 0 7px rgba(232, 182, 74, 0.65));
+}
+.chain-conn.is-waiting { color: var(--signal); filter: drop-shadow(0 0 5px rgba(124, 108, 240, 0.55)); }
+.chain-conn.is-open { color: #56565f; }
+@media (prefers-reduced-motion: no-preference) {
+  .chain-conn.is-forged .link-run rect { stroke-dasharray: 7 4; animation: linkflow 2.4s linear infinite; }
+  .chain-conn.is-forged .link-spark { display: block; animation: spark-run 2.8s ease-in-out infinite; }
+  .chain-conn.is-waiting .link-run rect { stroke-dasharray: 5 4; animation: linkflow 4.8s linear infinite; }
+}
+@keyframes spark-run {
+  0% { transform: translateX(2px); opacity: 0; }
+  12% { opacity: 1; }
+  86% { opacity: 1; }
+  100% { transform: translateX(56px); opacity: 0; }
+}
+
+/* -- leaderboard: holographic hex rank emblems -- */
+.rank-badge, .rank-badge.rb-1, .rank-badge.rb-2, .rank-badge.rb-3 {
+  position: relative; width: 30px; height: 30px;
+  background: none; border-radius: 0; box-shadow: none;
+}
+.rank-badge svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.rank-badge .hex-core { fill: rgba(12, 11, 16, 0.82); }
+.rank-badge .hex-rim { fill: none; stroke: var(--rk-metal); stroke-width: 1.5; }
+.rank-badge .hex-inner { fill: none; stroke: var(--rk-metal); stroke-width: .7; opacity: .5; }
+.rank-badge .rank-num {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-weight: 700; font-size: 13px;
+  color: var(--rk-metal); text-shadow: 0 0 9px var(--rk-glow);
+}
+.rank-badge::after {
+  content: ''; position: absolute; inset: 2px;
+  clip-path: polygon(50% 5%, 88% 27%, 88% 73%, 50% 95%, 12% 73%, 12% 27%);
+  background: linear-gradient(115deg, transparent 40%, rgba(255, 255, 255, 0.34) 50%, transparent 60%);
+  background-size: 240% 100%; background-position: -130% 0;
+  background-repeat: no-repeat;
+  pointer-events: none;
+}
+.rank-badge.rb-1 {
+  --rk-metal: #EFC468; --rk-glow: rgba(232, 182, 74, 0.75);
+  filter: drop-shadow(0 0 8px rgba(232, 182, 74, 0.45));
+}
+.rank-badge.rb-1 .hex-core { fill: rgba(60, 45, 14, 0.55); }
+.rank-badge.rb-2 {
+  --rk-metal: #D6D6DC; --rk-glow: rgba(199, 199, 204, 0.6);
+  filter: drop-shadow(0 0 7px rgba(199, 199, 204, 0.32));
+}
+.rank-badge.rb-2 .hex-core { fill: rgba(52, 52, 58, 0.55); }
+.rank-badge.rb-3 {
+  --rk-metal: #C89F68; --rk-glow: rgba(176, 141, 87, 0.65);
+  filter: drop-shadow(0 0 7px rgba(176, 141, 87, 0.38));
+}
+.rank-badge.rb-3 .hex-core { fill: rgba(56, 42, 22, 0.55); }
+@media (prefers-reduced-motion: no-preference) {
+  .rank-badge::after { animation: emblem-sheen 5.4s ease-in-out infinite; }
+  .rank-badge.rb-2::after { animation-delay: 1.1s; }
+  .rank-badge.rb-3::after { animation-delay: 2.2s; }
+  .rank-badge.rb-1 { animation: emblem-breathe 3.6s ease-in-out infinite; }
+}
+@keyframes emblem-sheen {
+  0% { background-position: -130% 0; }
+  38% { background-position: 130% 0; }
+  100% { background-position: 130% 0; }
+}
+@keyframes emblem-breathe {
+  0%, 100% { filter: drop-shadow(0 0 6px rgba(232, 182, 74, 0.35)); }
+  50% { filter: drop-shadow(0 0 12px rgba(232, 182, 74, 0.6)); }
+}
+
+/* -- red zone: the tag never crowds or clips the name -- */
+.leaderboard td.player { display: flex; align-items: center; gap: 9px; min-width: 178px; }
+.leaderboard td.player > span:first-of-type {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.redzone-tag {
+  flex: none; margin-left: 2px;
+  font-size: 8.5px; letter-spacing: .05em; padding: 2px 6px;
+  background: rgba(201, 106, 94, 0.08);
+  opacity: .9;
+}
+
+/* -- the ceremonial podium -- */
+.podium-card { overflow: hidden; }
+.podium { gap: 22px; padding: 26px 0 6px; }
+/* shared pedestals overlap like a squad so a 3-way tie still fits the stage */
+.podium-frames.multi .podium-frame { margin-left: -30px; }
+.podium-frames.multi .podium-frame:first-child { margin-left: 0; }
+.place-1 .podium-frames.multi .podium-frame { width: 100px; height: 103px; }
+.place-2 .podium-frames.multi .podium-frame { width: 88px; height: 91px; }
+.place-3 .podium-frames.multi .podium-frame { width: 82px; height: 84px; }
+.podium-slot { position: relative; }
+.podium-stage { position: relative; display: flex; justify-content: center; }
+.podium-stage .podium-frames { position: relative; z-index: 2; }
+
+/* light beam: a holographic column rising from the pedestal */
+.podium-beam {
+  position: absolute; z-index: 0; pointer-events: none;
+  left: 50%; bottom: -12px; transform: translateX(-50%);
+  width: 82%; height: 158%;
+  clip-path: polygon(24% 100%, 76% 100%, 100% 0, 0 0);
+  background: linear-gradient(to top, var(--pd-beam), transparent 82%);
+  filter: blur(5px);
+}
+/* ritual ring: a slow ornament rotation behind the frame (fixed size:
+   percentage sizing explodes on shared pedestals with 3-4 frames) */
+.podium-ring {
+  position: absolute; z-index: 1; pointer-events: none;
+  left: 50%; top: 50%;
+  max-width: none; aspect-ratio: 258 / 266; height: auto;
+  transform: translate(-50%, -50%);
+  opacity: .30;
+}
+.place-1 .podium-ring { width: 236px; }
+.place-2 .podium-ring { width: 182px; opacity: .22; }
+.place-3 .podium-ring { width: 168px; opacity: .20; }
+/* the champion stands on a projected floor sigil */
+.podium-sigil {
+  position: absolute; z-index: 0; pointer-events: none;
+  left: 50%; bottom: -24px;
+  width: 240px; max-width: none;
+  transform: translateX(-50%) scaleY(.30);
+  opacity: .22; filter: blur(.5px) drop-shadow(0 0 12px rgba(232, 182, 74, 0.5));
+}
+/* rising gold sparks around the champion */
+.podium-sparks { position: absolute; z-index: 3; left: 50%; bottom: 8px; width: 0; height: 0; pointer-events: none; }
+.podium-sparks::before, .podium-sparks::after {
+  content: ''; position: absolute; width: 3px; height: 3px; border-radius: 50%;
+  background: #EFC468;
+  box-shadow: -46px -8px 0 -1px rgba(239, 196, 104, 0.85), 42px -20px 0 0 rgba(239, 196, 104, 0.7);
+  opacity: 0;
+}
+.podium-sparks::after {
+  box-shadow: -30px -26px 0 0 rgba(239, 196, 104, 0.7), 52px 2px 0 -1px rgba(239, 196, 104, 0.8);
+}
+.place-1 { --pd-beam: rgba(232, 182, 74, 0.17); }
+.place-2 { --pd-beam: rgba(199, 199, 204, 0.12); }
+.place-3 { --pd-beam: rgba(176, 141, 87, 0.12); }
+
+/* pedestals: taller monoliths with a rank numeral and etched ornament */
+.podium-pedestal { margin-top: 8px; }
+.place-1 .podium-pedestal { height: 132px; min-width: 186px; }
+.place-2 .podium-pedestal { height: 86px; min-width: 158px; }
+.place-3 .podium-pedestal { height: 54px; min-width: 148px; }
+.ped-rank {
+  position: absolute; left: 0; right: 0; text-align: center;
+  font-weight: 700; letter-spacing: .14em;
+  color: var(--pd-metal); opacity: .8;
+  text-shadow: 0 0 14px var(--pd-glow);
+}
+.place-1 { --pd-metal: #EFC468; --pd-glow: rgba(232, 182, 74, 0.6); }
+.place-2 { --pd-metal: #D6D6DC; --pd-glow: rgba(199, 199, 204, 0.45); }
+.place-3 { --pd-metal: #C89F68; --pd-glow: rgba(176, 141, 87, 0.5); }
+.place-1 .ped-rank { top: 34px; font-size: 34px; }
+.place-2 .ped-rank { top: 22px; font-size: 24px; }
+.place-3 .ped-rank { top: 13px; font-size: 18px; }
+.ped-etch {
+  position: absolute; left: 8%; right: 8%; bottom: 7px; height: 24px;
+  background-position: center; background-repeat: no-repeat; background-size: contain;
+  opacity: .5;
+}
+.place-3 .ped-etch { display: none; }
+@media (prefers-reduced-motion: no-preference) {
+  .podium-ring { animation: ring-orbit 46s linear infinite; }
+  .place-2 .podium-ring { animation-duration: 58s; animation-direction: reverse; }
+  .place-3 .podium-ring { animation-duration: 64s; }
+  .podium-sigil { animation: sigil-breathe 5.2s ease-in-out infinite; }
+  .podium-beam { animation: beam-breathe 6.4s ease-in-out infinite; }
+  .podium-sparks::before { animation: spark-rise 4.6s ease-in infinite; }
+  .podium-sparks::after { animation: spark-rise 5.8s ease-in 2.1s infinite; }
+}
+@keyframes ring-orbit { to { transform: translate(-50%, -50%) rotate(360deg); } }
+@keyframes sigil-breathe { 0%, 100% { opacity: .24; } 50% { opacity: .38; } }
+@keyframes beam-breathe { 0%, 100% { opacity: .75; } 50% { opacity: 1; } }
+@keyframes spark-rise {
+  0% { transform: translateY(6px); opacity: 0; }
+  18% { opacity: 1; }
+  100% { transform: translateY(-96px); opacity: 0; }
+}
+/* narrow screens: the stage stacks, champion first, nothing gets clipped */
+@media (max-width: 720px) {
+  .podium { flex-direction: column; align-items: center; gap: 30px; }
+  .place-1 { order: 1; }
+  .place-2 { order: 2; }
+  .place-3 { order: 3; }
+}
