@@ -1128,16 +1128,37 @@ body::before { content: none; }
   background: rgba(201, 106, 94, 0.08);
   opacity: .9;
 }
+/* the red marker is a short bar owned by the rank cell: a tr box-shadow
+   drifts against collapsed borders and crawled over the numerals */
+.leaderboard tr.redzone { box-shadow: none; }
+.leaderboard tr.redzone .rank { position: relative; padding-left: 15px; }
+.leaderboard tr.redzone .rank::before {
+  content: ''; position: absolute; left: 2px; top: 50%;
+  width: 3px; height: 20px; transform: translateY(-50%);
+  border-radius: 2px;
+  background: rgba(201, 106, 94, 0.8);
+  box-shadow: 0 0 8px rgba(201, 106, 94, 0.35);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .leaderboard tr.redzone { animation: none; }
+  .leaderboard tr.redzone .rank::before { animation: redbar-breathe 5s ease-in-out infinite; }
+}
+@keyframes redbar-breathe { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
 
 /* -- the ceremonial podium -- */
 .podium-card { overflow: hidden; }
-.podium { gap: 22px; padding: 26px 0 6px; }
-/* shared pedestals overlap like a squad so a 3-way tie still fits the stage */
-.podium-frames.multi .podium-frame { margin-left: -30px; }
+.podium { gap: 30px; padding: 26px 0 6px; }
+/* shared pedestals: a pair overlaps gently, a 3-4 squad packs tight so it
+   still fits the stage (:has fallback = the gentle overlap for everyone) */
+.podium-frames.multi .podium-frame { margin-left: -12px; }
 .podium-frames.multi .podium-frame:first-child { margin-left: 0; }
-.place-1 .podium-frames.multi .podium-frame { width: 100px; height: 103px; }
-.place-2 .podium-frames.multi .podium-frame { width: 88px; height: 91px; }
-.place-3 .podium-frames.multi .podium-frame { width: 82px; height: 84px; }
+.place-1 .podium-frames.multi .podium-frame { width: 116px; height: 119px; }
+.place-2 .podium-frames.multi .podium-frame { width: 100px; height: 103px; }
+.place-3 .podium-frames.multi .podium-frame { width: 94px; height: 97px; }
+.podium-frames.multi:has(.podium-frame:nth-child(3)) .podium-frame { margin-left: -28px; }
+.place-1 .podium-frames.multi:has(.podium-frame:nth-child(3)) .podium-frame { width: 100px; height: 103px; }
+.place-2 .podium-frames.multi:has(.podium-frame:nth-child(3)) .podium-frame { width: 88px; height: 91px; }
+.place-3 .podium-frames.multi:has(.podium-frame:nth-child(3)) .podium-frame { width: 82px; height: 84px; }
 .podium-slot { position: relative; }
 .podium-stage { position: relative; display: flex; justify-content: center; }
 .podium-stage .podium-frames { position: relative; z-index: 2; }
@@ -1189,8 +1210,8 @@ body::before { content: none; }
 /* pedestals: taller monoliths with a rank numeral and etched ornament */
 .podium-pedestal { margin-top: 8px; }
 .place-1 .podium-pedestal { height: 132px; min-width: 186px; }
-.place-2 .podium-pedestal { height: 86px; min-width: 158px; }
-.place-3 .podium-pedestal { height: 54px; min-width: 148px; }
+.place-2 .podium-pedestal { height: 94px; min-width: 158px; }
+.place-3 .podium-pedestal { height: 66px; min-width: 148px; }
 .ped-rank {
   position: absolute; left: 0; right: 0; text-align: center;
   font-weight: 700; letter-spacing: .14em;
