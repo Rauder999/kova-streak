@@ -1037,17 +1037,51 @@ function startCelebration(test = false) {
     FINAL_CHORD.forEach((f, i) => setTimeout(() => tone(f, 0.7, 0.14), i * 70));
     overlay.replaceChildren();
     const fin = el('div', 'celebrate-final');
-    // the guild frame flashes in behind the number: ceremony meets terminal
+    // the verdict stage: ritual ring + guild frame + shockwaves behind the
+    // number, a scanline sweep and rising sparks over it
+    const stage = el('div', 'final-stage');
+    const ring = el('img', 'final-ring');
+    ring.src = 'assets/ornament-ring-gold.svg'; ring.alt = '';
+    stage.append(ring);
+    stage.append(el('span', 'final-wave'));
+    stage.append(el('span', 'final-wave w2'));
     const fr = el('img', 'final-frame');
     fr.src = 'assets/frame-gold.svg'; fr.alt = '';
-    fin.append(fr);
-    fin.append(el('div', 'final-pct mono', '100%'));
+    stage.append(fr);
+    const pct = el('div', 'final-pct');
+    stage.append(pct);
+    stage.append(el('span', 'final-scanline'));
+    stage.append(el('span', 'final-sparks'));
+    fin.append(stage);
     fin.append(el('div', 'final-sys mono', '[DAY SECURED]'));
     fin.append(el('div', 'final-sub', state.streak && state.streak.streak
       ? `${state.streak.streak} day streak, checked in automatically`
       : 'checked in automatically'));
     overlay.append(fin);
-    setTimeout(() => overlay.remove(), 3200);
+
+    // the number decodes into place: glyphs settle left to right
+    const target = '100%';
+    const motionOk = !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    if (!motionOk) {
+      pct.textContent = target;
+    } else {
+      const glyphs = '0123456789#$&';
+      let t0 = null;
+      const step = (ts) => {
+        if (!fin.isConnected || pct.dataset.done) return;
+        if (t0 === null) t0 = ts;
+        const p = Math.min(1, (ts - t0) / 820);
+        const settled = Math.floor(p * (target.length + 0.99));
+        let s = target.slice(0, settled);
+        for (let i = settled; i < target.length; i++) s += glyphs[Math.floor(Math.random() * glyphs.length)];
+        pct.textContent = s;
+        if (p < 1) requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+      // rAF can stall (hidden window, game overlay): the verdict still lands
+      setTimeout(() => { pct.dataset.done = '1'; pct.textContent = target; }, 950);
+    }
+    setTimeout(() => overlay.remove(), 4000);
   };
 
   // respect reduced motion: no shooting gallery, straight to the card
@@ -1334,14 +1368,18 @@ export function renderGroup() {
     if (i < 3) rankTd.append(rankEmblem(i + 1));
     else rankTd.textContent = String(i + 1);
     tr.append(rankTd);
+    // the cell stays a real table cell (flex on a td breaks row alignment),
+    // the flex line lives on an inner wrapper
     const nameCell = el('td', 'player');
+    const wrap = el('span', 'player-wrap');
     const img = el('img');
     img.src = pl.avatar || avatarFallback(pl.userId);
     img.width = 22; img.height = 22; img.alt = '';
     if (pl.frame) img.className = 'honor-frame'; // an active Frame of Honor from the Vault
     safeAvatar(img, pl.userId);
-    nameCell.append(img, el('span', null, pl.displayName));
-    if (redzone) nameCell.append(el('span', 'redzone-tag mono', '[NO RECORD]'));
+    wrap.append(img, el('span', 'player-name', pl.displayName));
+    if (redzone) wrap.append(el('span', 'redzone-tag mono', '[NO RECORD]'));
+    nameCell.append(wrap);
     tr.append(nameCell);
     // stats live in chips, not raw text: each value is a small status cell
     const chip = (cls, text) => { const td = el('td'); td.append(el('span', 'stat-chip mono ' + cls, text)); return td; };
