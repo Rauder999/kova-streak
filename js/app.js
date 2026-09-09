@@ -927,18 +927,44 @@ function renderRestCard() {
   return card;
 }
 
+// The day gauge: a holographic System dial. A slow tick ring and a counter-
+// rotating inner dashed circle frame a gradient arc with a comet tip; the
+// percentage is holographic metal. Everything glows via layered strokes,
+// never CSS filters (a filter on an svg child rasterizes a visible square
+// over the translucent card).
 function progressRing(p) {
-  const size = 200, stroke = 14, r = (size - stroke) / 2, c = 2 * Math.PI * r;
+  const size = 200, stroke = 10, r = 78, c = 2 * Math.PI * r;
   const pct = Math.round(p.percent * 100);
+  const grad = p.done ? 'rg-done' : 'rg-live';
+  const deg = Math.min(360, p.percent * 360);
   const wrap = el('div', 'ring-wrap');
   wrap.innerHTML = `
-    <svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" class="ring ${p.done ? 'is-done' : ''}">
-      <circle cx="${size / 2}" cy="${size / 2}" r="${r}" class="ring-track" stroke-width="${stroke}" fill="none"></circle>
-      <circle cx="${size / 2}" cy="${size / 2}" r="${r}" class="ring-fill" stroke-width="${stroke}" fill="none"
-              stroke-dasharray="${c}" stroke-dashoffset="${c * (1 - p.percent)}"
-              transform="rotate(-90 ${size / 2} ${size / 2})" stroke-linecap="round"></circle>
+    <svg viewBox="0 0 ${size} ${size}" class="ring ${p.done ? 'is-done' : ''}${p.percent <= 0 ? ' rg-zero' : ''}">
+      <defs>
+        <linearGradient id="rg-live" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#B7AEF7"/><stop offset="1" stop-color="#7C6CF0"/>
+        </linearGradient>
+        <linearGradient id="rg-done" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#F5DFA6"/><stop offset="1" stop-color="#E8B64A"/>
+        </linearGradient>
+      </defs>
+      <circle cx="100" cy="100" r="94" class="rg-dial"/>
+      <circle cx="100" cy="100" r="63" class="rg-inner"/>
+      <circle cx="100" cy="100" r="${r}" class="rg-track" stroke-width="${stroke}" fill="none"/>
+      <g class="rg-turn">
+        <circle cx="100" cy="100" r="${r}" class="rg-halo" stroke-width="24" fill="none"
+                style="stroke: url(#${grad})"
+                stroke-dasharray="${c}" stroke-dashoffset="${c * (1 - p.percent)}" stroke-linecap="round"/>
+        <circle cx="100" cy="100" r="${r}" class="ring-fill" stroke-width="${stroke}" fill="none"
+                style="stroke: url(#${grad})"
+                stroke-dasharray="${c}" stroke-dashoffset="${c * (1 - p.percent)}" stroke-linecap="round"/>
+      </g>
+      <g class="rg-tip-rot" style="transform: rotate(${deg}deg)">
+        <circle cx="100" cy="${100 - r}" r="8" class="rg-tip-halo"/>
+        <circle cx="100" cy="${100 - r}" r="3.4" class="rg-tip"/>
+      </g>
     </svg>
-    <div class="ring-label"><b class="mono">${pct}%</b><span>today</span></div>`;
+    <div class="ring-label"><b class="mono rg-pct">${pct}%</b><span>today</span></div>`;
   return wrap;
 }
 

@@ -1114,11 +1114,52 @@ body::before { content: none; }
   50% { filter: drop-shadow(0 0 34px rgba(232, 182, 74, 0.6)); }
 }
 
-.ring-fill { filter: drop-shadow(0 0 8px rgba(124, 108, 240, 0.55)); }
-.ring.is-done .ring-fill { filter: drop-shadow(0 0 10px rgba(111, 163, 122, 0.65)); }
-
 /* ==== holo ceremony pass (per Rauder, 2026-09-08): real chain links,
    hex rank emblems, red zone spacing, the ceremonial podium ==== */
+
+/* -- the day gauge: a holographic System dial (no CSS filters on svg
+   children: they rasterize a visible square over the translucent card) -- */
+.ring-wrap svg { width: 100%; height: 100%; display: block; overflow: visible; }
+.rg-dial {
+  fill: none; stroke: rgba(124, 108, 240, 0.32);
+  stroke-width: 1; stroke-dasharray: 2 6;
+}
+.rg-inner {
+  fill: none; stroke: rgba(183, 174, 247, 0.20);
+  stroke-width: 1; stroke-dasharray: 1 5;
+}
+.rg-track { stroke: rgba(38, 38, 44, 0.9); }
+.rg-halo { opacity: .15; }
+.rg-turn { transform: rotate(-90deg); }
+.rg-turn, .rg-tip-rot, .rg-dial, .rg-inner { transform-box: view-box; transform-origin: 50% 50%; }
+.rg-tip-rot { transition: transform .5s ease; }
+.rg-tip { fill: #EFE9FF; }
+.rg-tip-halo { fill: rgba(183, 174, 247, 0.25); }
+.ring.is-done .rg-dial { stroke: rgba(232, 182, 74, 0.38); }
+.ring.is-done .rg-inner { stroke: rgba(232, 182, 74, 0.22); }
+.ring.is-done .rg-tip { fill: #FFF3D6; }
+.ring.is-done .rg-tip-halo { fill: rgba(239, 196, 104, 0.30); }
+.ring.rg-zero .rg-tip-rot { opacity: 0; }
+.ring-label .rg-pct {
+  background: linear-gradient(180deg, #EFE9FF 0%, #B7AEF7 46%, #8D7DF2 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  font-weight: 700;
+}
+.ring.is-done + .ring-label .rg-pct,
+.ring-wrap:has(.ring.is-done) .rg-pct {
+  background: linear-gradient(180deg, #FFF3D6 0%, #EFC468 45%, #C9992F 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .rg-dial { animation: rg-spin 70s linear infinite; }
+  .rg-inner { animation: rg-spinback 48s linear infinite; }
+  .rg-tip-halo { animation: rg-tip-pulse 2.4s ease-in-out infinite; }
+  .ring.is-done .rg-halo { animation: rg-halo-breathe 3.4s ease-in-out infinite; }
+}
+@keyframes rg-spin { to { transform: rotate(360deg); } }
+@keyframes rg-spinback { to { transform: rotate(-360deg); } }
+@keyframes rg-tip-pulse { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
+@keyframes rg-halo-breathe { 0%, 100% { opacity: .12; } 50% { opacity: .24; } }
 
 /* -- chain map: profile chain -- */
 .chain-conn svg { width: 60px; height: 20px; }
