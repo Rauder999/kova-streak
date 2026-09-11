@@ -584,31 +584,49 @@ async function avatarDataUri(url) {
   }
 }
 
-// A run of interlocked gold links between two circle edges.
-function chainRun(x1, x2, y) {
-  const parts = [];
+// The site's chain in profile at card scale (per Rauder, 2026-09-10: the
+// Discord card and the chain map must be the same chain): stadium rings
+// joined by edge-on waisted links, a soft halo, energy dashes running
+// around the rings and a spark riding the run. `phase` in [0, 1) is the
+// animation position.
+function chainRun(x1, x2, y, phase) {
+  const ringW = 50, ringH = 30, pitch = 64, edgeW = 30, edgeH = 33;
   const span = x2 - x1;
-  const n = Math.max(3, Math.round(span / 34));
+  const n = Math.max(2, Math.floor((span + (pitch - ringW)) / pitch));
+  const total = n * ringW + (n - 1) * (pitch - ringW);
+  const start = x1 + (span - total) / 2;
+  const rings = [];
+  const edges = [];
   for (let i = 0; i < n; i++) {
-    const cx = x1 + (span * (i + 0.5)) / n;
-    if (i % 2 === 0) parts.push(`<ellipse cx="${cx.toFixed(1)}" cy="${y}" rx="17" ry="10"/>`);
-    else parts.push(`<ellipse cx="${cx.toFixed(1)}" cy="${y}" rx="10" ry="16"/>`);
+    const rx = start + i * pitch;
+    rings.push(`<rect x="${rx.toFixed(1)}" y="${(y - ringH / 2).toFixed(1)}" width="${ringW}" height="${ringH}" rx="${ringH / 2}"/>`);
+    if (i < n - 1) {
+      const cx = rx + ringW + (pitch - ringW) / 2;
+      const hw = edgeW / 2, hh = edgeH / 2, pinch = hh * 0.56, cw = hw / 3;
+      const f = (v) => v.toFixed(1);
+      edges.push(`<path d="M${f(cx - hw)} ${f(y - hh)} C${f(cx - cw)} ${f(y - pinch)} ${f(cx + cw)} ${f(y - pinch)} ${f(cx + hw)} ${f(y - hh)} `
+        + `L${f(cx + hw)} ${f(y + hh)} C${f(cx + cw)} ${f(y + pinch)} ${f(cx - cw)} ${f(y + pinch)} ${f(cx - hw)} ${f(y + hh)} Z"/>`);
+    }
   }
-  return parts.join('');
+  const ringStr = rings.join('');
+  const sparkX = (x1 + span * phase).toFixed(1);
+  return `<g fill="none" stroke="#E8B64A" stroke-opacity="0.26" stroke-width="14">${ringStr}</g>`
+    + `<g fill="none" stroke="#E8B64A" stroke-width="5.5">${ringStr}</g>`
+    + `<g fill="#E8B64A">${edges.join('')}</g>`
+    + `<g fill="none" stroke="#FFF3D6" stroke-opacity="0.7" stroke-width="2.2" stroke-dasharray="10 24" stroke-dashoffset="${(-phase * 34).toFixed(2)}">${ringStr}</g>`
+    + `<circle cx="${sparkX}" cy="${y}" r="16" fill="url(#spark)"/>`
+    + `<circle cx="${sparkX}" cy="${y}" r="4.6" fill="#FFF7E6"/>`;
 }
 
-// The CHAIN FORGED card: avatars linked by a glowing gold chain on a
-// status-window panel. Shapes only, no text (no fonts ship with the worker).
-async function buildChainArt(members) {
-  await ensureResvg();
+// Card geometry shared by the frames: a status-window panel with the
+// avatars on it. Shapes only, no text (no fonts ship with the worker).
+function chainCardLayout(members) {
   const n = members.length;
-  const W = n === 3 ? 880 : 640;
-  const H = 260;
-  const y = 130;
-  const xs = n === 3 ? [150, 440, 730] : [160, 480];
-  const r = 62;
+  return { W: n === 3 ? 960 : 640, H: 260, y: 130, xs: n === 3 ? [120, 480, 840] : [132, 508], r: 62 };
+}
 
-  const avatars = await Promise.all(members.map((m) => avatarDataUri(m.avatar)));
+function chainCardSvg(members, avatars, phase, crop) {
+  const { W, H, y, xs, r } = chainCardLayout(members);
   const discs = members.map((m, i) => {
     const cx = xs[i];
     if (avatars[i]) {
@@ -619,32 +637,132 @@ async function buildChainArt(members) {
     const hue = 20 + (Number(BigInt(m.userId || '0') % 300n));
     return `<circle cx="${cx}" cy="${y}" r="${r}" fill="hsl(${hue} 30% 32%)" stroke="#E8B64A" stroke-width="3"/>`;
   }).join('');
-
-  const chains = xs.slice(1).map((x, i) => chainRun(xs[i] + r + 10, x - r - 10, y)).join('');
-
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+  const chains = xs.slice(1).map((x, i) => chainRun(xs[i] + r + 10, x - r - 10, y, phase)).join('');
+  // a crop renders just that region of the same picture (the animation strip)
+  const view = crop ? `width="${crop.w}" height="${crop.h}" viewBox="${crop.x} ${crop.y} ${crop.w} ${crop.h}"` : `width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" ${view}>
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="50%" r="60%">
+      <stop offset="0%" stop-color="#E8B64A" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#E8B64A" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="spark">
+      <stop offset="0%" stop-color="#FFF3D6" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#E8B64A" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
   <rect width="${W}" height="${H}" fill="#08070C"/>
   <g stroke="#7C6CF0" stroke-opacity="0.06" stroke-width="1">
     ${Array.from({ length: Math.floor(W / 64) }, (_, i) => `<line x1="${(i + 1) * 64}" y1="0" x2="${(i + 1) * 64}" y2="${H}"/>`).join('')}
     ${Array.from({ length: Math.floor(H / 64) }, (_, i) => `<line x1="0" y1="${(i + 1) * 64}" x2="${W}" y2="${(i + 1) * 64}"/>`).join('')}
   </g>
-  <radialGradient id="glow" cx="50%" cy="50%" r="60%">
-    <stop offset="0%" stop-color="#E8B64A" stop-opacity="0.16"/>
-    <stop offset="100%" stop-color="#E8B64A" stop-opacity="0"/>
-  </radialGradient>
   <rect width="${W}" height="${H}" fill="url(#glow)"/>
   <rect x="6" y="6" width="${W - 12}" height="${H - 12}" fill="#121216" fill-opacity="0.5" stroke="#3A3A3E" stroke-width="1"/>
   <g stroke="#7C6CF0" stroke-width="3" fill="none">
     <path d="M6 22 V6 H22"/><path d="M${W - 22} 6 H${W - 6} V22"/>
     <path d="M6 ${H - 22} V${H - 6} H22"/><path d="M${W - 22} ${H - 6} H${W - 6} V${H - 22}"/>
   </g>
-  <g fill="none" stroke="#E8B64A" stroke-opacity="0.35" stroke-width="7">${chains}</g>
-  <g fill="none" stroke="#E8B64A" stroke-width="2.6">${chains}</g>
+  ${chains}
   ${discs}
 </svg>`;
+}
 
-  const resvg = new Resvg(svg, { fitTo: { mode: 'width', value: W * 2 } });
-  return resvg.render().asPng();
+// ---- APNG assembly. Frame 0 is the whole card, every later frame repaints
+// only the chain band (an fcTL sub-region), so the file stays small and the
+// render cheap. Discord desktop plays APNG attachments; a client that does
+// not simply shows the first frame, which is the finished static card.
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(bytes) {
+  let c = 0xffffffff;
+  for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+const be32 = (n) => [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255];
+function concatBytes(parts) {
+  let n = 0;
+  for (const p of parts) n += p.length;
+  const out = new Uint8Array(n);
+  let o = 0;
+  for (const p of parts) { out.set(p, o); o += p.length; }
+  return out;
+}
+function pngChunk(type, data) {
+  const body = concatBytes([new Uint8Array([...type].map((ch) => ch.charCodeAt(0))), data]);
+  return concatBytes([new Uint8Array(be32(data.length)), body, new Uint8Array(be32(crc32(body)))]);
+}
+// IHDR data and the concatenated IDAT payload of a PNG
+function pngParts(png) {
+  let p = 8;
+  let ihdr = null;
+  const idat = [];
+  while (p + 8 <= png.length) {
+    const len = ((png[p] << 24) | (png[p + 1] << 16) | (png[p + 2] << 8) | png[p + 3]) >>> 0;
+    const type = String.fromCharCode(png[p + 4], png[p + 5], png[p + 6], png[p + 7]);
+    const data = png.subarray(p + 8, p + 8 + len);
+    if (type === 'IHDR') ihdr = data;
+    if (type === 'IDAT') idat.push(data);
+    if (type === 'IEND') break;
+    p += 12 + len;
+  }
+  if (!ihdr || !idat.length) throw new Error('not a PNG');
+  return { ihdr, data: concatBytes(idat) };
+}
+// frames: [{ png, x, y }], frames[0] full size at offset 0
+function buildApng(frames, delayMs) {
+  const first = pngParts(frames[0].png);
+  const sameFormat = (ihdr) => [8, 9, 10, 11, 12].every((i) => ihdr[i] === first.ihdr[i]);
+  const parts = [new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]), pngChunk('IHDR', first.ihdr)];
+  parts.push(pngChunk('acTL', new Uint8Array([...be32(frames.length), ...be32(0)])));
+  let seq = 0;
+  const fctl = (ihdr, x, y) => {
+    const d = new Uint8Array(26);
+    d.set(be32(seq++), 0);
+    d.set(ihdr.subarray(0, 8), 4); // width, height straight from the frame's IHDR
+    d.set(be32(x), 12); d.set(be32(y), 16);
+    d.set([(delayMs >> 8) & 255, delayMs & 255, 3, 232], 20); // delay = ms / 1000
+    d[24] = 0; d[25] = 0; // dispose none, blend source
+    return pngChunk('fcTL', d);
+  };
+  parts.push(fctl(first.ihdr, 0, 0), pngChunk('IDAT', first.data));
+  for (const f of frames.slice(1)) {
+    const fp = pngParts(f.png);
+    if (!sameFormat(fp.ihdr)) throw new Error('frame format mismatch');
+    parts.push(fctl(fp.ihdr, f.x, f.y), pngChunk('fdAT', concatBytes([new Uint8Array(be32(seq++)), fp.data])));
+  }
+  parts.push(pngChunk('IEND', new Uint8Array(0)));
+  return concatBytes(parts);
+}
+
+const CHAIN_FRAMES = 12;
+const CHAIN_FRAME_MS = 80;
+
+// The CHAIN FORGED card, animated: a full first frame plus a strip per
+// phase covering the chain band, all rendered at 2x. Any hiccup in the
+// animation path degrades to the static first frame.
+async function buildChainArt(members) {
+  await ensureResvg();
+  const { y, xs, r } = chainCardLayout(members);
+  const avatars = await Promise.all(members.map((m) => avatarDataUri(m.avatar)));
+  const render = (phase, crop) => new Resvg(chainCardSvg(members, avatars, phase, crop), { fitTo: { mode: 'zoom', value: 2 } }).render().asPng();
+  const still = render(0, null);
+  try {
+    const crop = { x: xs[0] + r + 4, y: y - 40, w: xs[xs.length - 1] - r - 4 - (xs[0] + r + 4), h: 80 };
+    const frames = [{ png: still, x: 0, y: 0 }];
+    for (let i = 1; i < CHAIN_FRAMES; i++) {
+      frames.push({ png: render(i / CHAIN_FRAMES, crop), x: crop.x * 2, y: crop.y * 2 });
+    }
+    return buildApng(frames, CHAIN_FRAME_MS);
+  } catch {
+    return still;
+  }
 }
 
 async function announceChainForged(env, members, delta, rescue, perfect) {
