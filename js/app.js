@@ -66,7 +66,6 @@ let groupTimer = null;
 let fsObserver = null;
 let lastTickAt = 0;
 let celebrationPending = false;
-let vaultLoading = false;
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
@@ -178,6 +177,7 @@ function switchTab(tab) {
   if (tab === 'today') renderToday();
   if (tab === 'stats') renderStats();
   if (tab === 'group') { renderGroup(); refreshGroup(); }
+  if (tab === 'vault') { renderVault(); loadVault(); }
   if (tab === 'admin') renderAdmin();
 }
 
@@ -650,11 +650,14 @@ export function renderToday() {
       forget.addEventListener('click', async () => { await forgetFolder(); state.handle = null; renderToday(); });
       gate.append(forget);
     } else {
-      // first time: four steps, the folder path always arrives from the helper
-      // via the clipboard. No fallback Copy path buttons: they overwrote the
+      // first time: five steps IN ORDER, each its own numbered row. People
+      // kept jumping straight to the PowerShell line with no export enabled
+      // and no stats folder on disk, and everything broke (per Rauder,
+      // 2026-09-10). The folder path always arrives from the helper via the
+      // clipboard. No fallback Copy path buttons: they overwrote the
       // clipboard with the wrong path, friends got caught by that twice.
       gate.append(el('h2', null, 'One-time setup'));
-      gate.append(el('p', 'lede', 'Two minutes, once. Then it is fully automatic: you play, the site checks you in.'));
+      gate.append(el('p', 'lede', 'Five steps, in this order. Each one needs the previous. After that it is fully automatic: you play, the site checks you in.'));
 
       const cmdRow = el('div', 'path-row');
       const cmdCode = el('code', 'mono path-text', MIRROR_CMD);
@@ -675,27 +678,33 @@ export function renderToday() {
       });
       cmdRow.append(cmdCode, cmdCopy);
 
-      const steps = el('ol', 'setup-steps');
+      const steps = el('div', 'setup-flow');
       const step = (title, rest) => {
-        const li = el('li');
-        li.append(el('b', null, title));
-        if (typeof rest === 'string') li.append(' ' + rest);
-        else if (rest) li.append(...rest);
-        steps.append(li);
-        return li;
+        const row = el('div', 'setup-step');
+        row.append(el('span', 'st-num mono', String(steps.children.length + 1).padStart(2, '0')));
+        const body = el('div', 'st-body');
+        body.append(el('b', 'st-title', title));
+        const text = el('div', 'st-text');
+        if (typeof rest === 'string') text.append(rest);
+        else if (rest) text.append(...rest);
+        body.append(text);
+        row.append(body);
+        steps.append(row);
+        return row;
       };
-      step('KovaaK\'s settings.', 'Settings -> Misc -> Statistics Export = "Always".');
+      step('Turn on stats export', 'In KovaaK\'s: Settings -> Misc -> Statistics Export = "Always".');
+      step('Play one run', 'Any scenario, one game. KovaaK\'s creates its stats folder only after the first run with export on. Skip this and the next steps find nothing.');
       if (state.playlist && state.playlist.shareCode) {
-        step('Playlist.', [' Download it in KovaaK\'s with this code: ', codeChip(state.playlist.shareCode)]);
+        step('Get the playlist', ['Download it in KovaaK\'s with this code: ', codeChip(state.playlist.shareCode)]);
       } else {
-        step('Playlist.', 'Import the week\'s playlist in KovaaK\'s (ask Rauder for the code).');
+        step('Get the playlist', 'Import the week\'s playlist in KovaaK\'s (ask Rauder for the code).');
       }
-      step('PowerShell.', [
-        ' Press Win, type "powershell", Enter. Paste this line, Enter:',
+      step('Run the helper', [
+        'Press Win, type "powershell", Enter. Paste this line, Enter:',
         cmdRow,
         'When it says Done, your folder path is in the clipboard. If it asks a question, answer it right there.',
       ]);
-      step('Folder.', 'Press the button below, then Ctrl+V, Enter, "Select Folder".');
+      step('Pick the folder', 'Press the button below, then Ctrl+V, Enter, "Select Folder".');
       gate.append(steps);
 
       const btn = el('button', 'primary big', 'Choose stats folder');
@@ -800,7 +809,6 @@ export function renderToday() {
   root.append(card);
 
   root.append(renderRestCard());
-  root.append(renderVaultCard());
 
   // first aid moved to the quiet bottom (audit: a healthy player should not
   // meet repair instructions as the first thing on the page)
@@ -818,36 +826,66 @@ export function renderToday() {
   root.append(help);
 }
 
-// The Vault: spend chain links on perks (see CHAIN_PROTOCOL.md)
-function renderVaultCard() {
-  const card = el('div', 'card');
+// ---------- The Vault: its own tab, a proper shop ----------
+// Spend chain links on perks (see CHAIN_PROTOCOL.md). It used to live at
+// the bottom of Today and nobody scrolled that far.
+
+const VAULT_ITEMS = [
+  { id: 'frame', name: 'Frame of Honor', icon: 'assets/frame-gold.svg',
+    desc: 'A golden frame around your avatar on the leaderboard. Seven days of everyone seeing it.' },
+  { id: 'voucher', name: 'Extra rest day', icon: 'assets/vault-rest.svg',
+    desc: 'One rest day above the weekly limit. One use per calendar month.' },
+  { id: 'shield', name: 'Streak Shield', icon: 'assets/vault-shield.svg',
+    desc: 'If a day ends with nothing played, the shield turns it into a rest day at 03:30. Automatic, held until it fires.' },
+  { id: 'score', name: 'Score point', icon: 'assets/vault-score.svg',
+    desc: "+1 day to this month's Done score, straight into the ranking. Stacks, and shows a gold mark by your Done count." },
+];
+
+function vaultItemState(v, id) {
+  if (id === 'frame') return v.frameUntil > Date.now() ? 'active until ' + new Date(v.frameUntil).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null;
+  if (id === 'voucher') return v.voucher ? 'held' : (v.voucherUsedMonth === localMonth() ? 'used this month' : null);
+  if (id === 'shield') return v.shield ? 'held' : null;
+  if (id === 'score') return v.scoreBonus ? `+${v.scoreBonus} this month` : null;
+  return null;
+}
+
+function renderVault() {
+  const root = $('view-vault');
+  root.replaceChildren();
+
+  const card = el('div', 'card vault-shop');
   const head = el('div', 'card-head');
   head.append(el('h2', null, 'The Vault'));
-  head.append(el('span', 'muted', state.vault ? `your links: ${state.vault.links}` : 'earn links by forging chains'));
+  head.append(el('span', 'muted', 'the System trades in links'));
   card.append(head);
 
-  if (!state.vault) {
-    card.append(el('p', 'lede', 'Forge chains with your partner to earn links, then spend them here.'));
-    if (!vaultLoading) { vaultLoading = true; loadVault(); }
-    return card;
+  const v = state.vault;
+
+  // balance hero: the currency greets you, no scrolling required
+  const bal = el('div', 'vault-balance');
+  const count = el('span', 'vb-count mono', v ? String(v.links) : '--');
+  bal.append(count);
+  bal.append(el('span', 'vb-label mono', v && v.links === 1 ? 'LINK' : 'LINKS'));
+  bal.append(el('span', 'vb-sub', 'Forge chains with your partner to earn links. Rescue chains pay double, perfect windows pay a bonus.'));
+  card.append(bal);
+
+  if (!v) {
+    card.append(el('p', 'lede', 'Opening the Vault...'));
+    root.append(card);
+    return;
   }
 
-  const v = state.vault;
-  const items = [
-    { id: 'frame', name: 'Frame of Honor', desc: 'A golden frame around your avatar on the leaderboard for 7 days.', state: v.frameUntil > Date.now() ? 'active until ' + new Date(v.frameUntil).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null },
-    { id: 'voucher', name: 'Extra rest day', desc: 'One rest day over the weekly limit. One use per calendar month.', state: v.voucher ? 'held' : (v.voucherUsedMonth === localMonth() ? 'used this month' : null) },
-    { id: 'shield', name: 'Streak Shield', desc: 'If a day ends with nothing played, it becomes a rest day at 03:30. Automatic.', state: v.shield ? 'held' : null },
-    { id: 'score', name: 'Score point', desc: "+1 day to this month's Done score, straight into the ranking. Stacks.", state: v.scoreBonus ? `+${v.scoreBonus} this month` : null },
-  ];
-  const list = el('div', 'vault-list');
-  for (const it of items) {
-    const row = el('div', 'vault-row');
-    const info = el('div', 'vault-info');
-    info.append(el('div', 'vault-name', it.name));
-    info.append(el('div', 'vault-desc', it.desc));
-    row.append(info);
-    const right = el('div', 'vault-right');
-    if (it.state) right.append(el('span', 'pill is-rest', it.state));
+  const grid = el('div', 'vault-grid');
+  for (const it of VAULT_ITEMS) {
+    const item = el('div', 'vault-item');
+    const icon = el('img', 'vi-icon');
+    icon.src = it.icon; icon.alt = '';
+    item.append(icon);
+    item.append(el('div', 'vi-name', it.name));
+    item.append(el('div', 'vi-desc', it.desc));
+    const foot = el('div', 'vi-foot');
+    const st = vaultItemState(v, it.id);
+    if (st) foot.append(el('span', 'pill is-rest', st));
     const btn = el('button', 'vault-buy mono', `${v.prices[it.id]} links`);
     btn.disabled = v.links < v.prices[it.id] || (it.id === 'shield' && v.shield) || (it.id === 'voucher' && v.voucher);
     btn.addEventListener('click', async () => {
@@ -860,22 +898,23 @@ function renderVaultCard() {
         state.vaultMsg = e.message;
       }
       await loadVault();
-      if (state.tab === 'today') renderToday();
     });
-    right.append(btn);
-    row.append(right);
-    list.append(row);
+    foot.append(btn);
+    item.append(foot);
+    item.append(el('span', 'vi-sheen'));
+    grid.append(item);
   }
-  card.append(list);
+  card.append(grid);
   if (state.vaultMsg) card.append(notice(state.vaultMsg, 'error'));
-  return card;
+  card.append(el('p', 'fine', 'Links come from the Chain Protocol: both ends of a chain close the day, both earn. The chain map lives on the Group tab.'));
+  root.append(card);
 }
 
 async function loadVault() {
   try {
     state.vault = await api.getVault();
-    if (state.tab === 'today') renderToday();
-  } catch { /* витрина опциональна */ }
+    if (state.tab === 'vault') renderVault();
+  } catch { /* the shop window is optional */ }
 }
 
 // ---------- rest days ----------

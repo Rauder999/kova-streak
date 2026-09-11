@@ -1161,6 +1161,116 @@ body::before { content: none; }
 @keyframes rg-tip-pulse { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
 @keyframes rg-halo-breathe { 0%, 100% { opacity: .12; } 50% { opacity: .24; } }
 
+/* ==== setup flow: numbered quest steps (per Rauder, 2026-09-10) ==== */
+.setup-flow { display: flex; flex-direction: column; margin: 18px 0 22px; text-align: left; }
+.setup-step {
+  position: relative;
+  display: flex; gap: 16px; align-items: flex-start;
+  padding: 12px 0;
+}
+/* the guide thread: each step hangs off one vertical line */
+.setup-step::before {
+  content: ''; position: absolute; left: 14px; top: 0; bottom: 0; width: 1px;
+  background: linear-gradient(180deg, rgba(124, 108, 240, 0.35), rgba(124, 108, 240, 0.12));
+}
+.setup-step:first-child::before { top: 12px; }
+.setup-step:last-child::before { bottom: auto; height: 12px; }
+.st-num {
+  position: relative; z-index: 1; flex: none;
+  width: 29px; height: 29px; margin-top: -1px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; letter-spacing: .05em;
+  color: var(--signal-soft);
+  border: 1px solid rgba(124, 108, 240, 0.5);
+  background: rgba(14, 13, 20, 0.95);
+  clip-path: polygon(50% 0, 93% 25%, 93% 75%, 50% 100%, 7% 75%, 7% 25%);
+}
+.st-body { min-width: 0; }
+.st-title { display: block; font-size: 14.5px; margin-bottom: 3px; }
+.st-text { font-size: 13px; color: var(--text-1); line-height: 1.5; }
+.st-text .path-row { margin: 8px 0 6px; }
+@media (prefers-reduced-motion: no-preference) {
+  .setup-step { animation: step-in .45s ease backwards; }
+  .setup-step:nth-child(2) { animation-delay: .07s; }
+  .setup-step:nth-child(3) { animation-delay: .14s; }
+  .setup-step:nth-child(4) { animation-delay: .21s; }
+  .setup-step:nth-child(5) { animation-delay: .28s; }
+}
+@keyframes step-in { from { opacity: 0; transform: translateY(8px); } }
+
+/* ==== The Vault tab: the shop ==== */
+/* the tab itself hints at gold so people actually find the shop */
+.tab-btn.tab-vault { color: #C9A45E; }
+.tab-btn.tab-vault:hover, .tab-btn.tab-vault.active { color: #EFC468; text-shadow: 0 0 10px rgba(232, 182, 74, 0.45); }
+
+.vault-balance {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  padding: 6px 0 18px; margin-bottom: 20px;
+  border-bottom: 1px solid var(--line-0);
+}
+.vb-count {
+  font-size: 46px; font-weight: 700; line-height: 1;
+  background: linear-gradient(180deg, #FFF3D6 0%, #EFC468 45%, #C9992F 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.vb-label { font-size: 12px; letter-spacing: .22em; color: #C9A45E; }
+.vb-sub { margin-left: auto; max-width: 380px; font-size: 12.5px; color: var(--text-1); }
+
+.vault-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 14px;
+}
+.vault-item {
+  position: relative; overflow: hidden;
+  display: flex; flex-direction: column; gap: 9px;
+  padding: 18px 16px 14px;
+  border: 1px solid var(--line-1);
+  background: rgba(24, 23, 30, 0.6);
+  transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease;
+}
+.vault-item::before, .vault-item::after {
+  content: ''; position: absolute; width: 10px; height: 10px; pointer-events: none;
+}
+.vault-item::before { top: -1px; left: -1px; border-top: 1.5px solid rgba(232, 182, 74, 0.45); border-left: 1.5px solid rgba(232, 182, 74, 0.45); }
+.vault-item::after { bottom: -1px; right: -1px; border-bottom: 1.5px solid rgba(232, 182, 74, 0.45); border-right: 1.5px solid rgba(232, 182, 74, 0.45); }
+.vault-item:hover {
+  transform: translateY(-3px);
+  border-color: rgba(232, 182, 74, 0.55);
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.4), 0 0 16px rgba(232, 182, 74, 0.12);
+}
+.vi-sheen {
+  position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(115deg, transparent 42%, rgba(255, 255, 255, 0.07) 50%, transparent 58%);
+  background-size: 260% 100%; background-position: -150% 0;
+  background-repeat: no-repeat;
+}
+.vault-item:hover .vi-sheen { animation: vi-sheen-run 1s ease .05s; }
+@keyframes vi-sheen-run { from { background-position: -150% 0; } to { background-position: 150% 0; } }
+.vi-icon {
+  width: 52px; height: 52px; object-fit: contain;
+  filter: drop-shadow(0 0 10px rgba(232, 182, 74, 0.35));
+}
+.vi-name { font-weight: 700; font-size: 15px; }
+.vi-desc { font-size: 12.5px; color: var(--text-1); line-height: 1.5; flex: 1; }
+.vi-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 4px; }
+@media (prefers-reduced-motion: no-preference) {
+  .vault-item { animation: vi-in .4s ease backwards; }
+  .vault-item:nth-child(2) { animation-delay: .06s; }
+  .vault-item:nth-child(3) { animation-delay: .12s; }
+  .vault-item:nth-child(4) { animation-delay: .18s; }
+  .vi-icon { animation: vi-float 5.2s ease-in-out infinite; }
+  .vault-item:nth-child(2) .vi-icon { animation-delay: 1.2s; }
+  .vault-item:nth-child(3) .vi-icon { animation-delay: 2.4s; }
+  .vault-item:nth-child(4) .vi-icon { animation-delay: 3.6s; }
+  .vb-count { animation: vb-glow 3.8s ease-in-out infinite; }
+}
+@keyframes vi-in { from { opacity: 0; transform: translateY(10px); } }
+@keyframes vi-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+@keyframes vb-glow {
+  0%, 100% { filter: drop-shadow(0 0 6px rgba(232, 182, 74, 0.25)); }
+  50% { filter: drop-shadow(0 0 16px rgba(232, 182, 74, 0.5)); }
+}
+
 /* -- chain map: profile chain -- */
 .chain-conn svg { width: 60px; height: 20px; }
 .chain-conn .link-edge { opacity: .85; }
