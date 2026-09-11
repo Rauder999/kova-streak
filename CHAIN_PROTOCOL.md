@@ -111,10 +111,13 @@ shows who holds which end and the window tally.
   partner and joins at the next window boundary, 1-3 days later.
 - A removed player breaks out of the pool instantly; their partner
   that day gets the chain task auto-credited (not the day itself).
-- Pairing pool = the digest roster (players with at least one
-  completed day ever) PLUS never-cleared players: chains deliberately
-  include ghosts, that is the point. Spectators with zero runs ever
-  stay excluded everywhere as before.
+- Pairing pool (revised 2026-09-10): active roster players with at
+  least one fully closed day before the window start AND at most 5
+  non-rest days of silence at that point. Silent 3-5 days = cold, the
+  pair pays double (the rescue). Silent longer = no partner this
+  window: in the first live window three of six pairs had a ghost
+  partner who never showed up and the active half earned nothing.
+  Spectators with zero runs ever stay excluded everywhere as before.
 - Rest days, grace window (3h), yesterday-healing and admin credits
   all interact with chains through the same completion records; a
   healed yesterday forges yesterday's chain retroactively if it
@@ -130,3 +133,32 @@ shows who holds which end and the window tally.
    Shield with its 03:30 cron.
 3. Weekly trial + PNG chain art (resvg-wasm) + economy tuning after
    two weeks of real data.
+4. Roster Protocol (below).
+
+## 9. Roster Protocol (2026-09-10)
+
+Silence = non-rest days without a fully closed day, counted from the
+last closed day, or from the join date for a newcomer who never closed
+one, or from the reinstatement date.
+
+- 14 silent days: the System serves a FINAL NOTICE by bot DM (if DMs
+  are closed, the same block lands in the channel with a mention).
+  This is your last day: close today and the notice is void.
+- Still silent the next morning (03:30 group time, right after the
+  shield sweep): removed from the roster. A removal DM explains the
+  way back. History is kept, nothing is deleted.
+- Removed players vanish from the live leaderboard, the digest, the
+  denominators and the chain pool; their end of a running chain reads
+  as held, so a partner left alone still forges. Past months keep them
+  in the history view.
+- The way back runs through Rauder on purpose: the player messages
+  him, he presses Reinstate in the admin panel (Roster card). A
+  reinstated player is back on the board at once with a fresh two
+  weeks on the clock, and back in the chains at the next window after
+  their first closed day.
+- Anyone already past the line when the protocol shipped got the
+  notice first; nobody is removed without one served the day before.
+- The digest names both events: `[Final notice served to X. One day
+  remains.]` and `[Removed from the roster: X. Two weeks of silence.
+  The System does not chase.]`. Players on notice are not repeated in
+  the silent line the same evening.

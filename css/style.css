@@ -1264,6 +1264,16 @@ body::before { content: none; }
   .vault-item:nth-child(4) .vi-icon { animation-delay: 3.6s; }
   .vb-count { animation: vb-glow 3.8s ease-in-out infinite; }
 }
+/* admin: the roster window */
+.roster-title { font-size: 11px; letter-spacing: .12em; color: var(--signal-soft); margin: 14px 0 6px; }
+.roster-row {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 8px 0; border-top: 1px solid var(--line-0);
+}
+.roster-row .roster-name { font-weight: 600; min-width: 140px; }
+.roster-row .muted { flex: 1; font-size: 12.5px; }
+.roster-row button { margin-left: auto; }
+
 @keyframes vi-in { from { opacity: 0; transform: translateY(10px); } }
 @keyframes vi-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
 @keyframes vb-glow {

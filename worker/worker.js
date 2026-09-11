@@ -125,6 +125,16 @@ const LINKS = { chain: 1, rescueMult: 2, perfect: 2, trialPart: 1, trialWin: 5 }
 const VAULT_PRICES = { frame: 5, voucher: 12, shield: 15, score: 30 };
 const FRAME_DAYS = 7;
 
+// Roster Protocol (per Rauder, 2026-09-10). Silence = non-rest days without
+// a fully closed day, counted from the last closed day (or the join /
+// reinstatement date). Over pairIdle days of silence at a window start =
+// no chain partner. At noticeIdle days the System serves a final notice by
+// DM; still silent the next morning = removed from the roster. The way
+// back is a message to Rauder and the Reinstate button in the admin panel.
+const ROSTER = { pairIdle: 5, noticeIdle: 14, removeIdle: 15 };
+// without a DiscordBot UA the Discord edge silently returns an empty 403
+const BOT_UA = 'DiscordBot (https://rauder999.github.io/kova-streak, 1.0)';
+
 // Half-week chain windows: Monday-Wednesday (A) and Thursday-Sunday (B).
 function windowOf(date) {
   const wk = weekKeyOf(date);
@@ -166,6 +176,15 @@ async function listAll(env, prefix) {
   return out;
 }
 
+// Every profile write goes through this so the metadata mirror (what the
+// list-based group view reads) never drops a Roster flag.
+function profileMeta(profile) {
+  const m = { n: profile.displayName, a: profile.avatar || null, j: profile.joinedDate || null };
+  if (profile.inactiveSince) m.x = 1;
+  if (profile.reinstatedOn) m.r = profile.reinstatedOn;
+  return m;
+}
+
 // Completion and profile values are duplicated into metadata, so the group view
 // is assembled with two list requests and not a single get.
 async function loadGroup(env) {
@@ -179,6 +198,9 @@ async function loadGroup(env) {
     displayName: (k.metadata && k.metadata.n) || 'unknown',
     avatar: (k.metadata && k.metadata.a) || null,
     joinedDate: (k.metadata && k.metadata.j) || null,
+    // Roster Protocol flags ride the metadata too (x = removed, r = reinstated on)
+    inactive: !!(k.metadata && k.metadata.x),
+    reinstatedOn: (k.metadata && k.metadata.r) || null,
   }));
 
   const byUser = new Map(users.map((u) => [u.userId, {}]));
@@ -225,13 +247,26 @@ function computeMissed(byDate, month, today, joinedDate, rest) {
   return missed;
 }
 
-async function buildStandings(env, month) {
+// Non-rest days after `start` up to today inclusive: the silence counter
+// behind the digest tone, chain pairing and the Roster Protocol.
+function countIdle(start, today, rest) {
+  let idle = 0;
+  for (let d = shiftDate(start, 1), i = 0; d <= today && i < 60; d = shiftDate(d, 1), i++) {
+    if (!rest.has(d)) idle++;
+  }
+  return idle;
+}
+
+async function buildStandings(env, month, opts = {}) {
   const today = groupDate(env);
   const { users: allUsers, byUser } = await loadGroup(env);
   // Spectators are hidden everywhere (per Pasha's decision, 2026-08-26): anyone who has
   // not played a single run in all of history does not exist for the leaderboard, the calendar
   // and messages. They appear on their own as soon as their dashboard posts the first run.
+  // Players removed by the Roster Protocol are hidden from live views the same way;
+  // history months keep them (includeInactive), their past results were real.
   const users = allUsers.filter((u) => {
+    if (u.inactive && !opts.includeInactive) return false;
     const recs = byUser.get(u.userId) || {};
     return Object.values(recs).some((r) => r.done || r.completedRuns > 0);
   });
@@ -267,14 +302,15 @@ async function buildStandings(env, month) {
     let lastDone = null;
     for (const [d, rec] of Object.entries(all)) if (rec.done && (!lastDone || d > lastDone)) lastDone = d;
     // days of silence as of today, NOT counting scheduled rest days:
-    // legitimate rest is not a miss and does not push the player toward the harsh tone
-    let idleDays = null;
-    if (lastDone) {
-      idleDays = 0;
-      for (let d = shiftDate(lastDone, 1), i = 0; d <= today && i < 60; d = shiftDate(d, 1), i++) {
-        if (!rest.has(d)) idleDays++;
-      }
-    }
+    // legitimate rest is not a miss and does not push the player toward the harsh tone.
+    // A reinstatement restarts the clock: the digest must not shame someone
+    // "since Aug 20" the morning after Rauder let them back in.
+    const idleFrom = [lastDone, u.reinstatedOn].filter(Boolean).sort().pop() || null;
+    const idleDays = idleFrom ? countIdle(idleFrom, today, rest) : null;
+    // the Roster clock also starts at the join date: a newcomer who never
+    // closes a single day still runs out of time
+    const silentFrom = [lastDone, u.reinstatedOn, u.joinedDate].filter(Boolean).sort().pop() || null;
+    const silentDays = silentFrom ? countIdle(silentFrom, today, rest) : null;
     return {
       ...u,
       byDate,
@@ -287,6 +323,7 @@ async function buildStandings(env, month) {
       frame: (frameBy.get(u.userId) || 0) > Date.now(),
       lastDone,
       idleDays,
+      silentDays,
       streak: computeStreak(all, today, rest),
       missedDays: computeMissed(all, month, today, u.joinedDate, rest),
       doneToday: !!(all[today] && all[today].done),
@@ -311,14 +348,24 @@ async function getChainPairs(env, date) {
   let doc = await env.KOVA.get(key, 'json');
   if (doc) return { win, doc };
 
-  const { users, byUser } = await loadGroup(env);
-  // Pool rule (tightened per Rauder, 2026-09-08): only players who have
-  // FULLY closed at least one day before the window start. Partial-only
-  // players stay out of the chains entirely.
-  const pool = users.filter((u) => {
+  const { users: allUsers, byUser } = await loadGroup(env);
+  // Pool rule (tightened per Rauder, 2026-09-08, and again 2026-09-10): only
+  // active players who have FULLY closed at least one day before the window
+  // start, and who were silent for at most ROSTER.pairIdle non-rest days at
+  // that point. Ghosts stay out: a partner who never shows up made three of
+  // six pairs earn nothing in the first window. Silent 3-5 days = cold, the
+  // pair pays double (the rescue) while the partner is still reachable.
+  const idleAtStart = new Map();
+  for (const u of allUsers) {
+    if (u.inactive) continue;
     const recs = byUser.get(u.userId) || {};
-    return Object.entries(recs).some(([d, r]) => d < win.start && r.done);
-  });
+    let lastDone = null;
+    for (const [d, r] of Object.entries(recs)) if (r.done && d < win.start && (!lastDone || d > lastDone)) lastDone = d;
+    if (!lastDone) continue;
+    const rest = new Set((await env.KOVA.get(`rest:${u.userId}`, 'json')) || []);
+    idleAtStart.set(u.userId, countIdle(lastDone, shiftDate(win.start, -1), rest));
+  }
+  const pool = allUsers.filter((u) => idleAtStart.has(u.userId) && idleAtStart.get(u.userId) <= ROSTER.pairIdle);
   if (pool.length < 2) { doc = { groups: [], cold: [] }; return { win, doc }; }
 
   const uids = pool.map((u) => u.userId).sort();
@@ -355,19 +402,7 @@ async function getChainPairs(env, date) {
   }
 
   // cold members at window start (idle 3+ non-rest days): their chains pay double
-  const cold = [];
-  for (const u of pool) {
-    const recs = byUser.get(u.userId) || {};
-    let lastDone = null;
-    for (const [d, r] of Object.entries(recs)) if (r.done && d < win.start && (!lastDone || d > lastDone)) lastDone = d;
-    if (!lastDone) { cold.push(u.userId); continue; }
-    const rest = new Set((await env.KOVA.get(`rest:${u.userId}`, 'json')) || []);
-    let idle = 0;
-    for (let d = shiftDate(lastDone, 1), i = 0; d < win.start && i < 60; d = shiftDate(d, 1), i++) {
-      if (!rest.has(d)) idle++;
-    }
-    if (idle >= 3) cold.push(u.userId);
-  }
+  const cold = pool.filter((u) => idleAtStart.get(u.userId) >= 3).map((u) => u.userId);
 
   doc = { groups, cold, createdAt: Date.now() };
   await env.KOVA.put(key, JSON.stringify(doc), { expirationTtl: 60 * 60 * 24 * 45 });
@@ -419,8 +454,10 @@ async function chainCheck(env, user, date) {
     if (gi < 0) return;
     const group = doc.groups[gi];
 
+    // removed players drop out of the map: their end reads as held, so a
+    // partner left alone by a ghost still forges (same as a departed member)
     const { users } = await loadGroup(env);
-    const userMap = new Map(users.map((u) => [u.userId, u]));
+    const userMap = new Map(users.filter((u) => !u.inactive).map((u) => [u.userId, u]));
 
     const completed = [user.uid];
     const waiting = [];
@@ -484,7 +521,7 @@ async function chainCheck(env, user, date) {
       const members = group.map((uid) => userMap.get(uid) || { userId: uid, displayName: 'departed', avatar: null });
       await announceChainForged(env, members, delta, rescue, perfectNow);
     }
-  } catch { /* цепи никогда не ломают чек-ин */ }
+  } catch { /* chains never break a check-in */ }
 }
 
 async function announceChainWaiting(env, completerName, laggardIds) {
@@ -500,7 +537,7 @@ async function announceChainWaiting(env, completerName, laggardIds) {
         allowed_mentions: { users: laggardIds },
       }),
     });
-  } catch { /* пинг не критичен */ }
+  } catch { /* the ping is not critical */ }
 }
 
 // ---------- chain art (resvg) ----------
@@ -611,7 +648,7 @@ async function announceChainForged(env, members, delta, rescue, perfect) {
       fd.append('files[0]', new Blob([png], { type: 'image/png' }), 'chain.png');
       const res = await fetch(env.DISCORD_WEBHOOK_URL, { method: 'POST', body: fd });
       if (res.ok) return;
-    } catch { /* падаем в embed-фолбэк */ }
+    } catch { /* fall back to the plain embed */ }
 
     const embed = {
       color: 0xE8B64A,
@@ -629,7 +666,7 @@ async function announceChainForged(env, members, delta, rescue, perfect) {
         allowed_mentions: { users: ids },
       }),
     });
-  } catch { /* пост не критичен */ }
+  } catch { /* the post is not critical */ }
 }
 
 // 03:30 group time: a held Streak Shield converts yesterday's zero-run day
@@ -659,6 +696,96 @@ async function shieldSweep(env) {
     await env.KOVA.put(`shieldused:${today}`, JSON.stringify(used), { expirationTtl: 60 * 60 * 72 });
   }
   return used;
+}
+
+// ---------- Roster Protocol ----------
+
+const ROSTER_NOTICE_LINES = [
+  '[KOVA STREAK // FINAL NOTICE]',
+  '[Two weeks without a single closed day.]',
+  '[This is your last day on the roster. Close today\'s playlist and the notice is void.]',
+  '[Silence past midnight and the System removes you. The way back is a message to Rauder.]',
+];
+const ROSTER_REMOVED_LINES = [
+  '[KOVA STREAK // ROSTER UPDATE]',
+  '[The final notice went unanswered. You have been removed from the roster.]',
+  '[Your history is kept. Nothing is lost.]',
+  '[To return, message Rauder and ask to be reinstated. The gate reopens on his word.]',
+];
+
+// A private word from the System. Bot DM first; if the player keeps DMs
+// closed (or no bot is configured) the same block lands in the channel
+// with a mention, so the notice is never silently lost.
+async function sendSystemDm(env, uid, lines) {
+  const content = systemBlock(lines);
+  if (env.DISCORD_BOT_TOKEN) {
+    try {
+      const headers = { Authorization: `Bot ${env.DISCORD_BOT_TOKEN}`, 'Content-Type': 'application/json', 'User-Agent': BOT_UA };
+      const ch = await fetch('https://discord.com/api/v10/users/@me/channels', {
+        method: 'POST', headers, body: JSON.stringify({ recipient_id: uid }),
+      });
+      if (ch.ok) {
+        const { id } = await ch.json();
+        const msg = await fetch(`https://discord.com/api/v10/channels/${id}/messages`, {
+          method: 'POST', headers, body: JSON.stringify({ content }),
+        });
+        if (msg.ok) return 'dm';
+      }
+    } catch { /* fall through to the channel */ }
+  }
+  if (!env.DISCORD_WEBHOOK_URL) return false;
+  try {
+    await fetch(env.DISCORD_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: `<@${uid}>\n` + content, allowed_mentions: { users: [uid] } }),
+    });
+    return 'channel';
+  } catch {
+    return false;
+  }
+}
+
+// The morning roster sweep (03:30 group time, after the shield sweep).
+// Silent for ROSTER.noticeIdle days = final notice, served once; still
+// silent the morning after the notice = removed. Anyone already past the
+// line when this shipped gets the notice first, never a surprise removal.
+// A player who closes a day clears their notice; a removed player is
+// hidden from live boards, chains and the digest until reinstated.
+async function rosterSweep(env) {
+  const today = groupDate(env);
+  const standings = await buildStandings(env, today.slice(0, 7));
+  const noticed = [];
+  const removed = [];
+  for (const p of standings.players) {
+    if (p.silentDays == null) continue;
+    const marker = `roster:notice:${p.userId}`;
+    if (p.silentDays < ROSTER.noticeIdle) {
+      // back in training: a stale notice must not turn into a surprise later
+      if (await env.KOVA.get(marker)) await env.KOVA.delete(marker);
+      continue;
+    }
+    const served = await env.KOVA.get(marker);
+    if (!served) {
+      await env.KOVA.put(marker, today, { expirationTtl: 60 * 60 * 24 * 10 });
+      const via = await sendSystemDm(env, p.userId, ROSTER_NOTICE_LINES);
+      noticed.push({ userId: p.userId, name: p.displayName, via });
+      continue;
+    }
+    if (served < today && p.silentDays >= ROSTER.removeIdle) {
+      const key = `user:${p.userId}`;
+      const profile = (await env.KOVA.get(key, 'json')) || { displayName: p.displayName, avatar: p.avatar, joinedDate: p.joinedDate };
+      profile.inactiveSince = today;
+      await env.KOVA.put(key, JSON.stringify(profile), { metadata: profileMeta(profile) });
+      await env.KOVA.delete(marker);
+      const via = await sendSystemDm(env, p.userId, ROSTER_REMOVED_LINES);
+      removed.push({ userId: p.userId, name: p.displayName, via });
+    }
+  }
+  if (noticed.length || removed.length) {
+    await env.KOVA.put(`roster:events:${today}`, JSON.stringify({ noticed, removed }), { expirationTtl: 60 * 60 * 72 });
+  }
+  return { noticed, removed };
 }
 
 // The weekly trial: created at playlist publish, resolved in the Sunday
@@ -695,7 +822,7 @@ async function announceTrial(env, trial) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content: systemBlock(lines), allowed_mentions: { parse: [] } }),
     });
-  } catch { /* анонс не критичен */ }
+  } catch { /* the announce is not critical */ }
 }
 
 async function resolveTrial(env, today) {
@@ -817,15 +944,16 @@ async function handleCallback(request, env) {
     : null;
 
   const existing = await env.KOVA.get(`user:${me.id}`, 'json');
+  // spread first: a login must not wipe Roster flags (removed players can
+  // still sign in and watch, they just stay off the boards until reinstated)
   const profile = {
+    ...(existing || {}),
     displayName,
     avatar,
     joinedAt: existing ? existing.joinedAt : Date.now(),
     joinedDate: existing ? existing.joinedDate : groupDate(env),
   };
-  await env.KOVA.put(`user:${me.id}`, JSON.stringify(profile), {
-    metadata: { n: displayName, a: avatar, j: profile.joinedDate },
-  });
+  await env.KOVA.put(`user:${me.id}`, JSON.stringify(profile), { metadata: profileMeta(profile) });
 
   const admins = String(env.ADMIN_DISCORD_IDS || '').split(',').map((s) => s.trim()).filter(Boolean);
   const session = await signToken({
@@ -1066,7 +1194,9 @@ async function handleApi(request, env, url, cors, ctx) {
   if (path === '/api/group' && request.method === 'GET') {
     const month = url.searchParams.get('month');
     if (!isMonth(month)) return json({ error: 'month must be YYYY-MM' }, 400, cors);
-    return json(await buildStandings(env, month), 200, cors);
+    // a past month is a closed record: removed players keep their place in it
+    const includeInactive = month < groupDate(env).slice(0, 7);
+    return json(await buildStandings(env, month, { includeInactive }), 200, cors);
   }
 
   // Chain map data for the current window + the caller's link balance
@@ -1075,7 +1205,7 @@ async function handleApi(request, env, url, cors, ctx) {
     const { win, doc } = await getChainPairs(env, today);
     const st = (await env.KOVA.get(`chain:state:${win.id}`, 'json')) || {};
     const { users, byUser } = await loadGroup(env);
-    const userMap = new Map(users.map((u) => [u.userId, u]));
+    const userMap = new Map(users.filter((u) => !u.inactive).map((u) => [u.userId, u]));
     const groups = doc.groups.map((g, gi) => ({
       members: g.map((uid) => {
         const u = userMap.get(uid);
@@ -1157,6 +1287,50 @@ async function handleApi(request, env, url, cors, ctx) {
     return json({ ok: true, lines }, 200, cors);
   }
 
+  // Roster Protocol: who is out, who is on final notice, and the way back
+  if (path === '/api/admin/roster' && request.method === 'GET') {
+    if (!user.admin) return json({ error: 'Admin only' }, 403, cors);
+    const today = groupDate(env);
+    const { users, byUser } = await loadGroup(env);
+    const removed = [];
+    for (const u of users.filter((x) => x.inactive)) {
+      const profile = (await env.KOVA.get(`user:${u.userId}`, 'json')) || {};
+      let lastDone = null;
+      for (const [d, r] of Object.entries(byUser.get(u.userId) || {})) if (r.done && (!lastDone || d > lastDone)) lastDone = d;
+      removed.push({ userId: u.userId, displayName: u.displayName, avatar: u.avatar, inactiveSince: profile.inactiveSince || null, lastDone });
+    }
+    const standings = await buildStandings(env, today.slice(0, 7));
+    const onNotice = [];
+    for (const p of standings.players) {
+      if (p.silentDays == null || p.silentDays < ROSTER.noticeIdle) continue;
+      const served = await env.KOVA.get(`roster:notice:${p.userId}`);
+      onNotice.push({ userId: p.userId, displayName: p.displayName, avatar: p.avatar, silentDays: p.silentDays, servedOn: served || null });
+    }
+    return json({ removed, onNotice, rules: ROSTER }, 200, cors);
+  }
+
+  if (path === '/api/admin/reinstate' && request.method === 'POST') {
+    if (!user.admin) return json({ error: 'Admin only' }, 403, cors);
+    const body = await request.json().catch(() => null);
+    const uid = body ? String(body.userId || '') : '';
+    if (!/^\d{1,25}$/.test(uid)) return json({ error: 'userId is required' }, 400, cors);
+    const key = `user:${uid}`;
+    const profile = await env.KOVA.get(key, 'json');
+    if (!profile) return json({ error: 'No such player' }, 404, cors);
+    const today = groupDate(env);
+    delete profile.inactiveSince;
+    profile.reinstatedOn = today; // a fresh two weeks, the clock starts here
+    await env.KOVA.put(key, JSON.stringify(profile), { metadata: profileMeta(profile) });
+    await env.KOVA.delete(`roster:notice:${uid}`);
+    return json({ ok: true, userId: uid, reinstatedOn: today }, 200, cors);
+  }
+
+  // manual roster sweep (the 03:30 cron does this on its own)
+  if (path === '/api/admin/roster-sweep' && request.method === 'POST') {
+    if (!user.admin) return json({ error: 'Admin only' }, 403, cors);
+    return json({ ok: true, ...(await rosterSweep(env)) }, 200, cors);
+  }
+
   // three-line coach: client-side rules found the diagnosis codes, the AI here
   // only phrases them. Cached by state hash: while the diagnosis has not changed,
   // repeated requests do not spend a single token.
@@ -1205,12 +1379,8 @@ async function refreshProfiles(env) {
     const list = await listAll(env, 'user:');
     for (const k of list) {
       const uid = k.name.slice('user:'.length);
-      // without a DiscordBot UA the Discord edge silently returns an empty 403
       const res = await fetch(`https://discord.com/api/v10/users/${uid}`, {
-        headers: {
-          Authorization: `Bot ${env.DISCORD_BOT_TOKEN}`,
-          'User-Agent': 'DiscordBot (https://rauder999.github.io/kova-streak, 1.0)',
-        },
+        headers: { Authorization: `Bot ${env.DISCORD_BOT_TOKEN}`, 'User-Agent': BOT_UA },
       });
       if (!res.ok) continue;
       const u = await res.json();
@@ -1219,9 +1389,7 @@ async function refreshProfiles(env) {
       const avatar = u.avatar ? `https://cdn.discordapp.com/avatars/${uid}/${u.avatar}.png?size=64` : null;
       if (displayName === prev.displayName && avatar === prev.avatar) continue;
       const profile = { ...prev, displayName, avatar };
-      await env.KOVA.put(k.name, JSON.stringify(profile), {
-        metadata: { n: displayName, a: avatar, j: prev.joinedDate || null },
-      });
+      await env.KOVA.put(k.name, JSON.stringify(profile), { metadata: profileMeta(profile) });
     }
   } catch (e) {
     console.log('profile refresh failed', e.message);
@@ -1513,10 +1681,16 @@ async function postDigest(env) {
   const players = standings.players.filter((p) => p.lastDone !== null);
   if (!players.length) return;
 
+  // this morning's roster sweep: its lines come later, but whoever got the
+  // final notice today is named there and not shamed a second time below
+  let rosterEv = null;
+  try { rosterEv = await env.KOVA.get(`roster:events:${today}`, 'json'); } catch { /* optional */ }
+  const noticedIds = new Set(((rosterEv && rosterEv.noticed) || []).map((x) => x.userId));
+
   const done = players.filter((p) => p.doneToday);
   const resting = players.filter((p) => !p.doneToday && p.restToday);
   const missing = players.filter((p) => !p.doneToday && !p.restToday);
-  const silent = missing.filter((p) => p.idleDays >= 3);
+  const silent = missing.filter((p) => p.idleDays >= 3 && !noticedIds.has(p.userId));
   const incomplete = missing.filter((p) => p.idleDays < 3);
 
   // Distinction of the day: the most NEW personal bests today
@@ -1570,7 +1744,14 @@ async function postDigest(env) {
         const p = players.find((x) => x.userId === uid);
         if (p) lines.push(`[${p.displayName}'s Streak Shield absorbed the miss. The chain of days holds.]`);
       }
-    } catch { /* цепи не роняют дайджест */ }
+    } catch { /* chains never break the digest */ }
+    // Roster Protocol: what this morning's sweep did, said out loud
+    if (rosterEv && rosterEv.noticed && rosterEv.noticed.length) {
+      lines.push(`[Final notice served to ${rosterEv.noticed.map((x) => x.name).join(', ')}. One day remains.]`);
+    }
+    if (rosterEv && rosterEv.removed && rosterEv.removed.length) {
+      lines.push(`[Removed from the roster: ${rosterEv.removed.map((x) => x.name).join(', ')}. Two weeks of silence. The System does not chase.]`);
+    }
     if (incomplete.length) {
       const sting = STING_MILD[Number(today.slice(-2)) % STING_MILD.length];
       lines.push(`[Incomplete: ${names(incomplete)}. The day is not over. ${sting}]`);
@@ -1593,7 +1774,7 @@ async function postDigest(env) {
   try {
     const dowMon = (new Date(today + 'T00:00:00Z').getUTCDay() + 6) % 7;
     if (dowMon === 6) lines.push(...await resolveTrial(env, today));
-  } catch { /* триал не роняет дайджест */ }
+  } catch { /* the trial never breaks the digest */ }
 
   const roleId = await env.KOVA.get('config:aimChadRoleId');
   const content = (roleId ? `<@&${roleId}>\n` : '') + systemBlock(lines).slice(0, 1900);
@@ -1689,7 +1870,12 @@ export default {
     // 09:30 UTC = 03:30 Denver in summer: the Streak Shield sweep, after the
     // 3h night grace window has fully closed
     if (event.cron === '30 9 * * *') {
-      ctx.waitUntil(shieldSweep(env));
+      ctx.waitUntil((async () => {
+        await shieldSweep(env);
+        // the roster sweep runs after the shield sweep so a shield-covered
+        // day is already a rest day and does not count as silence
+        await rosterSweep(env);
+      })());
       return;
     }
     ctx.waitUntil((async () => {

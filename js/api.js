@@ -57,5 +57,7 @@ export const getRest = () => call('/api/rest');
 export const postRest = (date, on) => call('/api/rest', { method: 'POST', body: { date, on } });
 
 export const getChains = () => call('/api/chains');
+export const getRoster = () => call('/api/admin/roster');
+export const reinstate = (userId) => call('/api/admin/reinstate', { method: 'POST', body: { userId } });
 export const getVault = () => call('/api/vault');
 export const buyVault = (item) => call('/api/vault', { method: 'POST', body: { item } });

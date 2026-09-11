@@ -1271,7 +1271,7 @@ async function refreshGroup() {
     try {
       state.chains = await api.getChains();
       if (state.tab === 'group') renderGroup();
-    } catch { /* карта цепей опциональна */ }
+    } catch { /* the chain map is optional */ }
   }
   clearTimeout(groupTimer);
   groupTimer = setTimeout(refreshGroup, GROUP_REFRESH_MS);
@@ -1659,6 +1659,63 @@ function monthName(m) {
 
 // ---------- Admin tab ----------
 
+// Roster Protocol: who the System removed for two silent weeks, who is on
+// final notice today, and the Reinstate button (the way back runs through
+// Rauder by design: the player asks, Rauder clicks).
+function renderRosterCard() {
+  const card = el('div', 'card roster-card');
+  const head = el('div', 'card-head');
+  head.append(el('h2', null, 'Roster'));
+  head.append(el('span', 'muted', 'two silent weeks = final notice, one more day = removed'));
+  card.append(head);
+  const body = el('div', 'roster-body');
+  body.append(el('p', 'muted', 'Loading the roster...'));
+  card.append(body);
+
+  const fmt = (d) => (d ? new Date(d + 'T12:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }) : 'never');
+  const load = async () => {
+    try {
+      const r = await api.getRoster();
+      body.replaceChildren();
+      if (r.onNotice.length) {
+        body.append(el('div', 'roster-title mono', '[ ON FINAL NOTICE ]'));
+        for (const p of r.onNotice) {
+          const row = el('div', 'roster-row');
+          row.append(el('span', 'roster-name', p.displayName));
+          row.append(el('span', 'muted', `${p.silentDays} silent days · notice ${p.servedOn ? 'served ' + fmt(p.servedOn) : 'due tomorrow 03:30'}`));
+          body.append(row);
+        }
+      }
+      body.append(el('div', 'roster-title mono', '[ REMOVED ]'));
+      if (!r.removed.length) body.append(el('p', 'muted', 'Nobody. The roster is whole.'));
+      for (const p of r.removed) {
+        const row = el('div', 'roster-row');
+        row.append(el('span', 'roster-name', p.displayName));
+        row.append(el('span', 'muted', `removed ${fmt(p.inactiveSince)} · last closed day ${fmt(p.lastDone)}`));
+        const btn = el('button', 'ghost', 'Reinstate');
+        btn.addEventListener('click', async () => {
+          btn.disabled = true;
+          try {
+            await api.reinstate(p.userId);
+            await load();
+          } catch (e) {
+            if (handleApiError(e)) return;
+            btn.textContent = e.message;
+          }
+        });
+        row.append(btn);
+        body.append(row);
+      }
+      body.append(el('p', 'fine', 'A reinstated player gets a fresh two weeks from today. They return to the leaderboard at once and to the chains at the next window after their first closed day.'));
+    } catch (e) {
+      if (handleApiError(e)) return;
+      body.replaceChildren(notice(e.message, 'error'));
+    }
+  };
+  load();
+  return card;
+}
+
 function renderAdmin() {
   const root = $('view-admin');
   root.replaceChildren();
@@ -1760,6 +1817,8 @@ function renderAdmin() {
   });
   dig.append(dbtn, dmsg);
   root.append(dig);
+
+  root.append(renderRosterCard());
 
   if (state.playlist && state.playlist.scenarios) {
     const cur = el('div', 'card');
