@@ -715,27 +715,36 @@ function pngParts(png) {
   if (!ihdr || !idat.length) throw new Error('not a PNG');
   return { ihdr, data: concatBytes(idat) };
 }
-// frames: [{ png, x, y }], frames[0] full size at offset 0
-function buildApng(frames, delayMs) {
-  const first = pngParts(frames[0].png);
-  const sameFormat = (ihdr) => [8, 9, 10, 11, 12].every((i) => ihdr[i] === first.ihdr[i]);
-  const parts = [new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]), pngChunk('IHDR', first.ihdr)];
+// frames: [{ png, x, y, delay? }], frames[0] full size at offset 0. With
+// opts.defaultPng that separate full-size PNG is the default image (what a
+// client without APNG support shows) and is not part of the animation.
+function buildApng(frames, delayMs, opts = {}) {
+  const base = pngParts(opts.defaultPng || frames[0].png);
+  const sameFormat = (ihdr) => [8, 9, 10, 11, 12].every((i) => ihdr[i] === base.ihdr[i]);
+  const parts = [new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]), pngChunk('IHDR', base.ihdr)];
   parts.push(pngChunk('acTL', new Uint8Array([...be32(frames.length), ...be32(0)])));
   let seq = 0;
-  const fctl = (ihdr, x, y) => {
+  const fctl = (ihdr, x, y, delay) => {
     const d = new Uint8Array(26);
     d.set(be32(seq++), 0);
     d.set(ihdr.subarray(0, 8), 4); // width, height straight from the frame's IHDR
     d.set(be32(x), 12); d.set(be32(y), 16);
-    d.set([(delayMs >> 8) & 255, delayMs & 255, 3, 232], 20); // delay = ms / 1000
+    d.set([(delay >> 8) & 255, delay & 255, 3, 232], 20); // delay = ms / 1000
     d[24] = 0; d[25] = 0; // dispose none, blend source
     return pngChunk('fcTL', d);
   };
-  parts.push(fctl(first.ihdr, 0, 0), pngChunk('IDAT', first.data));
-  for (const f of frames.slice(1)) {
+  const fdat = (data) => pngChunk('fdAT', concatBytes([new Uint8Array(be32(seq++)), data]));
+  let rest = frames;
+  if (opts.defaultPng) {
+    parts.push(pngChunk('IDAT', base.data)); // no fcTL before it: default image only
+  } else {
+    parts.push(fctl(base.ihdr, 0, 0, frames[0].delay || delayMs), pngChunk('IDAT', base.data));
+    rest = frames.slice(1);
+  }
+  for (const f of rest) {
     const fp = pngParts(f.png);
     if (!sameFormat(fp.ihdr)) throw new Error('frame format mismatch');
-    parts.push(fctl(fp.ihdr, f.x, f.y), pngChunk('fdAT', concatBytes([new Uint8Array(be32(seq++)), fp.data])));
+    parts.push(fctl(fp.ihdr, f.x, f.y, f.delay || delayMs), fdat(fp.data));
   }
   parts.push(pngChunk('IEND', new Uint8Array(0)));
   return concatBytes(parts);
@@ -763,6 +772,112 @@ async function buildChainArt(members) {
   } catch {
     return still;
   }
+}
+
+// The reinstatement card: the System re-scans the returning player. Grey
+// avatar below the scanline, colour above, the dashed rings wake up with
+// it, the readout brackets fill; the final state carries the gold ring.
+function reinstateCardSvg(member, avatar, p, final, crop) {
+  const W = 640, H = 260, cx = 320, cy = 130, r = 62;
+  const scanY = cy - r - 8 + (2 * r + 16) * p;
+  const grid = [];
+  for (let i = 1; i < W / 64; i++) grid.push(`<line x1="${i * 64}" y1="0" x2="${i * 64}" y2="${H}"/>`);
+  for (let i = 1; i < H / 64; i++) grid.push(`<line x1="0" y1="${i * 64}" x2="${W}" y2="${i * 64}"/>`);
+  const wake = final ? 1 : p;
+  const ringOp = (0.22 + 0.36 * wake).toFixed(2);
+  const hue = 20 + (Number(BigInt(member.userId || '0') % 300n));
+  const discGrey = avatar
+    ? `<image href="${avatar}" x="${cx - r}" y="${cy - r}" width="${2 * r}" height="${2 * r}" clip-path="url(#disc)" filter="url(#grey)" preserveAspectRatio="xMidYMid slice"/>`
+    : `<circle cx="${cx}" cy="${cy}" r="${r}" fill="#34343a"/>`;
+  const discColor = avatar
+    ? `<image href="${avatar}" x="${cx - r}" y="${cy - r}" width="${2 * r}" height="${2 * r}" clip-path="url(#disc)" preserveAspectRatio="xMidYMid slice"/>`
+    : `<circle cx="${cx}" cy="${cy}" r="${r}" fill="hsl(${hue} 30% 32%)"/>`;
+  const bars = [[48, -8], [30, 2]].map(([len, dy]) => {
+    const l = (len * wake).toFixed(1);
+    return `<rect x="${cx - 152}" y="${cy + dy}" width="${l}" height="3"/><rect x="${(cx + 152 - len * wake).toFixed(1)}" y="${cy + dy}" width="${l}" height="3"/>`;
+  }).join('');
+  const readOp = (0.35 + 0.45 * wake).toFixed(2);
+  const view = crop ? `width="${crop.w}" height="${crop.h}" viewBox="${crop.x} ${crop.y} ${crop.w} ${crop.h}"` : `width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" ${view}>
+  <defs>
+    <radialGradient id="glow"><stop offset="0" stop-color="#7C6CF0" stop-opacity="0.24"/><stop offset="1" stop-color="#7C6CF0" stop-opacity="0"/></radialGradient>
+    <filter id="grey"><feColorMatrix type="saturate" values="0.05"/><feComponentTransfer><feFuncR type="linear" slope="0.55"/><feFuncG type="linear" slope="0.55"/><feFuncB type="linear" slope="0.6"/></feComponentTransfer></filter>
+    <clipPath id="disc"><circle cx="${cx}" cy="${cy}" r="${r}"/></clipPath>
+    <clipPath id="above"><rect x="0" y="0" width="${W}" height="${final ? H : scanY.toFixed(1)}"/></clipPath>
+  </defs>
+  <rect width="${W}" height="${H}" fill="#08070C"/>
+  <g stroke="#7C6CF0" stroke-opacity="0.06" stroke-width="1">${grid.join('')}</g>
+  <circle cx="${cx}" cy="${cy}" r="150" fill="url(#glow)"/>
+  <rect x="6" y="6" width="${W - 12}" height="${H - 12}" fill="#121216" fill-opacity="0.5" stroke="#3A3A3E" stroke-width="1"/>
+  <g stroke="#7C6CF0" stroke-width="3" fill="none">
+    <path d="M6 22 V6 H22"/><path d="M${W - 22} 6 H${W - 6} V22"/>
+    <path d="M6 ${H - 22} V${H - 6} H22"/><path d="M${W - 22} ${H - 6} H${W - 6} V${H - 22}"/>
+  </g>
+  <circle cx="${cx}" cy="${cy}" r="96" fill="none" stroke="#B7AEF7" stroke-opacity="${ringOp}" stroke-width="1" stroke-dasharray="2 7"/>
+  <circle cx="${cx}" cy="${cy}" r="82" fill="none" stroke="#7C6CF0" stroke-opacity="${(ringOp * 0.7).toFixed(2)}" stroke-width="1" stroke-dasharray="1 5"/>
+  ${discGrey}
+  <g clip-path="url(#above)">${discColor}</g>
+  <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${final ? '#E8B64A' : '#7C6CF0'}" stroke-width="3"/>
+  ${final
+    ? `<circle cx="${cx}" cy="${cy}" r="${r + 10}" fill="none" stroke="#E8B64A" stroke-opacity="0.35" stroke-width="6"/>`
+    : `<rect x="${cx - r - 30}" y="${(scanY - 14).toFixed(1)}" width="${2 * r + 60}" height="14" fill="#B7AEF7" fill-opacity="0.18"/><rect x="${cx - r - 30}" y="${(scanY - 1.5).toFixed(1)}" width="${2 * r + 60}" height="3" fill="#EFE9FF" fill-opacity="0.9"/>`}
+  <g stroke="#B7AEF7" stroke-opacity="${readOp}" stroke-width="2" fill="none">
+    <path d="M${cx - 150} ${cy - 26} h-14 v52 h14"/><path d="M${cx + 150} ${cy - 26} h14 v52 h-14"/>
+  </g>
+  <g fill="#B7AEF7" fill-opacity="${readOp}">${bars}</g>
+</svg>`;
+}
+
+const REINSTATE_FRAMES = 12;
+
+// The reinstatement card as APNG: the default image is the finished gold
+// state (what a non-animating client shows), the animation is the scan.
+async function buildReinstateArt(member) {
+  await ensureResvg();
+  const avatar = await avatarDataUri(member.avatar);
+  const render = (p, final, crop) => new Resvg(reinstateCardSvg(member, avatar, p, final, crop), { fitTo: { mode: 'zoom', value: 2 } }).render().asPng();
+  const still = render(1, true, null);
+  try {
+    // everything that moves lives inside this band: rings, discs, readout
+    const crop = { x: 148, y: 30, w: 344, h: 200 };
+    const frames = [{ png: render(0, false, null), x: 0, y: 0 }];
+    for (let i = 1; i <= REINSTATE_FRAMES; i++) {
+      frames.push({ png: render(i / REINSTATE_FRAMES, false, crop), x: crop.x * 2, y: crop.y * 2 });
+    }
+    frames.push({ png: render(1, true, crop), x: crop.x * 2, y: crop.y * 2, delay: 1600 });
+    return buildApng(frames, 90, { defaultPng: still });
+  } catch {
+    return still;
+  }
+}
+
+// The return, said out loud (per Rauder, 2026-09-11): a ping, the record
+// of the last stay, the card. Falls back to the plain block.
+async function announceReinstated(env, member, stats) {
+  if (!env.DISCORD_WEBHOOK_URL) return;
+  try {
+    const lines = ['[KOVA STREAK // ROSTER UPDATE]', `[The gate reopened. ${member.displayName} walks back in.]`];
+    if (stats.totalDone > 0) {
+      lines.push(`[Last time: ${stats.totalDone} closed ${stats.totalDone === 1 ? 'day' : 'days'}, then silence since ${shortDate(stats.lastDone)}.]`);
+    } else {
+      lines.push('[Last time: not a single closed day.]');
+    }
+    lines.push('[Let us see how this one holds this time. The System is watching. Closely.]');
+    const payload = { content: `<@${member.userId}>\n` + systemBlock(lines), allowed_mentions: { users: [member.userId] } };
+    try {
+      const png = await buildReinstateArt(member);
+      const fd = new FormData();
+      fd.append('payload_json', JSON.stringify(payload));
+      fd.append('files[0]', new Blob([png], { type: 'image/png' }), 'reinstated.png');
+      const res = await fetch(env.DISCORD_WEBHOOK_URL, { method: 'POST', body: fd });
+      if (res.ok) return;
+    } catch { /* fall through to the plain block */ }
+    await fetch(env.DISCORD_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch { /* the announce is not critical */ }
 }
 
 async function announceChainForged(env, members, delta, rescue, perfect) {
@@ -918,10 +1033,19 @@ async function rosterSweep(env) {
       removed.push({ userId: p.userId, name: p.displayName, via });
     }
   }
-  if (noticed.length || removed.length) {
-    await env.KOVA.put(`roster:events:${today}`, JSON.stringify({ noticed, removed }), { expirationTtl: 60 * 60 * 72 });
-  }
+  if (noticed.length || removed.length) await appendRosterEvents(env, today, { noticed, removed });
   return { noticed, removed };
+}
+
+// roster:events:{day} collects what the day did to the roster (the digest
+// reads it); the sweep and a reinstatement both append, never overwrite
+async function appendRosterEvents(env, day, patch) {
+  const key = `roster:events:${day}`;
+  const ev = (await env.KOVA.get(key, 'json')) || {};
+  for (const [field, items] of Object.entries(patch)) {
+    if (items && items.length) ev[field] = [...(ev[field] || []), ...items];
+  }
+  await env.KOVA.put(key, JSON.stringify(ev), { expirationTtl: 60 * 60 * 72 });
 }
 
 // The weekly trial: created at playlist publish, resolved in the Sunday
@@ -1458,6 +1582,16 @@ async function handleApi(request, env, url, cors, ctx) {
     profile.reinstatedOn = today; // a fresh two weeks, the clock starts here
     await env.KOVA.put(key, JSON.stringify(profile), { metadata: profileMeta(profile) });
     await env.KOVA.delete(`roster:notice:${uid}`);
+    // the record of the last stay, for the announce
+    const member = { userId: uid, displayName: profile.displayName || 'unknown', avatar: profile.avatar || null };
+    if (ctx) ctx.waitUntil((async () => {
+      const { byUser } = await loadGroup(env);
+      let totalDone = 0;
+      let lastDone = null;
+      for (const [d, r] of Object.entries(byUser.get(uid) || {})) if (r.done) { totalDone++; if (!lastDone || d > lastDone) lastDone = d; }
+      await appendRosterEvents(env, today, { reinstated: [{ userId: uid, name: member.displayName }] });
+      await announceReinstated(env, member, { totalDone, lastDone });
+    })());
     return json({ ok: true, userId: uid, reinstatedOn: today }, 200, cors);
   }
 
@@ -1887,6 +2021,9 @@ async function postDigest(env) {
     }
     if (rosterEv && rosterEv.removed && rosterEv.removed.length) {
       lines.push(`[Removed from the roster: ${rosterEv.removed.map((x) => x.name).join(', ')}. Two weeks of silence. The System does not chase.]`);
+    }
+    if (rosterEv && rosterEv.reinstated && rosterEv.reinstated.length) {
+      lines.push(`[Reinstated today: ${rosterEv.reinstated.map((x) => x.name).join(', ')}. The clock restarts.]`);
     }
     if (incomplete.length) {
       const sting = STING_MILD[Number(today.slice(-2)) % STING_MILD.length];

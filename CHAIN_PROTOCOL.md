@@ -158,6 +158,11 @@ one, or from the reinstatement date.
   their first closed day.
 - Anyone already past the line when the protocol shipped got the
   notice first; nobody is removed without one served the day before.
+- A reinstatement is announced in the channel with a ping, the record
+  of the last stay (`[Last time: 8 closed days, then silence since
+  Aug 31.]`) and an animated card: the System re-scans the player, grey
+  to colour, and the ring turns gold. The evening digest adds
+  `[Reinstated today: X. The clock restarts.]`.
 - The digest names both events: `[Final notice served to X. One day
   remains.]` and `[Removed from the roster: X. Two weeks of silence.
   The System does not chase.]`. Players on notice are not repeated in
