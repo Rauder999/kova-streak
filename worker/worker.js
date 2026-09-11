@@ -152,6 +152,23 @@ function prevWindowIdOf(win) {
   return shiftDate(win.start, -7) + ':B';
 }
 
+// Concurrent duplicates (two tabs posting the same completion in the same
+// millisecond, 2026-09-10) beat a KV get-then-put marker: both requests read
+// "no marker" before either writes. Requests from one client land on one
+// isolate almost always, so a short in-memory window closes the race
+// cheaply; the KV markers stay as the durable line of defense.
+const RECENT_KEYS = new Map();
+function firstInWindow(key, ms) {
+  const now = Date.now();
+  const seen = RECENT_KEYS.get(key);
+  if (seen && now - seen < ms) return false;
+  RECENT_KEYS.set(key, now);
+  if (RECENT_KEYS.size > 2000) {
+    for (const [k, t] of RECENT_KEYS) if (now - t > ms) RECENT_KEYS.delete(k);
+  }
+  return true;
+}
+
 // Small deterministic PRNG: the same window id gives the same shuffle
 // everywhere, so pairing needs no coordination.
 function seededRng(str) {
@@ -447,6 +464,7 @@ async function memberDayStatus(env, uid, date, userMap) {
 // window, healing) award quietly: links yes, channel noise no.
 async function chainCheck(env, user, date) {
   try {
+    if (!firstInWindow(`chain:${user.uid}:${date}`, 30000)) return;
     const today = groupDate(env);
     const quiet = date !== today;
     const { win, doc } = await getChainPairs(env, date);
@@ -1816,6 +1834,7 @@ async function announceRecords(env, user, improvements) {
       if (!victims.length) continue;
 
       const dedupeKey = `pbping:${user.uid}:${imp.name}:${today}`;
+      if (!firstInWindow(dedupeKey, 30000)) continue;
       if (await env.KOVA.get(dedupeKey)) continue;
       await env.KOVA.put(dedupeKey, '1', { expirationTtl: 172800 });
 

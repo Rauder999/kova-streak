@@ -344,8 +344,14 @@ async function maybePostScores(added) {
   const ser = JSON.stringify(Object.entries(bests).sort((a, b) => a[0].localeCompare(b[0])));
   if (ser === cached) return;
   try {
-    await api.postScores(bests);
-    localStorage.setItem(PB_CACHE_KEY, ser);
+    await withPostLock(async () => {
+      // re-read inside the lock: the other tab may have just posted this exact set
+      let fresh = null;
+      try { fresh = localStorage.getItem(PB_CACHE_KEY); } catch { /* private browsing mode */ }
+      if (fresh === ser) return;
+      await api.postScores(bests);
+      localStorage.setItem(PB_CACHE_KEY, ser);
+    });
   } catch { /* not critical: we retry with the next new run */ }
 }
 
@@ -540,6 +546,24 @@ function fmtScore(v) {
   return v >= 100 ? String(Math.round(v)) : (Math.round(v * 10) / 10).toString();
 }
 
+// Two tabs on the same stats folder used to post the same completion in
+// the same millisecond (2026-09-10: duplicate CHAIN FORGED cards and record
+// pings). Web Locks serialize the posts across every tab of this origin,
+// and a shared localStorage note lets the second tab see the first one
+// already did the work, so the request is never sent twice.
+async function withPostLock(fn) {
+  if (navigator.locks && navigator.locks.request) return navigator.locks.request('kova-streak-post', fn);
+  return fn();
+}
+function postedNote(key) {
+  try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch { return null; }
+}
+function rememberPosted(key, date, runs) {
+  try { localStorage.setItem(key, JSON.stringify({ date, runs })); } catch { /* private mode */ }
+}
+const POSTED_KEY = 'kova-streak-posted';
+const POSTED_PREV_KEY = 'kova-streak-posted-prev';
+
 // Posting for yesterday: the grace top-up for a night session and the fix for
 // "played yesterday but the tab was not open". The server accepts yesterday
 // within its date window and never downgrades an already closed day, so the post is safe.
@@ -552,15 +576,24 @@ async function maybePostPrev() {
   if (!justFinished && Date.now() - state.lastPrevPostAt < POST_DEBOUNCE_MS) return;
 
   state.postingPrev = true;
+  const date = prevDateOf(state.date);
   try {
-    await api.postCompletion({
-      date: prevDateOf(state.date),
-      completedRuns: p.completedRuns,
-      requiredRuns: p.requiredRuns,
-      done: p.done,
+    await withPostLock(async () => {
+      const note = postedNote(POSTED_PREV_KEY);
+      if (note && note.date === date && note.runs === p.completedRuns) {
+        state.lastPostedPrevRuns = p.completedRuns; // another tab already sent exactly this
+        return;
+      }
+      await api.postCompletion({
+        date,
+        completedRuns: p.completedRuns,
+        requiredRuns: p.requiredRuns,
+        done: p.done,
+      });
+      rememberPosted(POSTED_PREV_KEY, date, p.completedRuns);
+      state.lastPostedPrevRuns = p.completedRuns;
+      state.lastPrevPostAt = Date.now();
     });
-    state.lastPostedPrevRuns = p.completedRuns;
-    state.lastPrevPostAt = Date.now();
   } catch (e) {
     if (handleApiError(e)) return;
     // not critical: we retry on the next tick
@@ -580,17 +613,26 @@ async function maybePost() {
   if (!justFinished && Date.now() - state.lastPostAt < POST_DEBOUNCE_MS) return;
 
   state.posting = true;
+  const date = state.date;
   try {
-    const res = await api.postCompletion({
-      date: state.date,
-      completedRuns: p.completedRuns,
-      requiredRuns: p.requiredRuns,
-      done: p.done,
+    await withPostLock(async () => {
+      const note = postedNote(POSTED_KEY);
+      if (note && note.date === date && note.runs === p.completedRuns) {
+        state.lastPostedRuns = p.completedRuns; // another tab already sent exactly this
+        return;
+      }
+      const res = await api.postCompletion({
+        date,
+        completedRuns: p.completedRuns,
+        requiredRuns: p.requiredRuns,
+        done: p.done,
+      });
+      rememberPosted(POSTED_KEY, date, p.completedRuns);
+      state.lastPostedRuns = p.completedRuns;
+      state.lastPostAt = Date.now();
+      if (res && res.streak !== undefined) state.streak = res;
+      if (state.tab === 'today') renderToday();
     });
-    state.lastPostedRuns = p.completedRuns;
-    state.lastPostAt = Date.now();
-    if (res && res.streak !== undefined) state.streak = res;
-    if (state.tab === 'today') renderToday();
   } catch (e) {
     if (handleApiError(e)) return;
     state.scanError = 'Could not save progress: ' + e.message;
