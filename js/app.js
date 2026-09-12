@@ -491,7 +491,7 @@ export function renderStats() {
   const grid = el('div', 'status-grid');
   const left = el('div');
   const id = el('div', 'id-row');
-  id.append(avatarTile({ avatar: state.user.avatar, userId: state.user.uid }, me && me.frame ? 'gold' : null));
+  id.append(avatarTile({ avatar: state.user.avatar, userId: state.user.uid }, me && me.frame ? 'gold' : null, 256));
   const idText = el('div');
   idText.style.cssText = 'display:flex;flex-direction:column;gap:8px;min-width:0';
   idText.append(el('span', 'id-nm', state.user.name));
@@ -1592,17 +1592,30 @@ function linkMarkSvg(color, w = 62, h = 20) {
     + `<g fill="${color}"><path d="M15.9 4.8 C19 7.1 22 7.1 25.1 4.8 L25.1 15.2 C22 12.9 19 12.9 15.9 15.2 Z"/><path d="M36.9 4.8 C40 7.1 43 7.1 46.1 4.8 L46.1 15.2 C43 12.9 40 12.9 36.9 15.2 Z"/></g></svg>`;
 }
 
-function avatarImg(p, cls = 'av sq') {
+// Discord's CDN serves the size it is asked for. The worker stores the 64px
+// URL (enough for a row), so tiles and portraits ask for what they need.
+function avatarAt(url, size) {
+  if (!url || !/cdn\.discordapp\.com\/(avatars|embed\/avatars)\//.test(url)) return url;
+  try {
+    const u = new URL(url);
+    u.searchParams.set('size', String(size));
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
+function avatarImg(p, cls = 'av sq', size = 128) {
   const img = el('img', cls);
-  img.src = (p && p.avatar) || avatarFallback(p && p.userId);
+  img.src = avatarAt((p && p.avatar) || avatarFallback(p && p.userId), size);
   img.alt = '';
   safeAvatar(img, p && p.userId);
   return img;
 }
 
 // a chamfered portrait tile; with a metal it gets the rarity edge
-function avatarTile(p, metal = null) {
-  const img = avatarImg(p);
+function avatarTile(p, metal = null, size = 128) {
+  const img = avatarImg(p, 'av sq', size);
   if (!metal) return img;
   const t = el('span', 'tile');
   t.style.setProperty('--tm', METAL[metal].metal);
@@ -2020,7 +2033,7 @@ export function renderGroup() {
       const slot = el('div', 'podium-slot');
       slot.style.cssText = `width: ${sz.slot}px; --metal: ${METAL[metal].metal};`;
       const cards = shown.map((p, k) => ({
-        metal, w: sz.w, h: sz.h, avatar: p.avatar || avatarFallback(p.userId), uid: p.userId, name: p.displayName,
+        metal, w: sz.w, h: sz.h, avatar: avatarAt(p.avatar || avatarFallback(p.userId), 512), uid: p.userId, name: p.displayName,
         days: `${podiumValues[i]}d`, rev: k % 2 === 1,
         tier: p.lastDone ? 'SINCE ' + monthDayShort(addDays(p.lastDone, -(p.streak - 1))).toUpperCase() : 'ACTIVE',
       }));
