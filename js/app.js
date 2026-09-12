@@ -80,6 +80,12 @@ const el = (tag, cls, text) => {
 async function boot() {
   initGlossary();
   $('login-btn').addEventListener('click', login);
+  // the gate's reject: the System does not recommend it
+  $('reject-btn').addEventListener('click', () => {
+    const note = $('reject-note');
+    note.textContent = '[ THE SYSTEM HAS NOTED YOUR HESITATION. ]';
+    setTimeout(() => { note.textContent = 'THE SYSTEM DOES NOT RECOMMEND IT'; }, 2200);
+  });
   $('logout-btn').addEventListener('click', () => { logout(); location.reload(); });
   document.querySelectorAll('.tab-btn').forEach((b) => {
     b.addEventListener('click', () => switchTab(b.dataset.tab));
@@ -111,7 +117,10 @@ async function boot() {
   }
 
   state.user = initAuth();
-  if (!state.user) return showView('login');
+  if (!state.user) {
+    $('online-chip').hidden = false;
+    return showView('login');
+  }
 
   $('user-name').textContent = state.user.name;
   safeAvatar($('user-avatar'), state.user.uid);
@@ -150,6 +159,7 @@ async function boot() {
   switchTab(fsSupported() ? 'today' : 'group');
   refreshGroup();
   loadRest().then(() => { if (state.tab === 'today') renderToday(); });
+  loadVault(); // the rest calendar reads the shield and the voucher from it
   if (state.granted) startPolling();
 }
 
@@ -428,7 +438,11 @@ async function maybeCoach() {
   if (state.tab === 'stats') renderStats();
 }
 
-function renderStats() {
+// My stats is the System's STATUS window: the hunter's identity plate, the
+// three niches as attributes with today's delta against the player's own
+// baseline on a bipolar bar, the coach's verdict as System lines tagged by
+// niche, and the day's scenarios against their usual.
+export function renderStats() {
   const root = $('view-stats');
   root.replaceChildren();
 
@@ -436,110 +450,211 @@ function renderStats() {
     root.append(notice('Connect your stats folder on the Today tab first.'));
     return;
   }
-  if (state.indexProgress) {
-    root.append(notice(`Reading your history: ${state.indexProgress.done} / ${state.indexProgress.total} runs parsed. First time takes a minute, later it is instant.`));
-    return;
-  }
   const r = state.report;
-  if (!r) {
+  const indexing = !!state.indexProgress;
+  if (!r && !indexing) {
     root.append(notice('Crunching your runs...'));
     return;
   }
 
-  // day picker: today and past played dates
-  if (state.playedDates.length) {
-    const days = el('div', 'day-chips');
-    const mk = (label, day, active) => {
-      const b = el('button', 'day-chip mono' + (active ? ' active' : ''), label);
-      b.addEventListener('click', async () => {
-        state.statsDate = day;
-        state.coachLines = null;
-        state.coachHash = null;
-        await rebuildReport(day || state.date);
-      });
-      return b;
-    };
-    const viewing = state.statsDate || state.date;
-    days.append(mk('today', null, viewing === state.date));
-    for (const d of state.playedDates) {
-      if (d === state.date) continue;
-      days.append(mk(d.slice(5), d, viewing === d));
-    }
-    root.append(days);
-  }
+  const viewing = state.statsDate || state.date;
+  const isPast = !!(state.statsDate && state.statsDate !== state.date);
+  const me = state.group && state.group.players.find((p) => p.userId === state.user.uid);
+  const rank = state.group ? state.group.players.findIndex((p) => p.userId === state.user.uid) + 1 : 0;
 
-  // coach: the diagnostic window, the answer goes first
-  const isPast = (state.statsDate && state.statsDate !== state.date);
-  const coach = el('div', 'card coach-card');
-  const ch = el('div', 'card-head');
-  ch.append(el('h2', null, 'Coach diagnostic'));
-  ch.append(el('span', 'muted mono', isPast ? r.today.toUpperCase() : (r.rusty ? `${r.gapDays} DAYS OFF BEFORE THIS` : 'NEXT SESSION')));
-  coach.append(ch);
+  // ---- the STATUS window ----
+  const win = mkWin();
+  activeDecor(win);
+  const head = el('div', 'win-head');
+  head.append(el('span', 'win-label', `[ Status // ${indexing ? 'first visit' : isPast ? monthDayShort(viewing) : 'today'} ]`));
+  const chips = el('div', 'chipline');
+  chips.append(el('span', 'win-sub', 'RECORD OF'));
+  const mk = (label, day, active) => {
+    const b = el('button', 'dc' + (active ? ' on' : ''), label);
+    b.type = 'button';
+    b.addEventListener('click', async () => {
+      state.statsDate = day;
+      state.coachLines = null;
+      state.coachHash = null;
+      await rebuildReport(day || state.date);
+    });
+    return b;
+  };
+  chips.append(mk('TODAY', null, viewing === state.date));
+  for (const d of state.playedDates) {
+    if (d === state.date) continue;
+    chips.append(mk(monthDayShort(d).toUpperCase(), d, viewing === d));
+  }
+  head.append(chips);
+  win.append(head);
+
+  const grid = el('div', 'status-grid');
+  const left = el('div');
+  const id = el('div', 'id-row');
+  id.append(avatarTile({ avatar: state.user.avatar, userId: state.user.uid }, me && me.frame ? 'gold' : null));
+  const idText = el('div');
+  idText.style.cssText = 'display:flex;flex-direction:column;gap:8px;min-width:0';
+  idText.append(el('span', 'id-nm', state.user.name));
+  const bits = ['HUNTER'];
+  if (rank > 0) bits.push(`RANK <b>#${rank}</b> THIS MONTH`);
+  if (state.streak) bits.push(`STREAK <b>${state.streak.streak}D</b>`);
+  if (me) bits.push(`<b>${me.links || 0}</b> LINKS`);
+  if (me && me.frame) bits.push('FRAME OF HONOR ACTIVE');
+  const sub = el('span', 'id-sub');
+  sub.innerHTML = bits.join(' · ');
+  idText.append(sub);
+  id.append(idText);
+  left.append(id);
+
+  const dcol = (pct) => (pct > 2 ? 'up' : pct < -2 ? 'down' : 'flat');
+  const dtxt = (pct) => (pct > 0 ? '+' : '') + pct + '%';
+  for (const n of ['clicking', 'tracking', 'switching']) {
+    const row = el('div', 'attr');
+    row.append(el('span', 'k ' + n, n.toUpperCase()));
+    const found = r && r.niches.find((x) => x.niche === n);
+    const pct = found && found.scoreDelta != null ? Math.round(found.scoreDelta * 100) : null;
+    const d = el('span', 'd' + (pct == null ? '' : ' ' + dcol(pct)), pct == null ? '--' : dtxt(pct));
+    if (pct == null) d.style.color = 'var(--text-2)';
+    row.append(d);
+    const bar = el('div', 'bip');
+    if (pct != null) {
+      const half = Math.min(50, Math.abs(pct) * 5); // plus or minus 10% fills the whole half
+      const fill = el('i', Math.abs(pct) <= 1 ? 'flat' : pct > 0 ? 'up' : 'dn');
+      if (Math.abs(pct) <= 1) fill.style.cssText = 'left: calc(50% - 2px); width: 4px;';
+      else if (pct > 0) fill.style.cssText = `left: 50%; width: ${half}%;`;
+      else fill.style.cssText = `right: 50%; width: ${half}%;`;
+      bar.append(fill);
+    }
+    row.append(bar);
+    let note = indexing ? 'waiting for the history' : 'not played today';
+    if (found) {
+      const parts = [];
+      if (found.best && found.best.scoreDelta != null && found.best.scoreDelta > 0.02) parts.push(shortScen(found.best.name) + ' up');
+      if (found.worst && found.worst.scoreDelta != null && found.worst.scoreDelta < -0.02) parts.push(shortScen(found.worst.name) + ' down');
+      if (found.pbs && found.pbs.length) parts.push(found.pbs.length === 1 ? shortScen(found.pbs[0]) + ' is a PB' : found.pbs.length + ' PBs');
+      note = parts.join(', ') || (found.scenarios.length + ' played, on your usual');
+    }
+    row.append(el('span', 'n', note));
+    left.append(row);
+  }
+  grid.append(left);
+
+  const rec = el('div', 'rec-grid');
+  const recBlock = (label, value, hint, color) => {
+    const b = el('div', 'rec');
+    b.append(el('span', 'lbl', label));
+    const v = el('span', 'v', value);
+    if (color) v.style.color = color;
+    b.append(v, el('span', 'h', hint));
+    return b;
+  };
+  if (indexing) {
+    const ip = state.indexProgress;
+    rec.append(recBlock('History', `${ip.done} / ${ip.total}`, 'runs parsed · first time takes a minute'));
+    const pr = el('div', 'rec');
+    pr.style.cssText = 'grid-column: span 2; justify-content: center;';
+    const bar = el('div', 'prog');
+    const fill = el('i');
+    fill.style.width = (ip.total ? Math.round((ip.done / ip.total) * 100) : 0) + '%';
+    bar.append(fill);
+    pr.append(bar, el('span', 'h', '[ Reading your history. Later it is instant. ]'));
+    pr.querySelector('.h').style.marginTop = '8px';
+    rec.append(pr);
+  } else {
+    const runs = r.scenarios.reduce((a, s) => a + s.runsToday, 0);
+    const secured = state.progress && !isPast ? state.progress.items.filter((i) => i.done).length : null;
+    rec.append(recBlock('Runs ' + (isPast ? 'that day' : 'today'), String(runs), `${r.scenarios.length} scenarios${secured != null ? ` · ${secured} secured` : ''}`));
+    const pb = r.pbs.length;
+    rec.append(recBlock('New bests', String(pb), pb ? shortScen(r.pbs[0]) + (pb > 1 ? ` and ${pb - 1} more` : '') : 'none today, the usual holds', pb ? 'var(--gold)' : null));
+    const deltas = r.scenarios.map((s) => s.scoreDelta).filter((x) => x != null).sort((a, b) => a - b);
+    const med = deltas.length ? deltas[Math.floor(deltas.length / 2)] : null;
+    const medPct = med == null ? null : Math.round(med * 100);
+    rec.append(recBlock('Day vs usual', medPct == null ? '--' : dtxt(medPct), medPct == null ? 'no baseline yet' : `median of ${deltas.length} deltas · ${Math.abs(medPct) <= 2 ? 'a flat day' : medPct > 0 ? 'a strong day' : 'a soft day'}`, medPct == null ? 'var(--text-2)' : medPct > 2 ? 'var(--ok)' : medPct < -2 ? 'var(--bad)' : 'var(--text-1)'));
+  }
+  grid.append(rec);
+  win.append(grid);
+  root.append(win);
+
+  // ---- coach: the diagnostic window, the answer goes first ----
+  const coach = mkWin();
+  const coachSub = indexing ? 'NO VERDICT YET'
+    : isPast ? r.today.toUpperCase()
+      : (r.rusty ? `${r.gapDays} DAYS OFF BEFORE THIS` : 'NEXT SESSION') + ' · ONE FOCUS PER NICHE · UNDERLINED TERMS OPEN THE GLOSSARY';
+  coach.append(winHead('[ Coach diagnostic ]', coachSub));
   if (state.coachLines && state.coachLines.length) {
     for (const line of state.coachLines) {
       const m = /^\[(CLICKING|TRACKING|SWITCHING)\]\s*(.*)$/.exec(line);
       const niche = m ? m[1] : null;
       let text = m ? m[2] : line;
-      const row = el('div', 'coach-line' + (niche ? ' cn-' + niche.toLowerCase() : ''));
-      const chipCol = el('div', 'coach-chips');
-      chipCol.append(el('span', 'coach-niche mono', niche || '•'));
+      const row = el('div', 'cl');
+      const tags = el('div', 'tags');
+      tags.append(el('span', 'ntag' + (niche ? ' ' + niche.toLowerCase() : ''), niche || 'COACH'));
       // the repeat marker becomes a visible badge instead of buried prose
       if (/^Same focus as yesterday:?\s*/i.test(text)) {
         text = text.replace(/^Same focus as yesterday:?\s*/i, '');
-        chipCol.append(el('span', 'coach-repeat mono', 'REPEAT'));
+        tags.append(el('span', 'ntag repeat', 'REPEAT'));
       }
-      row.append(chipCol);
-      row.append(el('span', 'coach-text', text));
+      row.append(tags, el('span', 'tx', text));
       coach.append(row);
     }
     annotateTerms(coach); // jargon becomes a clickable glossary
-  } else if (state.coachError) {
-    coach.append(el('p', 'muted', 'Coach is unavailable: ' + state.coachError));
-  } else if (!r.scenarios.length) {
-    coach.append(el('p', 'muted', isPast ? 'No runs on that day.' : 'Play something and the verdict appears here.'));
   } else {
-    coach.append(el('p', 'muted mono', '[ ANALYZING... ]'));
+    const line = el('div', 'quest-line');
+    line.style.cssText = 'padding:20px 0 6px;font-size:13px;letter-spacing:.08em';
+    if (state.coachError) line.textContent = `[ COACH UNAVAILABLE: ${state.coachError} ]`;
+    else if (indexing || !r.scenarios.length) {
+      const b = el('span', 'blink', '[ ANALYZING... ]');
+      line.append(b, ' ');
+      const t = el('span', null, isPast ? 'no runs on that day' : 'the verdict appears after the first runs of the day');
+      t.style.color = 'var(--text-2)';
+      line.append(t);
+    } else line.append(el('span', 'blink', '[ ANALYZING... ]'));
+    coach.append(line);
   }
   root.append(coach);
 
-  // the day's scenarios against their own baseline
-  const card = el('div', 'card');
-  const head = el('div', 'card-head');
-  head.append(el('h2', null, isPast ? `${r.today} vs your usual back then` : 'Today vs your usual'));
-  head.append(el('span', 'muted', 'best of the day against the median of the runs before it'));
-  card.append(head);
-
-  if (!r.scenarios.length) {
-    card.append(el('p', 'muted', isPast ? 'Nothing was played that day.' : 'No runs yet today.'));
+  // ---- the day's scenarios against their own baseline ----
+  const table = mkWin();
+  table.append(winHead(`[ ${isPast ? monthDayShort(r ? r.today : viewing) : 'Today'} vs your usual ]`, 'BEST OF THE DAY AGAINST THE MEDIAN OF THE RUNS BEFORE IT · PB = NEW PERSONAL BEST'));
+  if (indexing || !r.scenarios.length) {
+    const line = el('div', 'quest-line', isPast ? '[ NOTHING WAS PLAYED THAT DAY. ]' : '[ NO RUNS YET TODAY. THE TABLE FILLS AS YOU PLAY. ]');
+    line.style.cssText = 'padding:18px 0 6px;color:var(--text-2)';
+    table.append(line);
   } else {
-    const table = el('table', 'stats-table');
-    const thead = el('thead');
-    const hr = el('tr');
-    ['Scenario', 'Runs', 'Best today', 'Your usual', 'Delta'].forEach((h) => hr.append(el('th', null, h)));
-    thead.append(hr);
-    table.append(thead);
-    const tbody = el('tbody');
+    const scroll = el('div', 'st-scroll');
+    scroll.style.marginTop = '10px';
+    const cols = el('div', 'st-cols');
+    ['Scenario', 'Niche', 'Runs', 'Best today', 'Your usual', 'Delta'].forEach((h, i) => cols.append(el('span', i >= 2 ? 'r' : '', h)));
+    scroll.append(cols);
     for (const s of r.scenarios) {
-      const tr = el('tr');
-      const nameCell = el('td', 'scen');
-      nameCell.append(el('span', null, s.name));
-      if (s.isPB) nameCell.append(el('span', 'pb-chip mono', 'PB'));
-      tr.append(nameCell);
-      tr.append(el('td', 'mono', String(s.runsToday)));
-      tr.append(el('td', 'mono', s.bestToday != null ? fmtScore(s.bestToday) : '-'));
-      tr.append(el('td', 'mono muted', s.base ? fmtScore(s.base.score) : 'no baseline yet'));
-      const d = el('td', 'mono');
+      const row = el('div', 'st-row');
+      const nm = el('div', 'nm');
+      nm.append(el('span', null, s.name));
+      if (s.isPB) nm.append(el('span', 'tag gold', 'PB'));
+      row.append(nm);
+      const nt = el('span', 'ntag' + (s.niche && s.niche !== 'unknown' ? ' ' + s.niche : ''), (s.niche && s.niche !== 'unknown' ? s.niche : 'other').toUpperCase());
+      nt.style.justifySelf = 'start';
+      row.append(nt);
+      row.append(el('span', 'r', String(s.runsToday)));
+      row.append(el('span', 'r' + (s.isPB ? ' gold' : ''), s.bestToday != null ? fmtScore(s.bestToday) : '-'));
+      row.append(el('span', 'r mute', s.base ? fmtScore(s.base.score) : 'no baseline yet'));
+      const d = el('span', 'r dl');
       if (s.scoreDelta != null) {
         const pct = Math.round(s.scoreDelta * 100);
-        d.append(el('span', 'delta ' + (pct > 2 ? 'up' : pct < -2 ? 'down' : ''), (pct > 0 ? '+' : '') + pct + '%'));
+        d.classList.add(dcol(pct));
+        d.textContent = `[${dtxt(pct)}]`;
       } else d.textContent = '-';
-      tr.append(d);
-      tbody.append(tr);
+      row.append(d);
+      scroll.append(row);
     }
-    table.append(tbody);
-    card.append(table);
+    table.append(scroll);
   }
-  root.append(card);
+  root.append(table);
+}
+
+// "VT Pasu Rasp Novice" reads as "Pasu Rasp" in a short note
+function shortScen(name) {
+  return String(name).replace(/^VT\s+/i, '').replace(/\s+(Novice|Intermediate|Advanced|Easy|Medium|Hard|Ez|Beginner)$/i, '');
 }
 
 function fmtScore(v) {
@@ -663,13 +778,17 @@ async function regrant() {
   if (state.granted) startPolling();
 }
 
+// Today is the System's Daily Quest window: the quest line under the label,
+// the day gauge, the scenario list as GOAL rows that read [credited/required]
+// with a quest checkbox, the WARNING with the penalty, the rest calendar and
+// your chain of the half-week beside it.
 export function renderToday() {
   const root = $('view-today');
   root.replaceChildren();
 
   if (!fsSupported()) {
     root.append(notice('Check-ins happen on your gaming PC in desktop Chrome or Edge. On this device you can watch the group tab.'));
-    root.append(renderRestCard()); // rest days are convenient to schedule right from the phone
+    root.append(renderRestWindow()); // rest days are convenient to schedule right from the phone
     return;
   }
   if (!state.playlist || !state.playlist.scenarios || !state.playlist.scenarios.length) {
@@ -680,82 +799,7 @@ export function renderToday() {
   }
 
   if (SETUP_PREVIEW || !state.granted) {
-    const gate = el('div', 'card gate-card');
-    if (state.handle && !SETUP_PREVIEW) {
-      // the folder was already picked before, only the permission click is needed
-      gate.append(el('h2', null, 'Grant folder access'));
-      gate.append(el('p', 'lede', 'The folder is remembered. In the browser prompt pick "Allow on every visit" and even this click disappears: next time the page will just start watching on its own.'));
-      const btn = el('button', 'primary big', 'Grant access');
-      btn.addEventListener('click', regrant);
-      gate.append(btn);
-      const forget = el('button', 'ghost', 'Pick a different folder');
-      forget.addEventListener('click', async () => { await forgetFolder(); state.handle = null; renderToday(); });
-      gate.append(forget);
-    } else {
-      // first time: five steps IN ORDER, each its own numbered row. People
-      // kept jumping straight to the PowerShell line with no export enabled
-      // and no stats folder on disk, and everything broke (per Rauder,
-      // 2026-09-10). The folder path always arrives from the helper via the
-      // clipboard. No fallback Copy path buttons: they overwrote the
-      // clipboard with the wrong path, friends got caught by that twice.
-      gate.append(el('h2', null, 'One-time setup'));
-      gate.append(el('p', 'lede', 'Five steps, in this order. Each one needs the previous. After that it is fully automatic: you play, the site checks you in.'));
-
-      const cmdRow = el('div', 'path-row');
-      const cmdCode = el('code', 'mono path-text', MIRROR_CMD);
-      const cmdCopy = el('button', null, 'Copy command');
-      cmdCopy.addEventListener('click', async () => {
-        const ok = await copyText(MIRROR_CMD);
-        if (ok) {
-          cmdCopy.textContent = 'Copied';
-          setTimeout(() => { cmdCopy.textContent = 'Copy command'; }, 1500);
-        } else {
-          const range = document.createRange();
-          range.selectNodeContents(cmdCode);
-          const sel = getSelection();
-          sel.removeAllRanges();
-          sel.addRange(range);
-          cmdCopy.textContent = 'Press Ctrl+C';
-        }
-      });
-      cmdRow.append(cmdCode, cmdCopy);
-
-      const steps = el('div', 'setup-flow');
-      const step = (title, rest) => {
-        const row = el('div', 'setup-step');
-        row.append(el('span', 'st-num mono', String(steps.children.length + 1).padStart(2, '0')));
-        const body = el('div', 'st-body');
-        body.append(el('b', 'st-title', title));
-        const text = el('div', 'st-text');
-        if (typeof rest === 'string') text.append(rest);
-        else if (rest) text.append(...rest);
-        body.append(text);
-        row.append(body);
-        steps.append(row);
-        return row;
-      };
-      step('Turn on stats export', 'In KovaaK\'s: Settings -> Misc -> Statistics Export = "Always".');
-      step('Play one run', 'Any scenario, one game. KovaaK\'s creates its stats folder only after the first run with export on. Skip this and the next steps find nothing.');
-      if (state.playlist && state.playlist.shareCode) {
-        step('Get the playlist', ['Download it in KovaaK\'s with this code: ', codeChip(state.playlist.shareCode)]);
-      } else {
-        step('Get the playlist', 'Import the week\'s playlist in KovaaK\'s (ask Rauder for the code).');
-      }
-      step('Run the helper', [
-        'Press Win, type "powershell", Enter. Paste this line, Enter:',
-        cmdRow,
-        'When it says Done, your folder path is in the clipboard. If it asks a question, answer it right there.',
-      ]);
-      step('Pick the folder', 'Press the button below, then Ctrl+V, Enter, "Select Folder".');
-      gate.append(steps);
-
-      const btn = el('button', 'primary big', 'Choose stats folder');
-      btn.addEventListener('click', connectFolder);
-      gate.append(btn);
-
-      gate.append(el('p', 'fine', 'When Chrome asks for folder access, pick "Allow on every visit". Everything is remembered after that.'));
-    }
-    root.append(gate);
+    root.append(renderSetupGate());
     if (state.scanError) root.append(notice(state.scanError, 'error'));
     return;
   }
@@ -773,19 +817,23 @@ export function renderToday() {
   // no stats files in the folder at all: almost certainly the wrong one was picked
   if (p.scanned === 0) {
     const warn = notice('There are no KovaaK\'s stats files in this folder at all, so it is probably the wrong one. It has to be the "stats" folder inside FPSAimTrainer\\FPSAimTrainer. If the folder is right, check that Statistics Export is set to "Always" in KovaaK\'s settings (Misc tab).', 'error');
-    const rebtn = el('button', null, 'Pick a different folder');
+    const rebtn = el('button', 'btn ghost', 'Pick a different folder');
     rebtn.addEventListener('click', connectFolder);
     warn.append(rebtn);
     root.append(warn);
   }
 
-  // the hero: the day lives inside its own status window
-  const top = el('div', 'today-top');
-  top.append(progressRing(p));
-
-  const stats = el('div', 'today-stats');
-  stats.append(statBlock(p.done ? 'Done' : 'In progress', `${p.completedRuns} / ${p.requiredRuns} runs`,
-    p.done ? 'checked in for today, automatically' : `${p.items.filter((i) => i.done).length} of ${p.items.length} scenarios finished`));
+  // ---- the daily quest window ----
+  const hero = mkWin();
+  activeDecor(hero, p.done);
+  hero.append(winHead(`[ Daily quest // ${monthDayShort(state.date)} ]`, p.done ? 'DAY SECURED' : gateLine(), { gold: p.done }));
+  hero.append(questLine(`[ Daily Quest: ${state.playlist.weekLabel ? state.playlist.weekLabel + ' playlist' : 'the playlist'} has arrived. ${p.requiredRuns} runs close the day. ]`));
+  const row = el('div', 'hero-row');
+  row.append(progressRing(p));
+  const stats = el('div', 'hero-stats');
+  const finished = p.items.filter((i) => i.done).length;
+  stats.append(statBlock(p.done ? 'Done' : 'In progress', `${p.completedRuns} / ${p.requiredRuns}`,
+    p.done ? 'runs · checked in automatically' : `runs · ${finished} of ${p.items.length} scenarios finished`, p.done ? 'gold' : ''));
   if (state.streak) {
     stats.append(statBlock('Streak', `${state.streak.streak} ${state.streak.streak === 1 ? 'day' : 'days'}`, 'consecutive days completed'));
     stats.append(statBlock('Done this month', state.streak.doneDays != null ? String(state.streak.doneDays) : '-', 'this is what the ranking uses'));
@@ -794,175 +842,468 @@ export function renderToday() {
     const doneCnt = state.group.players.filter((x) => x.doneToday).length;
     stats.append(statBlock('Group today', `${doneCnt} / ${state.group.players.length}`, 'friends already checked in'));
   }
-  if (state.playlist && state.playlist.shareCode) {
-    const pc = el('div', 'stat');
-    pc.append(el('span', 'stat-label', 'Playlist code'));
-    pc.append(codeChip(state.playlist.shareCode));
-    pc.append(el('span', 'stat-hint', 'import it in KovaaK\'s, click to copy'));
-    stats.append(pc);
-  }
-  top.append(stats);
-  const dayWin = el('div', 'card day-window' + (p.done ? ' day-done' : ''));
-  const dwHead = el('div', 'card-head');
-  dwHead.append(el('h2', null, 'Day status'));
-  dwHead.append(el('span', 'muted mono', p.done ? 'DAY SECURED' : `${Math.round(p.percent * 100)}% // ${p.completedRuns} OF ${p.requiredRuns} RUNS`));
-  dayWin.append(dwHead);
-  dayWin.append(top);
-  root.append(dayWin);
+  row.append(stats);
+  hero.append(row);
+  root.append(hero);
 
   if (state.scanError) root.append(notice(state.scanError, 'error'));
 
-  // scenario checklist: what remains carries the meaning, done rows collapse
-  const card = el('div', 'card');
-  const head = el('div', 'card-head');
-  head.append(el('h2', null, 'What is left to play'));
-  head.append(el('span', 'muted mono', state.date + ' · resets at your local midnight'));
-  card.append(head);
+  // ---- the goals and the side column ----
+  const two = el('div', 'row2');
+  two.append(renderGoalsWindow(p));
+  const side = el('div', 'side');
+  side.append(renderRestWindow());
+  const chain = renderMyChainWindow();
+  if (chain) side.append(chain);
+  two.append(side);
+  root.append(two);
 
-  const rowFor = (item) => {
-    const li = el('li', item.done ? 'done' : '');
-    li.append(el('span', 'check', item.done ? '✓' : ''));
-    li.append(el('span', 'scen-name', item.name));
-    const count = el('span', 'scen-count mono', `${item.credited} / ${item.required}`);
-    if (item.played > item.required) count.title = `${item.played} runs played, ${item.required} required`;
-    li.append(count);
-    return li;
-  };
-
-  const remaining = p.items.filter((i) => !i.done);
-  const secured = p.items.filter((i) => i.done);
-  if (remaining.length) {
-    const list = el('ul', 'checklist');
-    for (const item of remaining) list.append(rowFor(item));
-    card.append(list);
-  } else {
-    card.append(el('p', 'lede', 'Every scenario is secured. The day is yours.'));
+  // ---- the playlist line ----
+  if (state.playlist.shareCode) {
+    const pl = mkWin('playlist-line');
+    pl.style.padding = '20px 28px';
+    pl.append(el('span', 'win-label', '[ Playlist ]'));
+    pl.append(el('span', 'win-sub', `${(state.playlist.weekLabel || 'THIS WEEK').toUpperCase()} · ${p.items.length} SCENARIOS · ${p.requiredRuns} RUNS`));
+    pl.append(codeChip(state.playlist.shareCode));
+    pl.append(el('span', 'fine', 'Import it in KovaaK\'s: Playlists, Share code, paste. Only runs from this playlist count.'));
+    root.append(pl);
   }
-  if (secured.length) {
-    const det = el('details', 'secured-details');
-    if (!remaining.length) det.open = true;
-    const sum = el('summary', 'mono', `[ ${secured.length} ${secured.length === 1 ? 'SCENARIO' : 'SCENARIOS'} SECURED ]`);
-    det.append(sum);
-    const doneList = el('ul', 'checklist secured-list');
-    for (const item of secured) doneList.append(rowFor(item));
-    det.append(doneList);
-    card.append(det);
-  }
-  root.append(card);
 
-  root.append(renderRestCard());
-
-  // first aid moved to the quiet bottom (audit: a healthy player should not
-  // meet repair instructions as the first thing on the page)
-  const help = el('div', 'help-line help-footer');
-  help.append(el('span', null, 'Progress not updating while you play? Run this in PowerShell:'));
-  const hcode = el('code', 'mono', MIRROR_CMD);
-  help.append(hcode);
-  const hbtn = el('button', 'ghost', 'Copy');
-  hbtn.addEventListener('click', async () => {
-    const ok = await copyText(MIRROR_CMD);
-    hbtn.textContent = ok ? 'Copied' : 'Copy';
-    if (ok) setTimeout(() => { hbtn.textContent = 'Copy'; }, 1500);
-  });
-  help.append(hbtn);
+  // first aid at the quiet bottom (audit: a healthy player should not meet
+  // repair instructions as the first thing on the page)
+  const help = el('div', 'help-line');
+  help.append(el('span', 'win-sub', '[ PROGRESS NOT UPDATING WHILE YOU PLAY? ]'));
+  help.append(el('span', 'win-sub', 'run this in PowerShell:'));
+  help.append(codeChip(MIRROR_CMD));
   root.append(help);
 }
 
-// ---------- The Vault: its own tab, a proper shop ----------
-// Spend chain links on perks (see CHAIN_PROTOCOL.md). It used to live at
-// the bottom of Today and nobody scrolled that far.
+// GOAL: what remains carries the meaning, secured rows follow under a divider
+function renderGoalsWindow(p) {
+  const win = mkWin('goals grow');
+  win.append(winHead('[ What is left to play ]', p.done ? 'EVERY SCENARIO SECURED' : `${monthDayShort(state.date).toUpperCase()} · RESETS AT YOUR LOCAL MIDNIGHT`));
+  const gh = el('div', 'goal-h');
+  gh.append(el('i'), el('span', null, 'Goal'), el('i', 'r'));
+  win.append(gh);
+
+  const rowFor = (item) => {
+    const g = el('div', 'goal' + (item.done ? ' ok' : ''));
+    g.append(el('span', 'n', item.name), el('span', 'lead'));
+    const c = el('span', 'c', `[${item.credited}/${item.required}]`);
+    if (item.played > item.required) c.title = `${item.played} runs played, ${item.required} required`;
+    g.append(c, qbox(!!item.done));
+    return g;
+  };
+  const remaining = p.items.filter((i) => !i.done);
+  const secured = p.items.filter((i) => i.done);
+  for (const item of remaining) win.append(rowFor(item));
+  if (secured.length) {
+    if (remaining.length) {
+      const sh = el('div', 'secured-h');
+      sh.append(el('span', null, `[ ${secured.length} ${secured.length === 1 ? 'SCENARIO' : 'SCENARIOS'} SECURED ]`), el('i'));
+      win.append(sh);
+    }
+    for (const item of secured) win.append(rowFor(item));
+  }
+
+  if (p.done) {
+    const v = el('div', 'verdict');
+    const streak = state.streak && state.streak.streak;
+    v.innerHTML = '[ DAY SECURED. THE SYSTEM TOOK NOTE. ]<br><span>Checked in automatically. '
+      + (streak ? `The streak is ${streak} ${streak === 1 ? 'day' : 'days'}. ` : '')
+      + 'Nothing else to do tonight.</span>';
+    win.append(v);
+  } else {
+    const w = el('div', 'warn');
+    w.innerHTML = 'Failure to complete the daily quest before midnight will result in a <em>broken streak</em>. A scheduled rest day or an armed Streak Shield is the only way through.';
+    win.append(w);
+  }
+  return win;
+}
+
+// your chain of the half-week: the partner, the link state, what it pays
+function renderMyChainWindow() {
+  const ch = state.chains;
+  if (!ch || !ch.groups) return null;
+  const g = ch.groups.find((x) => x.members.some((m) => m.userId === state.user.uid));
+  const win = mkWin();
+  win.style.cssText = 'display:flex;flex-direction:column;gap:18px';
+  win.append(winHead('[ Your chain ]', `${monthDayShort(ch.start).toUpperCase()} - ${monthDayShort(ch.last).toUpperCase()}`));
+  if (!g) {
+    win.append(el('span', 'fine', 'No chain in this window. Close a day and the System pairs you at the next one.'));
+    return win;
+  }
+  const cls = threadClass(g, null);
+  const forged = cls === 'is-forged';
+  const waiting = cls === 'is-waiting';
+  const rowEl = el('div', 'chain-st');
+  g.members.forEach((m, i) => {
+    if (i > 0) rowEl.append(chainConnector(cls));
+    rowEl.append(avatarTile(m, forged ? 'gold' : null));
+  });
+  const st = el('span', 'win-sub' + (forged ? ' gold' : ''), forged ? 'FORGED' : waiting ? 'WAITING' : 'OPEN');
+  st.style.marginLeft = 'auto';
+  if (waiting) st.style.color = 'var(--accent)';
+  rowEl.append(st);
+  win.append(rowEl);
+
+  const partners = g.members.filter((m) => m.userId !== state.user.uid).map((m) => m.displayName);
+  const who = partners.join(' and ') || 'your partner';
+  const meDone = !!(state.progress && state.progress.done);
+  const pay = g.rescue ? '+2 links each, a rescue chain pays double' : '+1 link each';
+  const txt = el('span');
+  txt.style.cssText = 'font-size:13px;color:var(--text-1);line-height:1.5';
+  if (forged) txt.textContent = `${who} and you both closed the day: the chain is forged, ${pay}.`;
+  else if (waiting && meDone) txt.textContent = `You closed the day. ${who} ${partners.length > 1 ? 'have' : 'has'} not: the chain waits. Wake ${partners.length > 1 ? 'them' : 'them'} up and it is forged, ${pay}.`;
+  else if (waiting) txt.textContent = `${who} already closed the day. Close yours and the chain is forged: ${pay}.`;
+  else txt.textContent = `Nobody has closed the day yet. Both ends close, both earn: ${pay}.`;
+  win.append(txt);
+
+  const dots = el('div', 'dots');
+  for (const d of g.days) dots.append(el('span', 'dot-sq ' + d.state));
+  const forgedCount = g.days.filter((d) => d.state === 'forged').length;
+  const lab = el('span', 'win-sub', `${forgedCount} OF ${g.days.length} DAYS FORGED${g.perfect ? ' · PERFECT' : ''}`);
+  lab.style.marginLeft = '10px';
+  dots.append(lab);
+  win.append(dots);
+  return win;
+}
+
+// The first visit: System initialization. Five steps IN ORDER, each its own
+// numbered row. People kept jumping straight to the PowerShell line with no
+// export enabled and no stats folder on disk, and everything broke (per
+// Rauder, 2026-09-10). The folder path always arrives from the helper via
+// the clipboard. No fallback Copy path buttons: they overwrote the clipboard
+// with the wrong path, friends got caught by that twice.
+function renderSetupGate() {
+  const gate = mkWin();
+  activeDecor(gate);
+
+  if (state.handle && !SETUP_PREVIEW) {
+    // the folder was already picked before, only the permission click is needed
+    gate.append(winHead('[ Grant folder access ]', 'THE FOLDER IS REMEMBERED'));
+    gate.append(questLine('[ Pick "Allow on every visit" in the browser prompt and even this click disappears: next time the page starts watching on its own. ]'));
+    const actions = el('div', 'setup-actions');
+    const btn = el('button', 'btn big', 'Grant access');
+    btn.addEventListener('click', regrant);
+    const forget = el('button', 'btn ghost', 'Pick a different folder');
+    forget.addEventListener('click', async () => { await forgetFolder(); state.handle = null; renderToday(); });
+    actions.append(btn, forget);
+    gate.append(actions);
+    return gate;
+  }
+
+  gate.append(winHead('[ System initialization ]', 'ONE-TIME SETUP · FIVE STEPS, IN THIS ORDER'));
+  gate.append(questLine('[ You have become a Player. Each step needs the previous one. After this it is fully automatic: you play, the site checks you in. ]'));
+
+  const steps = el('div');
+  steps.style.cssText = 'margin-top:14px;max-width:860px';
+  const step = (title, body) => {
+    const s = el('div', 'step');
+    s.append(svgPlate(String(steps.children.length + 1).padStart(2, '0'), 'accent'));
+    const b = el('div');
+    b.append(el('div', 't', title));
+    const x = el('div', 'x');
+    if (typeof body === 'string') x.textContent = body;
+    else x.append(...body);
+    b.append(x);
+    s.append(b, qbox(false));
+    steps.append(s);
+  };
+  step('Turn on stats export', 'In KovaaK\'s: Settings, then the Misc tab, then Statistics Export = "Always".');
+  step('Play one run', 'Any scenario, one game. KovaaK\'s creates its stats folder only after the first run with export on. Skip this and the next steps find nothing.');
+  if (state.playlist && state.playlist.shareCode) {
+    step('Get the playlist', ['Download it in KovaaK\'s with this code: ', codeChip(state.playlist.shareCode)]);
+  } else {
+    step('Get the playlist', 'Import the week\'s playlist in KovaaK\'s (ask Rauder for the code).');
+  }
+  const cmdRow = el('div', 'cmd');
+  const cmdCode = el('code', null, MIRROR_CMD);
+  const cmdCopy = el('button', 'btn ghost', 'Copy command');
+  cmdCopy.addEventListener('click', async () => {
+    const ok = await copyText(MIRROR_CMD);
+    if (ok) {
+      cmdCopy.textContent = 'Copied';
+      setTimeout(() => { cmdCopy.textContent = 'Copy command'; }, 1500);
+    } else {
+      const range = document.createRange();
+      range.selectNodeContents(cmdCode);
+      const sel = getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      cmdCopy.textContent = 'Press Ctrl+C';
+    }
+  });
+  cmdRow.append(cmdCode, cmdCopy);
+  step('Run the helper', [
+    'Press Win, type "powershell", Enter. Paste this line, Enter:',
+    cmdRow,
+    'When it says Done, your folder path is in the clipboard. If it asks a question, answer it right there.',
+  ]);
+  step('Pick the folder', 'Press the button below, then Ctrl+V, Enter, "Select Folder".');
+  gate.append(steps);
+
+  const actions = el('div', 'setup-actions');
+  const btn = el('button', 'btn big', 'Choose stats folder');
+  btn.addEventListener('click', connectFolder);
+  actions.append(btn, el('span', 'fine', 'When Chrome asks for folder access, pick "Allow on every visit". Everything is remembered after that.'));
+  gate.append(actions);
+
+  const w = el('div', 'warn');
+  w.style.cssText = 'margin-top:18px;max-width:860px';
+  w.innerHTML = 'Skipping step 02 leaves no stats folder on disk, and the helper in step 04 will <em>find nothing</em>. Do them in order.';
+  gate.append(w);
+  return gate;
+}
+
+// ---------- The Vault: the artifact exchange ----------
+// Spend chain links on perks (see CHAIN_PROTOCOL.md). Four artifacts on the
+// podium's rarity ladder: the Score point is S (gold, the Monarch's aura), the
+// Shield A (silver), the rest day B (bronze), the Frame C (steel). It used to
+// live at the bottom of Today and nobody scrolled that far.
 
 const VAULT_ITEMS = [
-  { id: 'frame', name: 'Frame of Honor', icon: 'assets/frame-gold.svg',
-    desc: 'A golden frame around your avatar on the leaderboard. Seven days of everyone seeing it.' },
-  { id: 'voucher', name: 'Extra rest day', icon: 'assets/vault-rest.svg',
-    desc: 'One rest day above the weekly limit. One use per calendar month.' },
-  { id: 'shield', name: 'Streak Shield', icon: 'assets/vault-shield.svg',
+  { id: 'score', tier: 'gold', name: 'Score point', stock: 'STACKS', fx: '[ +1 DONE · THIS MONTH ]',
+    desc: "+1 day to this month's Done score, straight into the ranking. Shows a gold mark by your Done count." },
+  { id: 'shield', tier: 'silver', name: 'Streak Shield', stock: '1 HELD AT A TIME', fx: '[ ABSORBS ONE MISS ]',
     desc: 'If a day ends with nothing played, the shield turns it into a rest day at 03:30. Automatic, held until it fires.' },
-  { id: 'score', name: 'Score point', icon: 'assets/vault-score.svg',
-    desc: "+1 day to this month's Done score, straight into the ranking. Stacks, and shows a gold mark by your Done count." },
+  { id: 'voucher', tier: 'bronze', name: 'Extra rest day', stock: '1 PER MONTH', fx: '[ +1 REST DAY OVER QUOTA ]',
+    desc: 'One rest day above the weekly limit. One use per calendar month.' },
+  { id: 'frame', tier: 'steel', name: 'Frame of Honor', stock: 'EXTENDS', fx: '[ +7 DAYS · GOLD FRAME ]',
+    desc: 'A golden frame around your avatar on the leaderboard. Seven days of everyone seeing it.' },
 ];
 
+// line-art glyphs, drawn twice: a wide soft stroke under a crisp one
+const GLYPH_PATHS = {
+  frame: '<polygon points="14,4 50,4 60,14 60,50 50,60 14,60 4,50 4,14" fill="none"/><polygon points="20,12 44,12 52,20 52,44 44,52 20,52 12,44 12,20" fill="none" opacity=".45"/><circle cx="32" cy="27" r="6" fill="none"/><path d="M20 47 C20 38 44 38 44 47" fill="none"/>',
+  voucher: '<path d="M40 8 A22 22 0 1 0 56 40 A17 17 0 1 1 40 8 Z" fill="none" stroke-linejoin="round"/><polygon points="50,12 52.5,16 50,20 47.5,16" fill="currentColor" stroke="none"/><polygon points="56,26 58,29 56,32 54,29" fill="currentColor" stroke="none"/>',
+  shield: '<path d="M32 6 L54 14 C54 34 46 50 32 58 C18 50 10 34 10 14 Z" fill="none" stroke-linejoin="round"/><polygon points="32,22 42,32 32,42 22,32" fill="none"/>',
+  score: '<polygon points="32,6 52,20 32,34 12,20" fill="none" stroke-linejoin="round"/><path d="M12 32 L32 46 L52 32" fill="none" stroke-linejoin="round"/><path d="M12 44 L32 58 L52 44" fill="none" stroke-linejoin="round"/>',
+};
+function glyphSvg(id) {
+  const p = GLYPH_PATHS[id];
+  return `<svg class="glyph" viewBox="0 0 64 64" aria-hidden="true"><g class="glow" fill="none" stroke-linecap="round">${p}</g><g class="line" fill="none" stroke-linecap="round">${p}</g></svg>`;
+}
+
+// what you hold right now, per artifact: { text, cls } or null
 function vaultItemState(v, id) {
-  if (id === 'frame') return v.frameUntil > Date.now() ? 'active until ' + new Date(v.frameUntil).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null;
-  if (id === 'voucher') return v.voucher ? 'held' : (v.voucherUsedMonth === localMonth() ? 'used this month' : null);
-  if (id === 'shield') return v.shield ? 'held' : null;
-  if (id === 'score') return v.scoreBonus ? `+${v.scoreBonus} this month` : null;
+  if (id === 'frame') return v.frameUntil > Date.now() ? { text: 'ACTIVE UNTIL ' + fmtTs(v.frameUntil).toUpperCase(), cls: 'gold' } : null;
+  if (id === 'voucher') return v.voucher ? { text: 'HELD', cls: 'ok' } : (v.voucherUsedMonth === localMonth() ? { text: 'USED THIS MONTH', cls: 'amber' } : null);
+  if (id === 'shield') return v.shield ? { text: 'HELD · ARMED', cls: 'ok' } : null;
+  if (id === 'score') return v.scoreBonus ? { text: `+${v.scoreBonus} THIS MONTH`, cls: 'gold' } : null;
   return null;
+}
+
+// the price plate reads the situation: buy, extend, held, or the links missing
+function vaultBuyLabel(v, it) {
+  const price = v.prices[it.id];
+  if (it.id === 'shield' && v.shield) return { label: `${price} LINKS · HELD`, off: true };
+  if (it.id === 'voucher' && v.voucher) return { label: `${price} LINKS · HELD`, off: true };
+  if (v.links < price) return { label: `${price} LINKS · ${price - v.links} MORE`, off: true };
+  if (it.id === 'frame' && v.frameUntil > Date.now()) return { label: `${price} LINKS · EXTEND`, off: false };
+  return { label: `${price} LINKS`, off: false };
+}
+
+// one artifact tile: the rarity frame, the glyph window, the effect line,
+// the state chip, the price plate
+function vaultTile(it, v, idx) {
+  const t = METAL[it.tier];
+  const w = 256, h = 380, c = 16, i = 6;
+  const outer = `${c},1 ${w - c},1 ${w - 1},${c} ${w - 1},${h - c} ${w - c},${h - 1} ${c},${h - 1} 1,${h - c} 1,${c}`;
+  const inner = `${c + i},${i} ${w - c - i},${i} ${w - i},${c + i} ${w - i},${h - c - i} ${w - c - i},${h - i} ${c + i},${h - i} ${i},${h - c - i} ${i},${c + i}`;
+  const orn = (x, y, sx, sy) => `<path d="M${x} ${y + 14 * sy} L${x} ${y + 4 * sy} L${x + 4 * sx} ${y} L${x + 14 * sx} ${y}" fill="none" stroke="${t.metal}" stroke-width="1.5" stroke-opacity=".95"/>`;
+  const runes = it.tier === 'steel' ? '' : `<svg class="runes${idx % 2 ? ' rev' : ''}" viewBox="0 0 100 100" aria-hidden="true">
+      <circle cx="50" cy="50" r="46" fill="none" stroke="${t.metal}" stroke-width=".6" stroke-dasharray="1.4 3.2"/>
+      <circle cx="50" cy="50" r="41" fill="none" stroke="${t.metal}" stroke-width="1.6" stroke-dasharray="0.6 9.6" stroke-opacity=".8"/>
+      <g fill="${t.metal}" fill-opacity=".85"><rect x="48.6" y="2.6" width="2.8" height="2.8" transform="rotate(45 50 4)"/><rect x="48.6" y="94.6" width="2.8" height="2.8" transform="rotate(45 50 96)"/><rect x="2.6" y="48.6" width="2.8" height="2.8" transform="rotate(45 4 50)"/><rect x="94.6" y="48.6" width="2.8" height="2.8" transform="rotate(45 96 50)"/></g>
+    </svg>`;
+  const tile = el('div', 'vt');
+  tile.style.cssText = `--metal: ${t.metal}; --metal-2: ${t.metal2}; --aura: ${t.aura};`;
+  tile.innerHTML = `<div class="aura"></div>${runes}
+    <svg class="bg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
+      <defs>
+        <linearGradient id="vsteel-${it.id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1B212B"/><stop offset="1" stop-color="#0E1218"/></linearGradient>
+        <linearGradient id="vmet-${it.id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${t.metal2}"/><stop offset=".5" stop-color="${t.metal}"/><stop offset="1" stop-color="${t.metal2}"/></linearGradient>
+      </defs>
+      <polygon points="${outer}" fill="url(#vsteel-${it.id})"/>
+    </svg>
+    <div class="sheen" style="animation-delay: ${idx * 1.7}s;"></div>
+    <div class="body">
+      <div class="tags"><span class="rtag">${t.rank}-RANK</span><span class="stock">${it.stock}</span></div>
+      <div class="icon">${glyphSvg(it.id)}</div>
+      <span class="nm">${esc(it.name)}</span>
+      <span class="desc">${esc(it.desc)}</span>
+      <span class="fx">${it.fx}</span>
+    </div>
+    <svg class="frame" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
+      <polygon points="${outer}" fill="none" stroke="url(#vmet-${it.id})" stroke-width="2"/>
+      <polygon points="${inner}" fill="none" stroke="${t.metal}" stroke-width="1" stroke-opacity=".34"/>
+      <polygon class="energy" points="${outer}" fill="none" stroke="${t.metal2}" stroke-width="2.4" style="animation-delay: ${idx * 1.3}s;"/>
+      ${orn(5, 5 + c, 1, 1)}${orn(w - 5, 5 + c, -1, 1)}${orn(5, h - 5 - c, 1, -1)}${orn(w - 5, h - 5 - c, -1, -1)}
+    </svg>`;
+  const body = tile.querySelector('.body');
+  const st = vaultItemState(v, it.id);
+  const chip = el('span', 'state' + (st ? ' ' + st.cls : ''), st ? st.text : (it.id === 'score' ? 'NONE THIS MONTH' : 'NONE HELD'));
+  body.append(chip);
+  const buy = vaultBuyLabel(v, it);
+  const btn = el('button', 'buy' + (buy.off ? ' off' : ''));
+  btn.type = 'button';
+  if (!buy.off) btn.insertAdjacentHTML('afterbegin', linkMarkSvg(t.metal2, 34, 11));
+  btn.append(buy.label);
+  btn.disabled = buy.off;
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    try {
+      await api.buyVault(it.id);
+      state.vaultMsg = null;
+    } catch (e) {
+      if (handleApiError(e)) return;
+      state.vaultMsg = e.message;
+    }
+    await loadVault();
+  });
+  body.append(btn);
+  return tile;
+}
+
+// the ledger line for a link movement
+function ledgerLine(entry) {
+  const why = String(entry.why || '');
+  let what = why.toUpperCase();
+  if (why.startsWith('chain ')) what = 'CHAIN FORGED';
+  else if (why.startsWith('perfect chain')) what = 'PERFECT CHAIN';
+  else if (why.startsWith('trial')) what = 'WEEKLY TRIAL';
+  else if (why.startsWith('vault ')) {
+    const it = VAULT_ITEMS.find((x) => x.id === why.slice(6));
+    what = 'THE VAULT · ' + (it ? it.name.toUpperCase() : why.slice(6).toUpperCase());
+  }
+  const row = el('div');
+  row.append(el('span', 'd', fmtTs(entry.at).toUpperCase()), el('span', null, what), el('span', 'lead'));
+  const amt = el('span', 'amt', (entry.d > 0 ? '+' : '') + entry.d);
+  amt.style.color = entry.d > 0 ? 'var(--ok)' : 'var(--bad)';
+  row.append(amt);
+  return row;
 }
 
 function renderVault() {
   const root = $('view-vault');
   root.replaceChildren();
-
-  const card = el('div', 'card vault-shop');
-  const head = el('div', 'card-head');
-  head.append(el('h2', null, 'The Vault'));
-  head.append(el('span', 'muted', 'the System trades in links'));
-  card.append(head);
-
   const v = state.vault;
 
-  // balance hero: the currency greets you, no scrolling required
-  const bal = el('div', 'vault-balance');
-  const count = el('span', 'vb-count mono', v ? String(v.links) : '--');
-  bal.append(count);
-  bal.append(el('span', 'vb-label mono', v && v.links === 1 ? 'LINK' : 'LINKS'));
-  bal.append(el('span', 'vb-sub', 'Forge chains with your partner to earn links. Rescue chains pay double, perfect windows pay a bonus.'));
-  card.append(bal);
+  // ---- the wallet: the balance greets you, no scrolling required ----
+  const wallet = mkWin();
+  activeDecor(wallet, true);
+  wallet.append(winHead(`[ The Vault // ${monthDayShort(state.date)} ]`, 'THE SYSTEM TRADES IN LINKS'));
+  const grid = el('div', 'vault-wallet');
+  const left = el('div');
+  left.style.cssText = 'display:flex;flex-direction:column;gap:10px;border-left:1px solid var(--line-1);padding-left:22px';
+  left.append(el('span', 'lbl', 'Your links'));
+  const bal = el('div');
+  bal.style.cssText = 'display:flex;align-items:center;gap:18px';
+  const count = el('span', 'mono gold-num count-glow', v ? String(v.links) : '--');
+  count.style.cssText = 'font-size:64px;font-weight:700;line-height:1;letter-spacing:-.02em';
+  const mark = el('div');
+  mark.style.cssText = 'display:flex;flex-direction:column;gap:6px';
+  mark.innerHTML = linkMarkSvg('#E8B64A', 84, 27) + `<span class="mono" style="font-size:11px;letter-spacing:.22em;color:#C9A45E">${v && v.links === 1 ? 'LINK' : 'LINKS'}</span>`;
+  bal.append(count, mark);
+  left.append(bal);
+  left.append(el('span', 'lede', 'Forge chains with your partner to earn links. Rescue chains pay double, perfect windows pay a bonus. Links never touch the ranking, they only break ties.'));
+  grid.append(left);
+  const right = el('div');
+  right.style.cssText = 'display:flex;flex-direction:column;gap:12px;border-left:1px solid var(--line-1);padding-left:22px';
+  right.append(el('span', 'lbl', 'Ledger'));
+  const led = el('div', 'led');
+  if (v && v.log && v.log.length) for (const entry of v.log) led.append(ledgerLine(entry));
+  else led.append(el('span', 'win-sub', v ? 'NO LINKS HAVE MOVED YET. FORGE A CHAIN.' : 'OPENING THE VAULT...'));
+  right.append(led);
+  grid.append(right);
+  wallet.append(grid);
+  root.append(wallet);
 
-  if (!v) {
-    card.append(el('p', 'lede', 'Opening the Vault...'));
-    root.append(card);
-    return;
-  }
+  if (!v) return;
 
-  const grid = el('div', 'vault-grid');
-  for (const it of VAULT_ITEMS) {
-    const item = el('div', 'vault-item');
-    const icon = el('img', 'vi-icon');
-    icon.src = it.icon; icon.alt = '';
-    item.append(icon);
-    item.append(el('div', 'vi-name', it.name));
-    item.append(el('div', 'vi-desc', it.desc));
-    const foot = el('div', 'vi-foot');
-    const st = vaultItemState(v, it.id);
-    if (st) foot.append(el('span', 'pill is-rest', st));
-    const btn = el('button', 'vault-buy mono', `${v.prices[it.id]} links`);
-    btn.disabled = v.links < v.prices[it.id] || (it.id === 'shield' && v.shield) || (it.id === 'voucher' && v.voucher);
-    btn.addEventListener('click', async () => {
-      btn.disabled = true;
-      try {
-        await api.buyVault(it.id);
-        state.vaultMsg = null;
-      } catch (e) {
-        if (handleApiError(e)) return;
-        state.vaultMsg = e.message;
-      }
-      await loadVault();
-    });
-    foot.append(btn);
-    item.append(foot);
-    item.append(el('span', 'vi-sheen'));
-    grid.append(item);
+  // ---- the exchange ----
+  const shop = mkWin();
+  shop.append(winHead('[ Exchange ]', 'FOUR ARTIFACTS · THE SAME RARITY LADDER AS THE PODIUM'));
+  const tiles = el('div', 'vault-grid');
+  VAULT_ITEMS.forEach((it, i) => tiles.append(vaultTile(it, v, i)));
+  shop.append(tiles);
+  if (state.vaultMsg) {
+    const s = el('div', 'status err', `[ THE SYSTEM REFUSED: ${state.vaultMsg} ]`);
+    s.style.marginTop = '20px';
+    shop.append(s);
   }
-  card.append(grid);
-  if (state.vaultMsg) card.append(notice(state.vaultMsg, 'error'));
-  card.append(el('p', 'fine', 'Links come from the Chain Protocol: both ends of a chain close the day, both earn. The chain map lives on the Group tab.'));
-  root.append(card);
+  root.append(shop);
+
+  // ---- what you hold, and how links are forged ----
+  const two = el('div', 'row2');
+  const held = mkWin('grow');
+  held.append(winHead('[ Held artifacts ]', 'YOUR INVENTORY'));
+  const rows = [
+    ['frame', v.frameUntil > Date.now()
+      ? [`Gold frame on the leaderboard · ${Math.max(1, Math.ceil((v.frameUntil - Date.now()) / 86400000))} days left · a repurchase extends it by 7`, { text: 'ACTIVE UNTIL ' + fmtTs(v.frameUntil).toUpperCase(), cls: 'gold' }]
+      : ['Buy one and the leaderboard shows it for seven days', { text: 'NONE', cls: 'none' }]],
+    ['shield', v.shield
+      ? ['Fires at 03:30 on the first empty day · the digest reports it', { text: 'ARMED', cls: 'ok' }]
+      : ['Nothing absorbs a miss right now', { text: 'NONE', cls: 'none' }]],
+    ['voucher', v.voucher
+      ? ['One rest day over the weekly quota, once this month', { text: 'HELD', cls: 'ok' }]
+      : v.voucherUsedMonth === localMonth()
+        ? ['Used this month · one per calendar month', { text: 'NEXT MONTH', cls: 'amber' }]
+        : ['One rest day over the weekly quota, once a month', { text: 'NONE', cls: 'none' }]],
+    ['score', v.scoreBonus
+      ? [`${v.scoreBonus} bought this month · counted in the ranking already`, { text: `+${v.scoreBonus} THIS MONTH`, cls: 'gold' }]
+      : [v.links < v.prices.score ? `None bought this month · ${v.prices.score - v.links} more links to the first one` : 'None bought this month · affordable now', { text: 'NONE', cls: 'none' }]],
+  ];
+  for (const [id, [sub, chip]] of rows) {
+    const it = VAULT_ITEMS.find((x) => x.id === id);
+    const t = METAL[it.tier];
+    const r = el('div', 'held');
+    r.style.cssText = `--metal: ${t.metal}; --metal-2: ${t.metal2};`;
+    const g = el('div', 'g');
+    g.innerHTML = glyphSvg(id);
+    const tx = el('div', 't');
+    tx.append(el('span', 'n', it.name), el('span', 's', sub));
+    r.append(g, tx, el('span', 'stchip ' + chip.cls, chip.text));
+    held.append(r);
+  }
+  two.append(held);
+
+  const rules = mkWin('side wide');
+  rules.append(winHead('[ How links are forged ]'));
+  // launch defaults of the Chain Protocol (the worker's LINKS table)
+  for (const [what, amt] of [['CHAIN FORGED · BOTH ENDS CLOSE', '+1'], ['RESCUE CHAIN · WAKE A SLEEPER', '+2'], ['PERFECT CHAIN · WHOLE WINDOW', '+2'], ['WEEKLY TRIAL · NEW BEST', '+1'], ['WEEKLY TRIAL · TOP IMPROVER', '+5']]) {
+    const r = el('div', 'rule');
+    r.append(el('span', 'dia'), el('span', null, what), el('span', 'lead'), el('span', 'amt', amt));
+    rules.append(r);
+  }
+  const foot = el('span', 'win-sub', 'EQUAL DONE DAYS: MORE LINKS WINS THE TIE');
+  foot.style.cssText = 'display:block;margin-top:14px';
+  rules.append(foot);
+  two.append(rules);
+  root.append(two);
 }
 
 async function loadVault() {
   try {
     state.vault = await api.getVault();
     if (state.tab === 'vault') renderVault();
+    if (state.tab === 'today') renderToday();
   } catch { /* the shop window is optional */ }
 }
 
-// ---------- rest days ----------
+// ---------- rest days: the permit calendar ----------
 // Up to 2 days a week without losing the streak. Scheduled strictly before
 // the day starts (group time), so today cannot be toggled: this guards
 // against "forgot to play, I will file a rest day in the evening".
+// Three weeks (the backend's horizon), one row per week, every cell carries
+// its state, the quota reads at the row's end. A click asks the System to
+// confirm in a NOTIFICATION box before anything is sent.
+
+const REST_QUOTA_PER_WEEK = 2;  // mirrors the worker's constant
+const REST_HORIZON_DAYS = 21;   // the worker refuses dates further ahead
+
+let restPending = null; // { date, on } awaiting the accept
 
 async function loadRest() {
   try {
@@ -971,54 +1312,161 @@ async function loadRest() {
   } catch { /* not critical */ }
 }
 
-function renderRestCard() {
-  const card = el('div', 'card rest-card');
-  const head = el('div', 'card-head');
-  head.append(el('h2', null, 'Rest days'));
-  head.append(el('span', 'muted', 'up to 2 per week, streak survives'));
-  card.append(head);
-  card.append(el('p', 'lede', 'Know you cannot play on a day? Schedule it in advance and your streak will pass right over it. Days must be set before they start, today cannot be changed.'));
+const CELL_MARKS = {
+  done: `<svg class="m" viewBox="0 0 10 10" aria-hidden="true"><path d="M1.6 5.3 L4 7.6 L8.5 2.5" fill="none" stroke="#4CC38A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  miss: `<svg class="m" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 2 L8 8 M8 2 L2 8" fill="none" stroke="#E5484D" stroke-width="1.8" stroke-linecap="round"/></svg>`,
+  rest: `<svg class="m" viewBox="0 0 10 10" aria-hidden="true"><path d="M6.5 1.2 A4 4 0 1 0 9 6.6 A3 3 0 1 1 6.5 1.2 Z" fill="#FFFFFF"/></svg>`,
+  today: `<svg class="m" viewBox="0 0 10 10" aria-hidden="true"><polygon points="5,1 9,5 5,9 1,5" style="fill: var(--accent)"/></svg>`,
+  pend: `<svg class="m" viewBox="0 0 10 10" aria-hidden="true"><polygon points="5,1 9,5 5,9 1,5" fill="none" style="stroke: var(--accent)" stroke-width="1.4"/></svg>`,
+};
 
-  const row = el('div', 'rest-days');
-  for (let i = 1; i <= 10; i++) {
-    const d = new Date();
-    d.setDate(d.getDate() + i);
-    const pad = (n) => String(n).padStart(2, '0');
-    const iso = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-    const label = d.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric' });
-    const on = state.restDates.includes(iso);
-    const chip = el('button', 'rest-chip' + (on ? ' on' : ''), label);
-    chip.title = iso + (on ? ' - scheduled rest day, click to cancel' : ' - click to schedule a rest day');
-    chip.addEventListener('click', async () => {
-      chip.disabled = true;
-      try {
-        const res = await api.postRest(iso, !on);
-        state.restDates = res.dates || [];
-        state.restError = null;
-      } catch (e) {
-        if (handleApiError(e)) return;
-        state.restError = e.message;
+function renderRestWindow() {
+  const win = mkWin();
+  win.append(winHead('[ Rest days ]', 'CLICK A DAY · 3 WEEKS AHEAD'));
+
+  const today = state.date;
+  const me = state.group && state.group.players.find((p) => p.userId === state.user.uid);
+  const restSet = new Set(state.restDates);
+  const horizon = addDays(today, REST_HORIZON_DAYS);
+  const t0 = new Date(today + 'T12:00:00');
+  const monday = addDays(today, -((t0.getDay() + 6) % 7));
+  const wdL = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+  const weekLabels = ['THIS WEEK', 'NEXT WEEK'];
+
+  const cal = el('div', 'cal3');
+  cal.style.marginTop = '14px';
+  for (let w = 0; w < 3; w++) {
+    const row = el('div', 'cal-row');
+    const start = addDays(monday, w * 7);
+    row.append(el('span', 'wk', weekLabels[w] || monthDayShort(start).toUpperCase()));
+    let used = 0;
+    for (let i = 0; i < 7; i++) {
+      const date = addDays(start, i);
+      const rec = me && me.byDate[date];
+      const isRest = restSet.has(date);
+      let st = 'open';
+      if (date < today) {
+        if (rec && rec.done) st = 'done';
+        else if (isRest) st = 'rest';
+        else if (rec && rec.completedRuns > 0) st = 'part';
+        else if (me && me.joinedDate && date < me.joinedDate) st = 'lock';
+        else st = 'miss';
+      } else if (date === today) {
+        st = rec && rec.done ? 'done' : isRest ? 'rest' : 'today';
+      } else if (isRest) st = 'rest';
+      else if (restPending && restPending.date === date) st = 'pend';
+      else if (date > horizon) st = 'lock';
+      if (st === 'rest') used++;
+
+      const clickable = date > today && (st === 'open' || st === 'rest' || st === 'pend');
+      const cell = el(clickable ? 'button' : 'span', 'cell ' + st);
+      if (clickable) {
+        cell.type = 'button';
+        cell.title = st === 'rest' ? `${date}: scheduled rest day, click to cancel` : `${date}: click to schedule a rest day`;
+        cell.addEventListener('click', () => {
+          restPending = { date, on: st !== 'rest' };
+          state.restError = null;
+          renderToday();
+        });
+      } else {
+        cell.title = `${date}: ${st === 'today' ? 'today is locked' : st}`;
       }
-      renderToday();
-    });
-    row.append(chip);
+      if (CELL_MARKS[st]) cell.insertAdjacentHTML('afterbegin', CELL_MARKS[st]);
+      cell.append(el('span', 'wd', wdL[i]), el('span', 'dn', String(Number(date.slice(-2)))));
+      row.append(cell);
+    }
+    row.append(el('span', 'q' + (used >= REST_QUOTA_PER_WEEK ? ' full' : ''), `[${used}/${REST_QUOTA_PER_WEEK}]`));
+    cal.append(row);
   }
-  card.append(row);
-  if (state.restError) card.append(el('p', 'notice error', state.restError));
-  return card;
+  win.append(cal);
+
+  // the rules and the current situation, one legend
+  const legend = el('span', 'legend');
+  legend.style.cssText = 'display:block;margin-top:14px';
+  const lines = [`<b>${REST_QUOTA_PER_WEEK} PER WEEK</b> · THE STREAK PASSES OVER A REST DAY · SET IT BEFORE THE DAY STARTS · TODAY IS LOCKED`];
+  const bits = [];
+  const upcoming = state.restDates.filter((d) => d > today).sort();
+  if (upcoming.length) bits.push(upcoming.map((d) => monthDayShort(d).toUpperCase()).join(', ') + ' SCHEDULED');
+  if (restPending) bits.push(monthDayShort(restPending.date).toUpperCase() + (restPending.on ? ' PENDING' : ' CANCEL PENDING'));
+  const v = state.vault;
+  if (v) {
+    if (v.shield) bits.push('SHIELD ARMED');
+    if (v.voucher) bits.push('VOUCHER HELD: ONE MORE DAY THIS MONTH');
+    else if (v.voucherUsedMonth === localMonth()) bits.push('VOUCHER USED THIS MONTH');
+  }
+  if (bits.length) lines.push(bits.map(esc).join(' · '));
+  legend.innerHTML = lines.join('<br>');
+  win.append(legend);
+
+  if (restPending) win.append(restNotification());
+  else if (state.restError) {
+    const box = el('div', 'notif err');
+    box.style.marginTop = '14px';
+    const nh = el('div', 'nh');
+    nh.append(el('span', 'ic', '!'), el('span', 'ttl', 'Refused'));
+    box.append(nh);
+    box.append(el('p', null, `[ ${state.restError} ]`));
+    const acts = el('div', 'acts');
+    const ok = el('button', 'btn sm ghost', 'Understood');
+    ok.type = 'button';
+    ok.addEventListener('click', () => { state.restError = null; renderToday(); });
+    acts.append(ok);
+    box.append(acts);
+    win.append(box);
+  }
+  return win;
 }
+
+// the System asks before a rest permit is filed or withdrawn
+function restNotification() {
+  const { date, on } = restPending;
+  const box = el('div', 'notif');
+  box.style.marginTop = '14px';
+  const nh = el('div', 'nh');
+  nh.append(el('span', 'ic', '!'), el('span', 'ttl', 'Notification'));
+  box.append(nh);
+  const p = el('p');
+  p.innerHTML = on
+    ? `[ Rest permit: <b>${esc(longDay(date))}</b>. The streak passes over this day. It must be set before the day starts, and it can be cancelled until then. ]`
+    : `[ Withdraw the rest permit for <b>${esc(longDay(date))}</b>? The day goes back to a normal quest day. ]`;
+  box.append(p);
+  const acts = el('div', 'acts');
+  const ok = el('button', 'btn sm', 'Accept');
+  ok.type = 'button';
+  ok.addEventListener('click', async () => {
+    ok.disabled = true;
+    try {
+      const res = await api.postRest(date, on);
+      state.restDates = res.dates || [];
+      state.restError = null;
+    } catch (e) {
+      if (handleApiError(e)) return;
+      state.restError = e.message;
+    }
+    restPending = null;
+    renderToday();
+  });
+  const no = el('button', 'btn sm ghost', 'Reject');
+  no.type = 'button';
+  no.addEventListener('click', () => { restPending = null; renderToday(); });
+  acts.append(ok, no);
+  box.append(acts);
+  return box;
+}
+
+// ---------- the System's kit: atoms shared by every screen ----------
 
 // The day gauge: a holographic System dial. A slow tick ring and a counter-
 // rotating inner dashed circle frame a gradient arc with a comet tip; the
 // percentage is holographic metal. Everything glows via layered strokes,
 // never CSS filters (a filter on an svg child rasterizes a visible square
-// over the translucent card).
+// over the translucent window).
 function progressRing(p) {
   const size = 200, stroke = 10, r = 78, c = 2 * Math.PI * r;
   const pct = Math.round(p.percent * 100);
   const grad = p.done ? 'rg-done' : 'rg-live';
   const deg = Math.min(360, p.percent * 360);
-  const wrap = el('div', 'ring-wrap');
+  const wrap = el('div', 'ring-wrap' + (p.done ? ' done' : ''));
   wrap.innerHTML = `
     <svg viewBox="0 0 ${size} ${size}" class="ring ${p.done ? 'is-done' : ''}${p.percent <= 0 ? ' rg-zero' : ''}">
       <defs>
@@ -1029,8 +1477,8 @@ function progressRing(p) {
           <stop offset="0" stop-color="#F5DFA6"/><stop offset="1" stop-color="#E8B64A"/>
         </linearGradient>
       </defs>
-      <circle cx="100" cy="100" r="94" class="rg-dial"/>
-      <circle cx="100" cy="100" r="63" class="rg-inner"/>
+      <circle cx="100" cy="100" r="95" class="rg-dial"/>
+      <circle cx="100" cy="100" r="62" class="rg-inner"/>
       <circle cx="100" cy="100" r="${r}" class="rg-track" stroke-width="${stroke}" fill="none"/>
       <g class="rg-turn">
         <circle cx="100" cy="100" r="${r}" class="rg-halo" stroke-width="24" fill="none"
@@ -1041,20 +1489,178 @@ function progressRing(p) {
                 stroke-dasharray="${c}" stroke-dashoffset="${c * (1 - p.percent)}" stroke-linecap="round"/>
       </g>
       <g class="rg-tip-rot" style="transform: rotate(${deg}deg)">
-        <circle cx="100" cy="${100 - r}" r="8" class="rg-tip-halo"/>
+        <circle cx="100" cy="${100 - r}" r="9" class="rg-tip-halo"/>
         <circle cx="100" cy="${100 - r}" r="3.4" class="rg-tip"/>
       </g>
     </svg>
-    <div class="ring-label"><b class="mono rg-pct">${pct}%</b><span>today</span></div>`;
+    <div class="ring-label"><b class="rg-pct">${pct}%</b><span>${p.done ? 'SECURED' : 'TODAY'}</span></div>`;
   return wrap;
 }
 
-function statBlock(label, value, hint) {
+// a readout block: label, big mono value, a hint underneath
+function statBlock(label, value, hint, cls = '') {
   const b = el('div', 'stat');
-  b.append(el('span', 'stat-label', label));
-  b.append(el('span', 'stat-value mono', value));
-  if (hint) b.append(el('span', 'stat-hint', hint));
+  b.append(el('span', 'lbl', label));
+  b.append(el('span', 'v' + (cls ? ' ' + cls : ''), value));
+  if (hint) b.append(el('span', 'h', hint));
   return b;
+}
+
+// the rarity ladder: the podium's places and the Vault's artifacts share it
+const METAL = {
+  gold: { metal: '#E8B64A', metal2: '#FFF0C2', aura: 'rgba(139, 124, 255, 0.75)', rank: 'S' },
+  silver: { metal: '#C3CAD6', metal2: '#FFFFFF', aura: 'rgba(79, 195, 255, 0.45)', rank: 'A' },
+  bronze: { metal: '#B88A57', metal2: '#F2D3A6', aura: 'rgba(232, 182, 74, 0.35)', rank: 'B' },
+  steel: { metal: '#8A97A8', metal2: '#D7DEE8', aura: 'transparent', rank: 'C' },
+};
+const METALS = ['gold', 'silver', 'bronze'];
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+}
+
+function mkWin(cls = '') {
+  return el('div', 'win' + (cls ? ' ' + cls : ''));
+}
+
+function winHead(label, sub, opts = {}) {
+  const h = el('div', 'win-head');
+  h.append(el('span', 'win-label' + (opts.gold ? ' gold' : ''), label));
+  if (sub != null) h.append(el('span', 'win-sub' + (opts.gold ? ' gold' : ''), sub));
+  return h;
+}
+
+// the active window's light: a blurred ribbon, its sharp line, the scan line
+function activeDecor(win, gold = false) {
+  win.classList.add('active');
+  if (gold) win.classList.add('gold');
+  win.append(el('span', 'ribbon'), el('span', 'ribbon-line'), el('span', 'scan'));
+}
+
+// a quest line under a window label: the System announcing the quest
+function questLine(text) {
+  const q = el('span', 'quest-line', text);
+  q.style.cssText = 'display:block;margin-top:8px';
+  return q;
+}
+
+// the diamond rank plate, the ARISE ranking mark. Metal plates pulse.
+function svgPlate(n, kind = 'plain') {
+  const d = '17,2 32,17 17,32 2,17';
+  const dIn = '17,7 27,17 17,27 7,17';
+  const m = METAL[kind];
+  let inner;
+  if (m) {
+    inner = `<polygon class="halo" points="${d}" fill="none" stroke="${m.metal}" stroke-width="4"/>`
+      + `<polygon points="${d}" fill="${m.metal}" fill-opacity=".16" stroke="${m.metal}" stroke-width="1.4"/>`
+      + `<polygon points="${dIn}" fill="none" stroke="${m.metal}" stroke-width=".8" stroke-opacity=".45"/>`
+      + `<text x="17" y="21.3" text-anchor="middle" fill="${m.metal2}">${esc(n)}</text>`;
+  } else if (kind === 'me' || kind === 'accent') {
+    inner = (kind === 'me' ? `<polygon class="halo" points="${d}" fill="none" style="stroke: var(--accent)" stroke-width="4"/>` : '')
+      + `<polygon points="${d}" style="fill: var(--accent); stroke: var(--accent)" fill-opacity=".14" stroke-width="1.4"/>`
+      + `<polygon points="${dIn}" fill="none" style="stroke: var(--accent)" stroke-width=".8" stroke-opacity=".45"/>`
+      + `<text x="17" y="21.3" text-anchor="middle" fill="#FFFFFF">${esc(n)}</text>`;
+  } else if (kind === 'red' || kind === 'warn') {
+    const col = kind === 'red' ? 'var(--bad)' : 'var(--warn)';
+    inner = `<polygon points="${d}" style="fill: ${col}; stroke: ${col}" fill-opacity=".12" stroke-opacity=".85" stroke-width="1.2"/>`
+      + `<text x="17" y="21.3" text-anchor="middle" style="fill: ${col}">${esc(n)}</text>`;
+  } else {
+    inner = `<polygon points="${d}" fill="none" style="stroke: var(--line-1)" stroke-width="1.2"/>`
+      + `<text x="17" y="21.3" text-anchor="middle" style="fill: var(--text-2)">${esc(n)}</text>`;
+  }
+  const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  s.setAttribute('class', 'plate');
+  s.setAttribute('viewBox', '0 0 34 34');
+  s.setAttribute('aria-hidden', 'true');
+  s.innerHTML = inner;
+  return s;
+}
+
+const checkSvg = (color = '#4CC38A') => `<svg viewBox="0 0 10 10" width="9" height="9" aria-hidden="true"><path d="M1.6 5.3 L4 7.6 L8.5 2.5" fill="none" stroke="${color}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
+// a quest checkbox: true = checked, false = open, null = dashed (nothing recorded)
+function qbox(on) {
+  const s = el('span', 'qb' + (on ? ' on' : on === null ? ' off' : ''));
+  if (on) s.innerHTML = checkSvg();
+  return s;
+}
+
+// the site's chain glyph (three stadium rings, two twists): the link mark
+function linkMarkSvg(color, w = 62, h = 20) {
+  return `<svg viewBox="0 0 62 20" style="width: ${w}px; height: ${h}px; display: block;" aria-hidden="true">`
+    + `<g fill="none" stroke="${color}" stroke-width="2.1"><rect x="2" y="5.4" width="16" height="9.2" rx="4.6"/><rect x="23" y="5.4" width="16" height="9.2" rx="4.6"/><rect x="44" y="5.4" width="16" height="9.2" rx="4.6"/></g>`
+    + `<g fill="${color}"><path d="M15.9 4.8 C19 7.1 22 7.1 25.1 4.8 L25.1 15.2 C22 12.9 19 12.9 15.9 15.2 Z"/><path d="M36.9 4.8 C40 7.1 43 7.1 46.1 4.8 L46.1 15.2 C43 12.9 40 12.9 36.9 15.2 Z"/></g></svg>`;
+}
+
+function avatarImg(p, cls = 'av sq') {
+  const img = el('img', cls);
+  img.src = (p && p.avatar) || avatarFallback(p && p.userId);
+  img.alt = '';
+  safeAvatar(img, p && p.userId);
+  return img;
+}
+
+// a chamfered portrait tile; with a metal it gets the rarity edge
+function avatarTile(p, metal = null) {
+  const img = avatarImg(p);
+  if (!metal) return img;
+  const t = el('span', 'tile');
+  t.style.setProperty('--tm', METAL[metal].metal);
+  t.append(img);
+  return t;
+}
+
+// Today as a quest checkbox: checked DONE, an open box with the goal and a
+// thin progress bar, a dashed box when nothing is recorded
+function todayQuestCell(t, rest) {
+  const cell = el('div', 'today-cell');
+  if (t && t.done) {
+    const q = el('span', 'qrow ok');
+    q.append(qbox(true), 'DONE');
+    cell.append(q);
+  } else if (rest) {
+    const q = el('span', 'qrow');
+    q.append(qbox(false), 'REST');
+    cell.append(q);
+  } else if (t && t.requiredRuns) {
+    const pct = Math.min(100, Math.round((t.completedRuns / t.requiredRuns) * 100));
+    const q = el('span', 'qrow');
+    q.append(qbox(false), `${t.completedRuns}/${t.requiredRuns}`);
+    const bar = el('span', 'qbar');
+    const fill = el('i');
+    fill.style.width = pct + '%';
+    bar.append(fill);
+    cell.append(q, bar);
+  } else {
+    const q = el('span', 'qrow none');
+    q.append(qbox(null), '--');
+    cell.append(q);
+  }
+  return cell;
+}
+
+// time left until the local midnight, the gate of the day
+function gateLine() {
+  const now = new Date();
+  const mid = new Date(now);
+  mid.setHours(24, 0, 0, 0);
+  const mins = Math.max(0, Math.round((mid - now) / 60000));
+  return `GATE CLOSES AT MIDNIGHT · ${Math.floor(mins / 60)}H ${String(mins % 60).padStart(2, '0')}M LEFT`;
+}
+
+function addDays(dateStr, n) {
+  const d = new Date(dateStr + 'T12:00:00');
+  d.setDate(d.getDate() + n);
+  return localDate(d);
+}
+
+// "Tue Sep 15"
+function longDay(d) {
+  return new Date(d + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+function fmtTs(ts) {
+  return new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
 function notice(text, kind = '') {
@@ -1243,13 +1849,16 @@ function startCelebration(test = false) {
 
 // Clickable share-code chip: a click copies it, the label flashes a confirmation.
 function codeChip(code) {
-  const chip = el('button', 'code-chip mono', code);
+  const chip = el('button', 'code');
+  chip.type = 'button';
   chip.title = 'Click to copy';
+  const txt = el('span', 'txt', code);
+  const cp = el('span', 'cp', 'COPY');
+  chip.append(txt, cp);
   chip.addEventListener('click', async () => {
     const ok = await copyText(code);
-    const prev = chip.textContent;
-    chip.textContent = ok ? 'copied!' : code;
-    if (ok) setTimeout(() => { chip.textContent = prev; }, 1200);
+    cp.textContent = ok ? 'COPIED' : 'COPY';
+    if (ok) setTimeout(() => { cp.textContent = 'COPY'; }, 1200);
   });
   return chip;
 }
@@ -1346,101 +1955,85 @@ export function renderGroup() {
   // history view: a past month, frozen results; the live blocks are hidden
   const isHistory = g.month !== localMonth();
   const doneOf = (pl) => (pl.doneDays != null ? pl.doneDays : Object.values(pl.byDate).filter((r) => r.done).length);
+  const requiredRuns = state.playlist && state.playlist.scenarios ? state.playlist.scenarios.reduce((n, s) => n + (s.requiredRuns || 0), 0) : 0;
 
   if (isHistory) {
-    // slim banner instead of the live hero band
-    const bar = el('div', 'history-bar');
-    bar.append(el('span', null, `${monthName(g.month)}: final results.`));
-    const back = el('button', 'month-back', 'Back to this month');
+    // slim banner instead of the live readout
+    const bar = mkWin('history-bar');
+    bar.style.padding = '18px 28px';
+    bar.append(el('span', 'win-label', `[ ${monthName(g.month)} // final results ]`));
+    const back = el('button', 'btn ghost', 'Back to this month');
     back.addEventListener('click', () => gotoMonth(localMonth()));
     bar.append(back);
     root.append(bar);
   } else {
-    // group pulse: the day's key numbers in a single strip
+    // the group readout: the day's key numbers in one active window
     const doneCnt = g.players.filter((p) => p.doneToday).length;
     const restCnt = g.players.filter((p) => p.restToday).length;
     const runsToday = g.players.reduce((a, p) => a + ((p.todayRuns && p.todayRuns.completedRuns) || 0), 0);
     const topStreak = [...g.players].sort((a, b) => b.streak - a.streak)[0];
-    const hero = el('div', 'group-hero');
-    const tile = (label, value, hint) => {
-      const t = el('div', 'hero-tile');
-      t.append(el('span', 'stat-label', label));
-      t.append(el('span', 'hero-value mono', value));
-      if (hint) t.append(el('span', 'stat-hint', hint));
-      return t;
-    };
-    hero.append(tile('Checked in today', `${doneCnt} / ${g.players.length}`));
-    hero.append(tile('Runs today', String(runsToday)));
-    if (topStreak && topStreak.streak > 0) hero.append(tile('Top streak', `${topStreak.streak}d`, topStreak.displayName));
-    if (restCnt) hero.append(tile('On rest today', String(restCnt)));
-    root.append(hero);
+    const open = g.players.filter((p) => !p.doneToday && !p.restToday).map((p) => p.displayName);
+    const readout = mkWin();
+    activeDecor(readout);
+    readout.append(winHead(`[ Group // ${monthDayShort(today)} ]`, gateLine()));
+    const grid = el('div', 'readout');
+    const openLine = open.length
+      ? `${open.slice(0, 3).join(', ')}${open.length > 3 ? ` and ${open.length - 3} more` : ''} still open${restCnt ? ` · ${restCnt} on rest` : ''}`
+      : (restCnt ? `everyone is in or on rest · ${restCnt} on rest` : 'everyone checked in');
+    grid.append(statBlock('Checked in today', `${doneCnt} / ${g.players.length}`, openLine, 'grad-num'));
+    grid.append(statBlock('Runs today', String(runsToday), requiredRuns ? `${requiredRuns} per player closes the day` : 'across the group', 'grad-num'));
+    if (topStreak && topStreak.streak > 0) {
+      const since = topStreak.lastDone ? addDays(topStreak.lastDone, -(topStreak.streak - 1)) : null;
+      grid.append(statBlock('Top streak', `${topStreak.streak}d`, `${topStreak.displayName}${since ? ', since ' + monthDayShort(since) : ''}`, 'gold'));
+    } else {
+      grid.append(statBlock('Top streak', '-', 'nobody holds a streak yet'));
+    }
+    readout.append(grid);
+    root.append(readout);
   }
 
-  // streak podium: top 3 DISTINCT streak values with big avatars in frames
-  // from the OPERATOR pack. Players tied on the same streak share the pedestal
-  // (per Pasha, 2026-09-01). A streak is an honor, not a shame: no red board.
-  // Current month only: a streak is a now-thing, history months do not have one.
+  // streak podium: top 3 DISTINCT streak values as hunter cards. Players tied
+  // on the same streak share the place and fan out like a hand of cards, the
+  // longest holder in front (per Pasha, 2026-09-01 and 2026-09-11). A streak
+  // is an honor, not a shame: no red board. Current month only.
   const active = g.players.filter((p) => p.streak > 0);
   const podiumValues = [...new Set(active.map((p) => p.streak))].sort((a, b) => b - a).slice(0, 3);
   const podiumGroups = podiumValues.map((v) => active.filter((p) => p.streak === v)
-    .sort((a, b) => a.missedDays - b.missedDays || a.displayName.localeCompare(b.displayName)));
+    .sort((a, b) => a.missedDays - b.missedDays || (a.lastDone || '').localeCompare(b.lastDone || '') || a.displayName.localeCompare(b.displayName)));
   if (!isHistory && podiumGroups.length) {
-    const pod = el('div', 'card podium-card');
-    const ph = el('div', 'card-head');
-    ph.append(el('h2', null, 'Streak podium'));
-    ph.append(el('span', 'muted', 'longest active streaks'));
-    pod.append(ph);
-    const stage = el('div', 'podium');
-    const metals = ['gold', 'silver', 'bronze'];
+    const pod = mkWin();
+    pod.style.overflow = 'hidden';
+    pod.append(winHead('[ Streak podium ]', 'LONGEST ACTIVE STREAKS'));
+    const stage = el('div', 'podium-stage');
+    const sizes = [
+      { w: 210, h: 304, ped: 120, num: 54, slot: 280 },
+      { w: 172, h: 250, ped: 84, num: 40, slot: 236 },
+      { w: 150, h: 218, ped: 56, num: 32, slot: 236 },
+    ];
     // the classic order: second on the left, first in the center, third on the right
     const displayOrder = [1, 0, 2].filter((i) => i < podiumGroups.length);
     for (const i of displayOrder) {
       const grp = podiumGroups[i];
       const shown = grp.slice(0, 4); // a wider tie collapses into "+N"
-      const slot = el('div', `podium-slot place-${i + 1}`);
-
-      // the ceremony stage: light beam and ritual ring project behind the
-      // frames, the champion additionally stands on a floor sigil
-      const stagebox = el('div', 'podium-stage');
-      stagebox.append(el('span', 'podium-beam'));
-      const ring = el('img', 'podium-ring');
-      ring.src = `assets/ornament-ring-${metals[i]}.svg`; ring.alt = '';
-      stagebox.append(ring);
-      if (i === 0) {
-        const sigil = el('img', 'podium-sigil');
-        sigil.src = 'assets/sigil-base-gold.svg'; sigil.alt = '';
-        stagebox.append(sigil);
-        stagebox.append(el('span', 'podium-sparks'));
-      }
-      const frames = el('div', 'podium-frames' + (shown.length > 1 ? ' multi' : ''));
-      for (const p of shown) {
-        const frame = el('div', 'podium-frame');
-        frame.style.backgroundImage = `url('assets/frame-${metals[i]}.svg')`;
-        const img = el('img', 'podium-avatar');
-        img.src = p.avatar || avatarFallback(p.userId);
-        img.alt = '';
-        safeAvatar(img, p.userId);
-        frame.append(img);
-        frames.append(frame);
-      }
-      stagebox.append(frames);
-      slot.append(stagebox);
-
-      const names = shown.map((p) => p.displayName).join(', ') + (grp.length > shown.length ? ` +${grp.length - shown.length}` : '');
-      slot.append(el('div', 'podium-name' + (shown.length > 1 ? ' multi' : ''), names));
-      const st = el('div', 'podium-streak mono');
-      const fl = el('img', 'podium-flame');
-      fl.src = 'assets/flame.svg';
-      fl.alt = '';
-      st.append(fl, `${podiumValues[i]}d`);
-      slot.append(st);
-
-      // the pedestal face carries the rank numeral and an etched ornament
-      const ped = el('div', 'podium-pedestal');
-      const etch = el('span', 'ped-etch');
-      etch.style.backgroundImage = `url('assets/pedestal-etch-${metals[i]}.svg')`;
-      ped.append(el('span', 'ped-rank mono', ['01', '02', '03'][i]));
-      ped.append(etch);
+      const sz = sizes[i];
+      const metal = METALS[i];
+      const slot = el('div', 'podium-slot');
+      slot.style.cssText = `width: ${sz.slot}px; --metal: ${METAL[metal].metal};`;
+      const cards = shown.map((p, k) => ({
+        metal, w: sz.w, h: sz.h, avatar: p.avatar || avatarFallback(p.userId), uid: p.userId, name: p.displayName,
+        days: `${podiumValues[i]}d`, rev: k % 2 === 1,
+        tier: p.lastDone ? 'SINCE ' + monthDayShort(addDays(p.lastDone, -(p.streak - 1))).toUpperCase() : 'ACTIVE',
+      }));
+      const holder = el('div');
+      holder.innerHTML = cards.length > 1 ? podiumFan(cards, sz.w, sz.h) : podiumCard(cards[0]);
+      holder.querySelectorAll('img.portrait').forEach((img) => safeAvatar(img, img.dataset.uid));
+      slot.append(holder.firstElementChild);
+      const ped = el('div', 'ped');
+      ped.style.height = sz.ped + 'px';
+      const num = el('span', 'ped-num', ['01', '02', '03'][i]);
+      num.style.fontSize = sz.num + 'px';
+      ped.append(num);
+      if (grp.length > shown.length) ped.append(el('span', 'ped-more', `+${grp.length - shown.length}`));
       slot.append(ped);
       stage.append(slot);
     }
@@ -1448,92 +2041,127 @@ export function renderGroup() {
     root.append(pod);
   }
 
-  // leaderboard: ranked by days completed this month (the worker sorts)
-  const lb = el('div', 'card');
-  const lbHead = el('div', 'card-head');
-  lbHead.append(el('h2', null, 'Most days completed'));
-  lbHead.append(el('span', 'muted', isHistory ? 'final standings' : 'the prize ranking'));
+  // ---- the leaderboard: ranked by days completed this month (the worker sorts) ----
+  const lb = mkWin('lb');
+  lb.insertAdjacentHTML('afterbegin', '<svg class="lb-rail" viewBox="0 0 1000 8" preserveAspectRatio="none" aria-hidden="true"><line class="glow" x1="0" y1="4" x2="1000" y2="4"/><line class="base" x1="0" y1="4" x2="1000" y2="4"/><rect class="cap" x="0" y="2.5" width="46" height="3"/><rect class="cap" x="954" y="2.5" width="46" height="3"/><line class="run" x1="0" y1="4" x2="1000" y2="4"/></svg>');
+  const lbHead = el('div', 'lb-head');
+  const title = el('div', 'lb-title');
+  title.innerHTML = '<svg class="lb-ico" viewBox="0 0 26 26" aria-hidden="true"><circle cx="13" cy="13" r="11.5" fill="none" style="stroke: var(--accent)" stroke-width="1.4"/><polygon points="13,6.5 19.5,13 13,19.5 6.5,13" style="fill: var(--accent)" fill-opacity=".9"/></svg>';
+  const box = el('span', 'lb-box');
+  box.append(el('span', 'win-label', '[ Most days completed ]'));
+  title.append(box);
+  lbHead.append(title);
+  const dayN = Number(today.slice(-2));
+  lbHead.append(el('span', 'win-sub', isHistory ? `FINAL STANDINGS · ${monthName(g.month).toUpperCase()}` : `THE PRIZE RANKING · ${monthName(g.month).split(' ')[0].toUpperCase()} · DAY ${dayN} OF ${days.length}`));
   lb.append(lbHead);
 
-  const table = el('table', 'leaderboard');
-  const thead = el('thead');
-  const hr = el('tr');
-  const cols = isHistory
-    ? ['#', 'Player', 'Done', 'Missed']
-    : ['#', 'Player', 'Done', 'Missed', 'Streak', 'All time', 'Links', 'Today'];
-  cols.forEach((h) => hr.append(el('th', null, h)));
-  thead.append(hr);
-  table.append(thead);
-  const tbody = el('tbody');
+  const scroll = el('div', 'lb-scroll');
+  const cols = el('div', 'lb-cols' + (isHistory ? ' hist' : ''));
+  const colNames = isHistory ? ['#', 'Hunter', 'Done', 'Missed'] : ['#', 'Hunter', 'Done', 'Missed', 'Streak', 'All time', 'Links', 'Today'];
+  colNames.forEach((h, i) => cols.append(el('span', i >= 2 ? 'r' : '', h)));
+  scroll.append(cols);
+  const body = el('div', 'lb-body');
+  const topStreakValue = Math.max(0, ...g.players.map((p) => p.streak || 0));
+  const chainOf = (uid) => !isHistory && state.chains && state.chains.groups ? state.chains.groups.find((x) => x.members.some((m) => m.userId === uid)) : null;
   g.players.forEach((pl, i) => {
-    const medal = i === 0 ? ' rank-1' : i === 1 ? ' rank-2' : i === 2 ? ' rank-3' : '';
+    const isMe = pl.userId === state.user.uid;
     // the red zone: not a single fully completed day in all of history
-    const redzone = !isHistory && (pl.totalDone || 0) === 0 ? ' redzone' : '';
-    const tr = el('tr', (pl.userId === state.user.uid ? 'me' : '') + medal + redzone);
-    // rank: a holographic hex emblem for the top three, plain numeral below
-    const rankTd = el('td', 'rank mono');
-    if (i < 3) rankTd.append(rankEmblem(i + 1));
-    else rankTd.textContent = String(i + 1);
-    tr.append(rankTd);
-    // the cell stays a real table cell (flex on a td breaks row alignment),
-    // the flex line lives on an inner wrapper
-    const nameCell = el('td', 'player');
-    const wrap = el('span', 'player-wrap');
-    const img = el('img');
-    img.src = pl.avatar || avatarFallback(pl.userId);
-    img.width = 22; img.height = 22; img.alt = '';
-    if (pl.frame) img.className = 'honor-frame'; // an active Frame of Honor from the Vault
-    safeAvatar(img, pl.userId);
-    wrap.append(img, el('span', 'player-name', pl.displayName));
-    if (redzone) wrap.append(el('span', 'redzone-tag mono', '[NO RECORD]'));
-    nameCell.append(wrap);
-    tr.append(nameCell);
-    // stats live in chips, not raw text: each value is a small status cell
-    const chip = (cls, text) => { const td = el('td'); td.append(el('span', 'stat-chip mono ' + cls, text)); return td; };
+    const redzone = !isHistory && (pl.totalDone || 0) === 0;
+    const returned = !isHistory && pl.reinstatedOn && addDays(pl.reinstatedOn, 14) >= today;
+    const metal = i < 3 ? METALS[i] : null;
+    const kind = isMe ? 'me' : redzone ? 'red' : metal || 'plain';
+    const row = el('div', 'lb-row' + (isHistory ? ' hist' : '') + (isMe ? ' t-me' : metal ? ' t-' + METAL[metal].rank.toLowerCase() : '') + (redzone ? ' t-red' : returned ? ' t-ret' : ''));
+    row.append(svgPlate(String(i + 1), kind));
+
+    const hunter = el('div', 'hunter');
+    hunter.append(avatarTile(pl, pl.frame ? 'gold' : metal));
+    const who = el('div', 'who');
+    who.append(el('span', 'nm', pl.displayName));
+    const line = el('span', 'code-l');
+    const ch = chainOf(pl.userId);
+    if (redzone) line.innerHTML = `<span class="bad">NOT PAIRED · NO RECORD${pl.silentDays != null ? ` · SILENT ${pl.silentDays} DAYS` : ''}</span>`;
+    else if (ch) {
+      const partners = ch.members.filter((m) => m.userId !== pl.userId).map((m) => esc(m.displayName)).join(' + ');
+      const cls = threadClass(ch, null);
+      const st = cls === 'is-forged' ? '<span class="gold">FORGED</span>' : cls === 'is-waiting' ? '<span class="acc">WAITING</span>' : 'OPEN';
+      line.innerHTML = `LINK · ${partners} · ${st}${ch.perfect ? ' <span class="gold">· PERFECT</span>' : ''}`;
+    } else if (returned) line.textContent = `BACK SINCE ${monthDayShort(pl.reinstatedOn).toUpperCase()} · CHAINS AFTER A CLOSED DAY`;
+    else if (!isHistory) line.textContent = pl.streak > 0 ? `ON A ${pl.streak}-DAY STREAK` : 'NO CHAIN THIS WINDOW';
+    else line.textContent = `${doneOf(pl)} DAYS THAT MONTH`;
+    who.append(line);
+    hunter.append(who);
+    if (isMe) hunter.append(el('span', 'tag you', 'YOU'));
+    else if (redzone) hunter.append(el('span', 'tag red', 'NO RECORD'));
+    else if (returned) hunter.append(el('span', 'tag ret', 'RETURNED'));
+    hunter.append(el('span', 'lead'));
+    row.append(hunter);
+
+    // Done is the prize metric, so it alone gets the plate
     const doneN = doneOf(pl);
-    const doneTd = el('td');
-    const doneChip = el('span', 'stat-chip mono ' + (doneN > 0 ? 'sc-done' : 'sc-zero'), String(doneN));
+    const score = el('div', 'score');
+    const pill = el('span', 'pill' + (metal ? ' metal' : isMe ? ' me' : doneN > 0 ? '' : ' zero'));
+    if (metal) pill.style.cssText = `--metal: ${METAL[metal].metal}; --metal-2: ${METAL[metal].metal2};`;
+    pill.append(el('i'), String(doneN));
     if (pl.scoreBonus > 0) {
       // bought score points are public: a gold mark keeps the board honest
-      doneChip.append(el('sup', 'score-bought', '+' + pl.scoreBonus));
-      doneChip.title = `includes ${pl.scoreBonus} score point${pl.scoreBonus > 1 ? 's' : ''} from The Vault`;
+      pill.append(el('sup', 'score-bought', '+' + pl.scoreBonus));
+      pill.title = `includes ${pl.scoreBonus} score point${pl.scoreBonus > 1 ? 's' : ''} from The Vault`;
     }
-    doneTd.append(doneChip);
-    tr.append(doneTd);
-    tr.append(chip(pl.missedDays > 0 ? 'sc-miss' : 'sc-zero', String(pl.missedDays)));
+    score.append(pill);
+    row.append(score);
+    row.append(el('span', 'num' + (pl.missedDays > 0 ? ' bad' : ' mute'), String(pl.missedDays)));
     if (!isHistory) {
-      const stTd = el('td');
-      const stChip = el('span', 'stat-chip mono ' + (pl.streak >= 7 ? 'sc-hot' : pl.streak > 0 ? 'sc-streak' : 'sc-zero'));
-      if (pl.streak >= 3) {
-        const fl = el('img', 'row-flame');
-        fl.src = 'assets/flame.svg'; fl.alt = '';
-        stChip.append(fl);
-      }
-      stChip.append(pl.streak > 0 ? pl.streak + 'd' : '-');
-      stTd.append(stChip);
-      tr.append(stTd);
-      tr.append(chip('sc-dim', String(pl.totalDone != null ? pl.totalDone : doneN)));
-      tr.append(chip((pl.links || 0) > 0 ? 'sc-links' : 'sc-zero', String(pl.links || 0)));
+      row.append(el('span', 'num' + (pl.streak > 0 && pl.streak === topStreakValue ? ' gold' : pl.streak > 0 ? '' : ' mute'), pl.streak > 0 ? pl.streak + 'd' : '-'));
+      const allN = pl.totalDone != null ? pl.totalDone : doneN;
+      row.append(el('span', 'num' + (allN > 0 ? '' : ' mute'), String(allN)));
+      row.append(el('span', 'num' + ((pl.links || 0) > 0 ? ' acc' : ' mute'), String(pl.links || 0)));
       const t = pl.byDate[today];
-      const todayCell = el('td', 'mono');
-      if (!(t && t.done) && pl.restToday) {
-        todayCell.append(el('span', 'pill is-rest', 'rest'));
-      } else {
-        todayCell.append(el('span', 'pill ' + cellClass(t), t && t.done ? 'done' : t ? Math.round((t.completedRuns / t.requiredRuns) * 100) + '%' : '-'));
-      }
-      tr.append(todayCell);
+      row.append(todayQuestCell(t, !(t && t.done) && pl.restToday));
     }
-    tbody.append(tr);
+    body.append(row);
   });
-  table.append(tbody);
-  lb.append(table);
+  scroll.append(body);
+  lb.append(scroll);
+
+  // the Your-rank bar pinned to the window bottom
+  const meIdx = g.players.findIndex((p) => p.userId === state.user.uid);
+  if (!isHistory && meIdx >= 0) {
+    const me = g.players[meIdx];
+    const bar = el('div', 'lb-me');
+    const left = el('div');
+    left.style.cssText = 'display:flex;align-items:center;gap:12px';
+    left.append(svgPlate(String(meIdx + 1), 'me'));
+    const lbl = el('span', 'lbl', 'Your rank');
+    lbl.style.color = 'var(--text-0)';
+    left.append(lbl);
+    bar.append(left);
+    bar.append(el('span', 'mono', `${doneOf(me)} DONE · ${me.missedDays} MISSED`));
+    bar.append(el('span', 'lead'));
+    const third = g.players[2];
+    let gap;
+    if (meIdx < 3) gap = 'ON THE PODIUM';
+    else if (third) {
+      const behind = doneOf(third) - doneOf(me);
+      gap = behind > 0 ? `${behind} ${behind === 1 ? 'DAY' : 'DAYS'} BEHIND THE PODIUM` : 'TIED WITH THE PODIUM · LINKS DECIDE';
+    } else gap = '';
+    const gapEl = el('span', 'win-sub', gap);
+    gapEl.style.color = 'var(--text-1)';
+    bar.append(gapEl);
+    const left2 = days.length - dayN;
+    bar.append(el('span', 'win-sub sep', `MONTH CLOSES IN ${left2}D`));
+    const t = me.byDate[today];
+    const q = el('span', 'qrow sep' + (t && t.done ? ' ok' : ''));
+    q.append(qbox(!!(t && t.done)), t && t.done ? 'DONE TODAY' : me.restToday ? 'REST TODAY' : t && t.completedRuns ? `${t.completedRuns}/${t.requiredRuns} TODAY` : 'NOTHING YET TODAY');
+    bar.append(q);
+    lb.append(bar);
+  }
   root.append(lb);
 
-  // month calendar, one row per player
-  const cal = el('div', 'card');
-  const calHead = el('div', 'card-head');
+  // ---- month calendar, one row per player ----
+  const cal = mkWin();
+  const calHead = el('div', 'win-head');
   const titleWrap = el('div', 'cal-title');
-  titleWrap.append(el('h2', null, monthName(g.month)));
+  titleWrap.append(el('span', 'win-label', `[ ${monthName(g.month)} ]`));
   // quiet history navigation: small chevrons, nothing flashy (per Pasha)
   const nav = el('div', 'month-nav');
   const prevBtn = el('button', null, '‹');
@@ -1559,25 +2187,22 @@ export function renderGroup() {
 
   const grid = el('div', 'calendar');
   grid.style.setProperty('--days', String(days.length));
-
   const isMonday = (d) => new Date(d + 'T00:00:00Z').getUTCDay() === 1;
   grid.append(el('div', 'cal-corner'));
   for (const d of days) {
-    const h = el('div', 'cal-day-head' + (d === today ? ' is-today' : '') + (isMonday(d) ? ' wk' : ''), String(Number(d.slice(-2))));
-    grid.append(h);
+    grid.append(el('div', 'cal-day-head' + (d === today ? ' is-today' : '') + (isMonday(d) ? ' wk' : ''), String(Number(d.slice(-2)))));
   }
   for (const pl of g.players) {
     const restSet = new Set(pl.restDays || []);
-    const nameCell = el('div', 'cal-name' + (pl.userId === state.user.uid ? ' me' : ''), pl.displayName);
-    grid.append(nameCell);
+    grid.append(el('div', 'cal-name' + (pl.userId === state.user.uid ? ' me' : ''), pl.displayName));
     for (const d of days) {
       const rec = pl.byDate[d];
       let cls = cellClass(rec, d, today, pl.joinedDate);
-      let title = rec ? `${rec.completedRuns}/${rec.requiredRuns}` : 'nothing';
+      let tip = rec ? `${rec.completedRuns}/${rec.requiredRuns}` : 'nothing';
       // a rest day is visible both in the past and as a plan for the future
-      if (!(rec && rec.done) && restSet.has(d)) { cls = 'is-rest'; title = 'scheduled rest day'; }
+      if (!(rec && rec.done) && restSet.has(d)) { cls = 'is-rest'; tip = 'scheduled rest day'; }
       const cell = el('div', 'cal-cell ' + cls + (isMonday(d) ? ' wk' : ''));
-      cell.title = `${pl.displayName}, ${d}: ` + title;
+      cell.title = `${pl.displayName}, ${d}: ` + tip;
       grid.append(cell);
     }
   }
@@ -1589,56 +2214,103 @@ export function renderGroup() {
   }
 }
 
+// one hunter card of the podium (an HTML string; portraits carry data-uid for
+// the avatar fallback)
+function podiumCard({ w, h, metal, avatar, uid, name, days, tier, rev, style = '', cls = '' }) {
+  const m = METAL[metal];
+  const rank = m.rank;
+  const c = 16;
+  const outer = `${c},1 ${w - c},1 ${w - 1},${c} ${w - 1},${h - c} ${w - c},${h - 1} ${c},${h - 1} 1,${h - c} 1,${c}`;
+  const i = 6;
+  const inner = `${c + i},${i} ${w - c - i},${i} ${w - i},${c + i} ${w - i},${h - c - i} ${w - c - i},${h - i} ${c + i},${h - i} ${i},${h - c - i} ${i},${c + i}`;
+  const bandH = Math.round(h * 0.27);
+  const portTop = 8, portX = 8, portW = w - 16, portH = h - 16 - bandH + 6;
+  const plateW = Math.round(w * 0.24), plateH = Math.round(plateW * 0.9);
+  const gid = `${rank}-${w}`;
+  const orn = (x, y, sx, sy) => `<path d="M${x} ${y + 14 * sy} L${x} ${y + 4 * sy} L${x + 4 * sx} ${y} L${x + 14 * sx} ${y}" fill="none" stroke="${m.metal}" stroke-width="1.5" stroke-opacity=".95"/>`;
+  return `<div class="hcard ${cls}" style="--metal: ${m.metal}; --metal-2: ${m.metal2}; --aura: ${m.aura}; width: ${w}px; height: ${h}px; ${style}">
+  <div class="aura"></div>
+  <svg class="runes${rev ? ' rev' : ''}" viewBox="0 0 100 100" aria-hidden="true">
+    <circle cx="50" cy="50" r="46" fill="none" stroke="${m.metal}" stroke-width=".6" stroke-dasharray="1.4 3.2"/>
+    <circle cx="50" cy="50" r="41" fill="none" stroke="${m.metal}" stroke-width="1.6" stroke-dasharray="0.6 9.6" stroke-opacity=".8"/>
+    <circle cx="50" cy="50" r="36.5" fill="none" stroke="${m.metal}" stroke-width=".4" stroke-opacity=".6"/>
+    <g fill="${m.metal}" fill-opacity=".85"><rect x="48.6" y="2.6" width="2.8" height="2.8" transform="rotate(45 50 4)"/><rect x="48.6" y="94.6" width="2.8" height="2.8" transform="rotate(45 50 96)"/><rect x="2.6" y="48.6" width="2.8" height="2.8" transform="rotate(45 4 50)"/><rect x="94.6" y="48.6" width="2.8" height="2.8" transform="rotate(45 96 50)"/></g>
+  </svg>
+  <svg class="frame-bg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
+    <defs>
+      <linearGradient id="steel-${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1B212B"/><stop offset="1" stop-color="#0E1218"/></linearGradient>
+      <linearGradient id="met-${gid}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${m.metal2}"/><stop offset=".5" stop-color="${m.metal}"/><stop offset="1" stop-color="${m.metal2}"/></linearGradient>
+    </defs>
+    <polygon points="${outer}" fill="url(#steel-${gid})"/>
+  </svg>
+  <img class="portrait" src="${esc(avatar)}" data-uid="${esc(uid)}" alt="" style="left: ${portX}px; top: ${portTop}px; width: ${portW}px; height: ${portH}px;">
+  <div class="fade" style="left: ${portX}px; top: ${portTop}px; width: ${portW}px; height: ${portH}px;"></div>
+  <div class="sheen" style="left: ${portX}px; top: ${portTop}px; width: ${portW}px; height: ${portH}px;"></div>
+  <div class="band" style="height: ${bandH}px;">
+    <span class="nm" style="font-size: ${Math.round(w * 0.092)}px;">${esc(name)}</span>
+    <div class="row"><span class="days" style="font-size: ${Math.round(w * 0.13)}px;">${esc(days)}</span><span class="tier">STREAK</span></div>
+    <span class="tier">${esc(tier)}</span>
+  </div>
+  <svg class="frame" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
+    <polygon points="${outer}" fill="none" stroke="url(#met-${gid})" stroke-width="2"/>
+    <polygon points="${inner}" fill="none" stroke="${m.metal}" stroke-width="1" stroke-opacity=".38"/>
+    <polygon class="energy" points="${outer}" fill="none" stroke="${m.metal2}" stroke-width="2.6"/>
+    ${orn(5, 5 + c, 1, 1)}${orn(w - 5, 5 + c, -1, 1)}${orn(5, h - 5 - c, 1, -1)}${orn(w - 5, h - 5 - c, -1, -1)}
+  </svg>
+  <div class="rtag">${rank}-RANK</div>
+  <div class="plate-h" style="top: ${-Math.round(plateH / 2) + 2}px; width: ${plateW}px; height: ${plateH}px; font-size: ${Math.round(plateH * 0.62)}px;">
+    <svg viewBox="0 0 40 36" aria-hidden="true"><polygon points="20,1 38,10 38,26 20,35 2,26 2,10" fill="#0E1218" stroke="url(#met-${gid})" stroke-width="2"/><polygon points="20,6 33.5,12.5 33.5,23.5 20,30 6.5,23.5 6.5,12.5" fill="none" stroke="${m.metal}" stroke-opacity=".45" stroke-width="1"/></svg>
+    <span>${rank}</span>
+  </div>
+  <svg class="wing" viewBox="0 0 60 20" style="top: ${-Math.round(plateH / 2) + 6}px; left: 50%; width: ${plateW + 56}px; height: auto; transform: translateX(-50%);" aria-hidden="true"><path d="M2 14 C10 4 18 4 24 8" fill="none" stroke="${m.metal}" stroke-width="1.6" stroke-linecap="round"/><path d="M4 18 C11 10 17 10 22 13" fill="none" stroke="${m.metal}" stroke-width="1.2" stroke-opacity=".6" stroke-linecap="round"/><path d="M58 14 C50 4 42 4 36 8" fill="none" stroke="${m.metal}" stroke-width="1.6" stroke-linecap="round"/><path d="M56 18 C49 10 43 10 38 13" fill="none" stroke="${m.metal}" stroke-width="1.2" stroke-opacity=".6" stroke-linecap="round"/></svg>
+</div>`;
+}
+
+// a fanned hand of cards for a shared place: cards[0] holds the place the
+// longest and sits in front (rightmost, upright-most)
+function podiumFan(cards, w, h) {
+  const n = cards.length;
+  const spread = { 2: [-8, 8], 3: [-13, 0, 13], 4: [-16, -5, 5, 16] }[n] || [0];
+  const step = Math.round(w * 0.36);
+  const width = w + (n - 1) * step;
+  const inner = cards.slice().reverse().map((cfg, idx) => {
+    const j = n - 1 - idx; // j = 0 front
+    const rot = spread[n - 1 - j];
+    const dx = Math.round((n - 1 - j - (n - 1) / 2) * step);
+    return podiumCard({ ...cfg, w, h, rev: j % 2 === 1, cls: j === 0 ? 'front' : 'back', style: `transform: translateX(calc(-50% + ${dx}px)) rotate(${rot}deg); z-index: ${10 - j};` });
+  }).join('');
+  return `<div class="fan" style="width: ${width}px; height: ${h + 14}px; max-width: 100%;">${inner}</div>`;
+}
+
 // The chain map: the current half-week window's pairs, their day states and
-// the window arc. Full constellation treatment arrives with the redesign;
-// this renders in the current card language.
+// the window arc, a grid with 1px seams (not cards).
 function renderChainMap(ch) {
-  const card = el('div', 'card');
-  const head = el('div', 'card-head');
-  head.append(el('h2', null, 'Chain map'));
-  head.append(el('span', 'muted', `${monthDayShort(ch.start)} - ${monthDayShort(ch.last)} · your links: ${ch.myLinks}`));
-  card.append(head);
-
-  const wrap = el('div', 'chain-wrap');
+  const win = mkWin();
+  win.append(winHead('[ Chain map ]', `${monthDayShort(ch.start).toUpperCase()} - ${monthDayShort(ch.last).toUpperCase()} · YOUR LINKS: ${ch.myLinks}`));
+  const cm = el('div', 'cm');
   for (const g of ch.groups) {
-    const todayState = (g.days.find((d) => d.state === 'waiting' || d.state === 'open') || g.days[g.days.length - 1]).state;
-    const forgedCount = g.days.filter((d) => d.state === 'forged').length;
-    const node = el('div', 'chain-node' + (g.perfect ? ' perfect' : ''));
+    const cls = threadClass(g, null);
+    const forged = cls === 'is-forged';
+    const node = el('div');
     node.title = g.members.map((m) => m.displayName).join(' x ');
-
-    const connCls = threadClass(g, todayState);
-    const honored = connCls === 'is-forged' || g.perfect;
     const row = el('div', 'chain-avatars');
     g.members.forEach((m, i) => {
-      if (i > 0) row.append(chainConnector(connCls));
-      const av = el('span', 'chain-av');
-      // a forged chain earns the guild frame for the day (visual only)
-      if (honored) {
-        const fr = el('img', 'chain-honor');
-        fr.src = 'assets/frame-gold.svg'; fr.alt = '';
-        av.append(fr);
-      }
-      const img = el('img');
-      img.src = m.avatar || avatarFallback(m.userId);
-      img.width = 30; img.height = 30; img.alt = '';
-      safeAvatar(img, m.userId);
-      av.append(img);
-      row.append(av);
+      if (i > 0) row.append(chainConnector(cls + (g.members.length > 2 ? ' short' : '')));
+      row.append(avatarTile(m, forged ? 'gold' : null));
     });
+    const forgedCount = g.days.filter((d) => d.state === 'forged').length;
+    const st = el('span', 'win-sub state' + (forged ? ' forged' : cls === 'is-waiting' ? ' waiting' : ''),
+      (forged ? 'FORGED' : cls === 'is-waiting' ? 'WAITING' : 'OPEN') + (forgedCount > 1 ? ` · x${forgedCount}` : '') + (g.perfect ? ' · PERFECT' : '') + (g.rescue ? ' · RESCUE' : ''));
+    row.append(st);
     node.append(row);
-
-    const names = el('div', 'chain-names');
-    names.textContent = g.members.map((m) => m.displayName).join(' x ');
-    node.append(names);
-
-    const dots = el('div', 'chain-days');
-    for (const d of g.days) dots.append(el('span', 'chain-day is-' + d.state));
-    if (g.rescue) dots.append(el('span', 'chain-rescue mono', 'x2'));
+    node.append(el('span', 'names', g.members.map((m) => m.displayName).join(' x ')));
+    const dots = el('div', 'dots');
+    for (const d of g.days) dots.append(el('span', 'dot-sq ' + d.state));
     node.append(dots);
-    wrap.append(node);
+    cm.append(node);
   }
-  card.append(wrap);
-  return card;
+  win.append(cm);
+  return win;
 }
 
 // A real chain in profile (per Rauder's reference): stadium rings joined by
@@ -1658,19 +2330,6 @@ function chainConnector(stateCls) {
     + '<circle class="link-spark" cx="0" cy="10" r="2.1" fill="currentColor"/>'
     + '</svg>';
   return s;
-}
-
-// Holographic rank emblem: a double hex outline with a glassy core and a
-// glowing numeral. Metal tint and sheen come from the rb-N class.
-function rankEmblem(place) {
-  const b = el('span', 'rank-badge rb-' + place);
-  b.innerHTML = '<svg viewBox="0 0 32 32" aria-hidden="true">'
-    + '<polygon class="hex-core" points="16,2.6 27.6,9.3 27.6,22.7 16,29.4 4.4,22.7 4.4,9.3"/>'
-    + '<polygon class="hex-rim" points="16,1.2 28.8,8.6 28.8,23.4 16,30.8 3.2,23.4 3.2,8.6"/>'
-    + '<polygon class="hex-inner" points="16,5.6 24.9,10.8 24.9,21.2 16,26.4 7.1,21.2 7.1,10.8"/>'
-    + '</svg>';
-  b.append(el('span', 'rank-num', String(place)));
-  return b;
 }
 
 function threadClass(g, todayState) {
@@ -1699,42 +2358,56 @@ function monthName(m) {
   return new Date(Number(y), Number(mm) - 1, 1).toLocaleString('en', { month: 'long', year: 'numeric' });
 }
 
-// ---------- Admin tab ----------
+// ---------- Admin: the operator console ----------
 
 // Roster Protocol: who the System removed for two silent weeks, who is on
 // final notice today, and the Reinstate button (the way back runs through
-// Rauder by design: the player asks, Rauder clicks).
-function renderRosterCard() {
-  const card = el('div', 'card roster-card');
-  const head = el('div', 'card-head');
-  head.append(el('h2', null, 'Roster'));
-  head.append(el('span', 'muted', 'two silent weeks = final notice, one more day = removed'));
-  card.append(head);
-  const body = el('div', 'roster-body');
-  body.append(el('p', 'muted', 'Loading the roster...'));
-  card.append(body);
+// Rauder by design: the player asks, Rauder clicks). The two sweeps the
+// 03:30 cron runs on its own sit at the bottom for the day one cannot wait.
+function renderRosterWindow() {
+  const win = mkWin();
+  win.append(winHead('[ Roster protocol ]', 'IDLE 5 DAYS = NOT PAIRED · 14 = FINAL NOTICE · 15 = REMOVED'));
+  const body = el('div');
+  body.append(el('div', 'quest-line', '[ Loading the roster... ]'));
+  win.append(body);
 
-  const fmt = (d) => (d ? new Date(d + 'T12:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }) : 'never');
+  const fmt = (d) => (d ? monthDayShort(d) : 'never');
   const load = async () => {
     try {
       const r = await api.getRoster();
       body.replaceChildren();
+      const sec = (text, cls) => { const s = el('div', 'sec' + (cls ? ' ' + cls : '')); s.append(el('span', null, text), el('i')); return s; };
       if (r.onNotice.length) {
-        body.append(el('div', 'roster-title mono', '[ ON FINAL NOTICE ]'));
-        for (const p of r.onNotice) {
-          const row = el('div', 'roster-row');
-          row.append(el('span', 'roster-name', p.displayName));
-          row.append(el('span', 'muted', `${p.silentDays} silent days · notice ${p.servedOn ? 'served ' + fmt(p.servedOn) : 'due tomorrow 03:30'}`));
+        body.append(sec(`[ ON FINAL NOTICE · ${r.onNotice.length} ]`, 'red'));
+        r.onNotice.forEach((p, i) => {
+          const row = el('div', 'ro');
+          row.append(svgPlate(String(i + 1).padStart(2, '0'), 'red'));
+          const img = avatarImg(p);
+          img.style.opacity = '.7';
+          row.append(img);
+          const t = el('div');
+          t.append(el('div', 'n', p.displayName));
+          t.append(el('div', 's', `${p.silentDays} silent days · ${p.servedOn ? 'notice served ' + fmt(p.servedOn) + ' · removed at the next sweep if still silent' : 'notice due tomorrow 03:30'}`));
+          row.append(t);
+          row.append(el('span', 'stchip ' + (p.servedOn ? 'bad' : 'amber'), p.servedOn ? 'DM SENT' : 'DUE'));
           body.append(row);
-        }
+        });
       }
-      body.append(el('div', 'roster-title mono', '[ REMOVED ]'));
-      if (!r.removed.length) body.append(el('p', 'muted', 'Nobody. The roster is whole.'));
+      body.append(sec(`[ REMOVED · ${r.removed.length} ]`));
+      if (!r.removed.length) body.append(el('div', 'quest-line', '[ Nobody. The roster is whole. ]'));
       for (const p of r.removed) {
-        const row = el('div', 'roster-row');
-        row.append(el('span', 'roster-name', p.displayName));
-        row.append(el('span', 'muted', `removed ${fmt(p.inactiveSince)} · last closed day ${fmt(p.lastDone)}`));
-        const btn = el('button', 'ghost', 'Reinstate');
+        const row = el('div', 'ro');
+        row.append(svgPlate('--', 'plain'));
+        const img = avatarImg(p);
+        img.style.opacity = '.5';
+        row.append(img);
+        const t = el('div');
+        const n = el('div', 'n', p.displayName);
+        n.style.color = 'var(--text-1)';
+        t.append(n);
+        t.append(el('div', 's', `removed ${fmt(p.inactiveSince)} · last closed day ${fmt(p.lastDone)} · off the leaderboard and the chain pool`));
+        row.append(t);
+        const btn = el('button', 'btn ghost', 'Reinstate');
         btn.addEventListener('click', async () => {
           btn.disabled = true;
           try {
@@ -1748,51 +2421,99 @@ function renderRosterCard() {
         row.append(btn);
         body.append(row);
       }
-      body.append(el('p', 'fine', 'A reinstated player gets a fresh two weeks from today. They return to the leaderboard at once and to the chains at the next window after their first closed day.'));
+      const fine = el('span', 'fine', 'A reinstated player gets a fresh two weeks from today. They return to the leaderboard at once and to the chains at the next window after their first closed day.');
+      fine.style.cssText = 'display:block;margin-top:14px';
+      body.append(fine);
     } catch (e) {
       if (handleApiError(e)) return;
       body.replaceChildren(notice(e.message, 'error'));
     }
   };
   load();
-  return card;
+
+  const sweeps = el('div', 'sweeps');
+  const status = el('span', 'fine', 'The 03:30 cron does both on its own. Manual runs are for the day you cannot wait.');
+  const sweepBtn = (label, fn, report) => {
+    const b = el('button', 'btn ghost', label);
+    b.addEventListener('click', async () => {
+      b.disabled = true;
+      try {
+        const res = await fn();
+        status.textContent = report(res);
+        await load();
+      } catch (e) {
+        if (handleApiError(e)) return;
+        status.textContent = 'Failed: ' + e.message;
+      }
+      b.disabled = false;
+    });
+    return b;
+  };
+  sweeps.append(
+    sweepBtn('Run roster sweep', api.runRosterSweep, (res) => `Roster sweep done: ${(res.noticed || []).length || 0} notices, ${(res.removed || []).length || 0} removed.`),
+    sweepBtn('Run shield sweep', api.runShieldSweep, (res) => `Shield sweep done: ${res.absorbed || 0} ${res.absorbed === 1 ? 'miss' : 'misses'} absorbed.`),
+    status,
+  );
+  win.append(sweeps);
+  return win;
 }
 
 function renderAdmin() {
   const root = $('view-admin');
   root.replaceChildren();
 
-  const card = el('div', 'card');
-  card.append(el('h2', null, 'Playlist of the week'));
-  card.append(el('p', 'lede', 'Import the playlist JSON from FPSAimTrainer\\Saved\\SaveGames\\Playlists. Scenario names and play counts are read from it, nothing is typed by hand.'));
+  // ---- the playlist of the week: drop the JSON, name the week, publish ----
+  const win = mkWin();
+  activeDecor(win);
+  win.append(winHead('[ Playlist of the week ]', 'OPERATOR CONSOLE · NOTHING IS TYPED BY HAND'));
+  win.append(questLine('[ Drop the playlist JSON from FPSAimTrainer\\Saved\\SaveGames\\Playlists. Scenario names and play counts are read from it. ]'));
+  const grid = el('div', 'admin-grid');
+  const left = el('div', 'admin-left');
 
-  const row = el('div', 'admin-row');
+  const drop = el('label', 'drop');
   const input = el('input');
   input.type = 'file';
   input.accept = '.json,application/json';
-  row.append(input);
+  drop.append(input);
+  drop.insertAdjacentHTML('beforeend', '<svg viewBox="0 0 30 30" aria-hidden="true"><polygon points="6,3 19,3 24,8 24,27 6,27" fill="none" style="stroke: var(--accent)" stroke-width="1.4" stroke-linejoin="round"/><path d="M19 3 L19 8 L24 8" fill="none" style="stroke: var(--accent)" stroke-width="1.4" stroke-linejoin="round"/><path d="M15 12 L15 22 M11 18 L15 22 L19 18" fill="none" style="stroke: var(--accent)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>');
+  drop.append(el('span', 't', 'Drop the playlist JSON'));
+  const dropSub = el('span', 's', 'or click to pick it');
+  drop.append(dropSub);
+  left.append(drop);
 
-  const label = el('input', 'text-input');
+  const label = el('input', 'inp');
   label.type = 'text';
   label.placeholder = 'Week label, e.g. Week 1';
   label.value = (state.playlist && state.playlist.weekLabel) || '';
-  row.append(label);
+  left.append(label);
 
-  const save = el('button', 'primary', 'Publish to the group');
+  const actions = el('div');
+  actions.style.cssText = 'display:flex;align-items:center;gap:14px;flex-wrap:wrap';
+  const save = el('button', 'btn', 'Publish to the group');
   save.disabled = true;
-  row.append(save);
-  card.append(row);
+  actions.append(save, el('span', 'fine', state.playlist && state.playlist.weekLabel ? `Replaces ${state.playlist.weekLabel} at once. Everyone's Today switches to this list.` : 'Everyone\'s Today switches to this list at once.'));
+  left.append(actions);
+  grid.append(left);
 
-  const preview = el('div', 'preview');
-  card.append(preview);
-  const msg = el('p', 'notice');
+  const right = el('div');
+  const ph = el('div', 'win-head');
+  ph.style.marginBottom = '8px';
+  const previewLabel = el('span', 'lbl', 'Preview');
+  const previewSub = el('span', 'win-sub', 'NOTHING READ YET');
+  ph.append(previewLabel, previewSub);
+  right.append(ph);
+  const preview = el('div');
+  right.append(preview);
+  const msg = el('div', 'status');
+  msg.style.marginTop = '16px';
   msg.hidden = true;
-  card.append(msg);
+  right.append(msg);
+  grid.append(right);
+  win.append(grid);
 
   let parsed = null;
-
-  input.addEventListener('change', async () => {
-    const file = input.files[0];
+  const say = (text, cls) => { msg.textContent = text; msg.className = 'status ' + cls; msg.hidden = false; };
+  const readFile = async (file) => {
     if (!file) return;
     try {
       const json = JSON.parse(await file.text());
@@ -1804,16 +2525,26 @@ function renderAdmin() {
         scenarios: list.map((s) => ({ name: s.scenario_name, requiredRuns: Number(s.play_Count) || 1 })),
       };
       if (!label.value.trim()) label.value = parsed.weekLabel;
-      renderPreview(preview, parsed);
+      const runs = parsed.scenarios.reduce((n, s) => n + s.requiredRuns, 0);
+      dropSub.textContent = `${file.name} read · ${parsed.shareCode || 'no share code'} · ${parsed.scenarios.length} scenarios · ${runs} runs`;
+      previewLabel.textContent = `Preview · ${parsed.weekLabel}`;
+      previewSub.textContent = `${parsed.scenarios.length} SCENARIOS · ${runs} RUNS · ${parsed.shareCode ? 'SHARE CODE READ' : 'NO SHARE CODE IN THE FILE'}`;
+      renderPreview(preview, parsed, false);
       save.disabled = false;
-      msg.hidden = true;
+      say('[ File read. Nothing published yet. The list above is what the group will see. ]', 'ok');
     } catch (e) {
       parsed = null;
       save.disabled = true;
-      msg.textContent = 'Could not read that file: ' + e.message;
-      msg.className = 'notice error';
-      msg.hidden = false;
+      say('[ Could not read that file: ' + e.message + ' ]', 'err');
     }
+  };
+  input.addEventListener('change', () => readFile(input.files[0]));
+  drop.addEventListener('dragover', (ev) => { ev.preventDefault(); drop.classList.add('over'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+  drop.addEventListener('drop', (ev) => {
+    ev.preventDefault();
+    drop.classList.remove('over');
+    readFile(ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0]);
   });
 
   save.addEventListener('click', async () => {
@@ -1823,68 +2554,79 @@ function renderAdmin() {
     try {
       state.playlist = await api.setPlaylist(parsed);
       renderWeekLabel();
-      msg.textContent = 'Published. Everyone checks against this list now.';
-      msg.className = 'notice ok';
-      msg.hidden = false;
+      say('[ Published. Everyone checks against this list now. ]', 'ok');
       state.lastPostedRuns = -1; // requirements changed, recompute and repost
+      renderAdmin();
     } catch (e) {
-      msg.textContent = 'Failed: ' + e.message;
-      msg.className = 'notice error';
-      msg.hidden = false;
+      say('[ Failed: ' + e.message + ' ]', 'err');
       save.disabled = false;
     }
   });
+  root.append(win);
 
-  root.append(card);
+  // ---- what the group checks against right now, and the Discord window ----
+  const two = el('div', 'row2');
+  const cur = mkWin('grow');
+  if (state.playlist && state.playlist.scenarios && state.playlist.scenarios.length) {
+    const runs = state.playlist.scenarios.reduce((n, s) => n + s.requiredRuns, 0);
+    cur.append(winHead('[ Currently published ]', `${(state.playlist.weekLabel || '').toUpperCase()} · ${state.playlist.scenarios.length} SCENARIOS · ${runs} RUNS`));
+    const kv = el('div');
+    kv.style.cssText = 'display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px;margin:14px 0';
+    const pair = (k, v) => { const b = el('div', 'kv'); b.append(el('span', 'k', k), el('span', 'v', v)); return b; };
+    kv.append(pair('WEEK LABEL', state.playlist.weekLabel || '-'), pair('SHARE CODE', state.playlist.shareCode || '-'), pair('PUBLISHED', state.playlist.updatedAt ? new Date(state.playlist.updatedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'));
+    cur.append(kv);
+    renderPreview(cur, state.playlist, true);
+  } else {
+    cur.append(winHead('[ Currently published ]', 'NOTHING YET'));
+    cur.append(el('div', 'quest-line', '[ No playlist is published. The group waits. ]'));
+  }
+  two.append(cur);
 
   // manual digest: the same text the 18:00 cron sends
-  const dig = el('div', 'card');
-  dig.append(el('h2', null, 'Discord digest'));
-  dig.append(el('p', 'lede', 'Instant completion shouts and the daily 18:00 auto-digest are live. This button posts an extra digest right now, same text the evening one would send.'));
-  const dbtn = el('button', 'primary', 'Post digest now');
-  const dmsg = el('p', 'notice');
+  const dig = mkWin('side wide');
+  dig.style.cssText = 'display:flex;flex-direction:column;gap:16px';
+  dig.append(winHead('[ Discord ]', 'THE CHANNEL'));
+  const chips = el('div', 'chipline');
+  chips.append(el('span', 'stchip ok', 'COMPLETION SHOUTS · LIVE'), el('span', 'stchip ok', 'CHAIN CARDS · LIVE'));
+  dig.append(chips);
+  dig.append(el('span', 'lede', 'Instant completion shouts and the daily 18:00 auto-digest are live. This button posts an extra digest right now, the same text the evening one would send.'));
+  const dbtn = el('button', 'btn', 'Post digest now');
+  const dmsg = el('div', 'status');
   dmsg.hidden = true;
   dbtn.addEventListener('click', async () => {
     dbtn.disabled = true;
     try {
       await api.postDigest();
-      dmsg.textContent = 'Posted. Check the channel.';
-      dmsg.className = 'notice ok';
+      dmsg.textContent = '[ Posted. Check the channel. ]';
+      dmsg.className = 'status ok';
     } catch (e) {
-      dmsg.textContent = e.message;
-      dmsg.className = 'notice error';
+      dmsg.textContent = '[ ' + e.message + ' ]';
+      dmsg.className = 'status err';
     }
     dmsg.hidden = false;
     dbtn.disabled = false;
   });
-  dig.append(dbtn, dmsg);
-  root.append(dig);
+  const dact = el('div');
+  dact.append(dbtn);
+  dig.append(dact, dmsg);
+  two.append(dig);
+  root.append(two);
 
-  root.append(renderRosterCard());
-
-  if (state.playlist && state.playlist.scenarios) {
-    const cur = el('div', 'card');
-    const h = el('div', 'card-head');
-    h.append(el('h2', null, 'Currently published'));
-    h.append(el('span', 'muted mono', `${state.playlist.scenarios.reduce((n, s) => n + s.requiredRuns, 0)} runs`));
-    cur.append(h);
-    renderPreview(cur, state.playlist);
-    root.append(cur);
-  }
+  root.append(renderRosterWindow());
 }
 
-function renderPreview(container, playlist) {
-  const old = container.querySelector('.preview-list');
+// the playlist as quest goals: open boxes for a preview, checked for the
+// published one
+function renderPreview(container, playlist, published) {
+  const old = container.querySelector('.pl');
   if (old) old.remove();
-  const ul = el('ul', 'checklist preview-list');
+  const pl = el('div', 'pl');
   for (const s of playlist.scenarios) {
-    const li = el('li');
-    li.append(el('span', 'check'));
-    li.append(el('span', 'scen-name', s.name));
-    li.append(el('span', 'scen-count mono', 'x' + s.requiredRuns));
-    ul.append(li);
+    const row = el('div', 'pl-row');
+    row.append(qbox(!!published), el('span', 'n', s.name), el('span', 'lead'), el('span', 'x', 'x' + s.requiredRuns));
+    pl.append(row);
   }
-  container.append(ul);
+  container.append(pl);
 }
 
 boot();

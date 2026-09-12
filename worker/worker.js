@@ -1496,6 +1496,9 @@ async function handleApi(request, env, url, cors, ctx) {
     const [vault, linksDoc] = await Promise.all([getVault(env, user.uid), env.KOVA.get(`links:${user.uid}`, 'json')]);
     return json({
       links: (linksDoc && linksDoc.total) || 0,
+      // the last movements of the ledger, newest first: the wallet shows
+      // where links came from and where they went
+      log: ((linksDoc && linksDoc.log) || []).slice(-8).reverse(),
       prices: VAULT_PRICES,
       shield: !!vault.shield,
       voucher: !!vault.voucher,

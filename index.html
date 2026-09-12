@@ -4,133 +4,83 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>KOVA STREAK - daily aim training streak</title>
-  <meta name="theme-color" content="#08070C">
+  <meta name="theme-color" content="#0B0D12">
   <meta property="og:title" content="KOVA STREAK">
   <meta property="og:description" content="Group daily aim-training streak for KovaaK's. Play the week's playlist, the site checks you in by itself. Most days completed wins.">
   <meta property="og:type" content="website">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%237C6CF0'/><path d='M8.5 17.5l6 6 9-13' stroke='%23fff' stroke-width='3.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='%230B0D12'/><polygon points='16,3 29,16 16,29 3,16' fill='none' stroke='%238B7CFF' stroke-width='2.4'/><polygon points='16,10 22,16 16,22 10,16' fill='%238B7CFF'/></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-  <!-- The System's dimension: layered ambience behind every screen -->
-  <div class="dimension" aria-hidden="true">
-    <div class="nebula"></div>
-    <div class="nebula b"></div>
-    <div class="gridlines"></div>
-    <div class="stars"><div class="s1"></div><div class="s2"></div></div>
-    <div class="sigil">
-      <svg viewBox="0 0 980 980">
-        <g class="ring-a" fill="none" stroke="#7C6CF0" opacity="0.12">
-          <circle cx="490" cy="490" r="470" stroke-width="1"/>
-          <circle cx="490" cy="490" r="430" stroke-width="1" stroke-dasharray="4 14"/>
-          <circle cx="490" cy="490" r="360" stroke-width="18" opacity="0.35" stroke-dasharray="2 26"/>
-          <path d="M490 24 L502 58 L478 58 Z" fill="#7C6CF0" stroke="none"/>
-          <path d="M490 956 L502 922 L478 922 Z" fill="#7C6CF0" stroke="none"/>
-          <path d="M24 490 L58 478 L58 502 Z" fill="#7C6CF0" stroke="none"/>
-          <path d="M956 490 L922 478 L922 502 Z" fill="#7C6CF0" stroke="none"/>
-        </g>
-        <g class="ring-b" fill="none" opacity="0.15">
-          <circle cx="490" cy="490" r="300" stroke="#E8B64A" stroke-width="1"/>
-          <circle cx="490" cy="490" r="272" stroke="#E8B64A" stroke-width="1" stroke-dasharray="60 22 8 22"/>
-          <g stroke="#B7AEF7" stroke-width="2">
-            <path d="M490 178 v34"/><path d="M490 768 v34"/><path d="M178 490 h34"/><path d="M768 490 h34"/>
-            <path d="M279 279 l24 24"/><path d="M677 677 l24 24"/><path d="M701 279 l-24 24"/><path d="M303 677 l-24 24"/>
-          </g>
-        </g>
-      </svg>
-    </div>
-    <div class="consts">
-      <svg class="const c1" viewBox="0 0 200 260">
-        <g stroke="rgba(183,174,247,0.28)" stroke-width="1" fill="none">
-          <path d="M28 30 L74 66 L60 128 L112 158 L96 224"/>
-        </g>
-        <g fill="#B7AEF7">
-          <circle cx="28" cy="30" r="2.4"/><circle cx="74" cy="66" r="1.8"/>
-          <circle cx="60" cy="128" r="2.8"/><circle cx="112" cy="158" r="1.7"/>
-          <circle cx="96" cy="224" r="2.2"/>
-        </g>
-      </svg>
-      <svg class="const c2" viewBox="0 0 200 200">
-        <g stroke="rgba(183,174,247,0.25)" stroke-width="1" fill="none">
-          <path d="M30 150 L70 96 L128 108 L164 44"/>
-          <path d="M70 96 L60 40"/>
-        </g>
-        <g fill="#B7AEF7">
-          <circle cx="30" cy="150" r="2"/><circle cx="70" cy="96" r="2.7"/>
-          <circle cx="128" cy="108" r="1.8"/><circle cx="164" cy="44" r="2.3"/>
-          <circle cx="60" cy="40" r="1.6"/>
-        </g>
-      </svg>
-      <svg class="const c3" viewBox="0 0 220 240">
-        <g stroke="rgba(232,182,74,0.22)" stroke-width="1" fill="none">
-          <path d="M40 40 L110 70 L170 36 M110 70 L104 140 L48 190 M104 140 L172 178"/>
-        </g>
-        <g fill="#E8B64A">
-          <circle cx="40" cy="40" r="2"/><circle cx="110" cy="70" r="2.8"/>
-          <circle cx="170" cy="36" r="1.7"/><circle cx="104" cy="140" r="2.2"/>
-          <circle cx="48" cy="190" r="1.8"/><circle cx="172" cy="178" r="2.4"/>
-        </g>
-      </svg>
-      <svg class="const c4" viewBox="0 0 200 220">
-        <g stroke="rgba(183,174,247,0.26)" stroke-width="1" fill="none">
-          <path d="M36 180 L88 150 L92 88 L150 60 M92 88 L44 52"/>
-        </g>
-        <g fill="#B7AEF7">
-          <circle cx="36" cy="180" r="2.1"/><circle cx="88" cy="150" r="1.7"/>
-          <circle cx="92" cy="88" r="2.6"/><circle cx="150" cy="60" r="2.2"/>
-          <circle cx="44" cy="52" r="1.7"/>
-        </g>
-      </svg>
-    </div>
-    <div class="holo h1"><span class="holo-tab">[SYNC 98.7%]</span><span class="holo-line"></span></div>
-    <div class="holo h2"><span class="holo-tab">[LINK STABLE]</span><span class="holo-line"></span></div>
-    <div class="holo h3"><span class="holo-tab">[WATCHING]</span><span class="holo-line"></span></div>
-    <div class="grain"></div>
-    <div class="vignette"></div>
-  </div>
-
-  <header>
+  <header class="topbar">
     <div class="brand">
       <span class="brand-mark"></span>
       <h1>KOVA STREAK</h1>
       <span id="week-label" class="week-label"></span>
     </div>
+
+    <nav class="tabs" id="tabs" hidden>
+      <button class="tab-btn active" data-tab="today">Today</button>
+      <button class="tab-btn" data-tab="stats" id="stats-tab-btn" hidden>My stats</button>
+      <button class="tab-btn" data-tab="group">Group</button>
+      <button class="tab-btn tab-vault" data-tab="vault">Vault</button>
+      <button class="tab-btn" data-tab="admin" id="admin-tab-btn" hidden>Admin</button>
+    </nav>
+
     <div class="header-right">
       <div id="scan-state" class="scan-state" hidden>
         <span class="dot"></span><span id="scan-text">watching stats folder</span>
       </div>
       <div id="user-chip" class="user-chip" hidden>
-        <img id="user-avatar" alt="" width="24" height="24">
+        <img id="user-avatar" class="av sq" alt="" width="24" height="24">
         <span id="user-name"></span>
-        <button id="logout-btn" class="ghost">Log out</button>
+        <button id="logout-btn" class="link-btn">Log out</button>
       </div>
+      <span id="online-chip" class="online" hidden><i></i>SYSTEM ONLINE</span>
     </div>
   </header>
 
-  <nav class="tabs" id="tabs" hidden>
-    <button class="tab-btn active" data-tab="today">Today</button>
-    <button class="tab-btn" data-tab="stats" id="stats-tab-btn" hidden>My stats</button>
-    <button class="tab-btn" data-tab="group">Group</button>
-    <button class="tab-btn tab-vault" data-tab="vault">Vault</button>
-    <button class="tab-btn" data-tab="admin" id="admin-tab-btn" hidden>Admin</button>
-  </nav>
-
   <main>
+    <!-- The gate: the System's first notification, the one that makes a Player -->
     <section id="view-login" class="view active">
-      <div class="gate">
-        <div class="sys-eyebrow">[KOVA STREAK // GROUP TRAINING PROTOCOL]</div>
-        <h2>Show up every day.</h2>
-        <p class="lede">
-          Play this week's playlist, the site sees it in your KovaaK's stats folder
-          and checks you in by itself. No submit button. Ranking is most days
-          completed, never skill, so nobody loses for aiming worse.
-        </p>
-        <button id="login-btn" class="primary big">Sign in with Discord</button>
-        <p id="login-error" class="error" hidden></p>
-        <p class="fine">Check-ins happen in desktop Chrome or Edge on the PC where KovaaK's runs. From a phone you can still sign in and watch the group.</p>
+      <div class="gate-wrap">
+        <div class="ring-bg" aria-hidden="true">
+          <div class="glow"></div>
+          <svg viewBox="0 0 100 100">
+            <circle cx="50" cy="50" r="48" fill="none" stroke="currentColor" stroke-width=".35" stroke-dasharray="1 2.6"/>
+            <circle cx="50" cy="50" r="44" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="0.4 7.2" stroke-opacity=".8"/>
+            <g fill="currentColor" fill-opacity=".8"><rect x="48.9" y="1" width="2.2" height="2.2" transform="rotate(45 50 2.1)"/><rect x="48.9" y="96.8" width="2.2" height="2.2" transform="rotate(45 50 97.9)"/><rect x="1" y="48.9" width="2.2" height="2.2" transform="rotate(45 2.1 50)"/><rect x="96.8" y="48.9" width="2.2" height="2.2" transform="rotate(45 97.9 50)"/></g>
+          </svg>
+          <svg class="rev" viewBox="0 0 100 100">
+            <circle cx="50" cy="50" r="38" fill="none" stroke="currentColor" stroke-width=".3" stroke-opacity=".7"/>
+            <circle cx="50" cy="50" r="34" fill="none" stroke="currentColor" stroke-width=".9" stroke-dasharray="6 14" stroke-opacity=".5"/>
+          </svg>
+        </div>
+        <div class="gate-win">
+          <svg class="rail t" viewBox="0 0 1000 8" preserveAspectRatio="none" aria-hidden="true"><line class="glow" x1="0" y1="4" x2="1000" y2="4"/><line class="base" x1="0" y1="4" x2="1000" y2="4"/><rect class="cap" x="0" y="2.5" width="46" height="3"/><rect class="cap" x="954" y="2.5" width="46" height="3"/><line class="run" x1="0" y1="4" x2="1000" y2="4"/></svg>
+          <svg class="rail b" viewBox="0 0 1000 8" preserveAspectRatio="none" aria-hidden="true"><line class="glow" x1="0" y1="4" x2="1000" y2="4"/><line class="base" x1="0" y1="4" x2="1000" y2="4"/><rect class="cap" x="0" y="2.5" width="46" height="3"/><rect class="cap" x="954" y="2.5" width="46" height="3"/><line class="run" x1="0" y1="4" x2="1000" y2="4"/></svg>
+          <span class="scan"></span>
+          <div class="nh"><span class="ic">!</span><span class="ttl">Notification</span></div>
+          <h2 class="n-title">Show up<br>every day.</h2>
+          <p class="n-line">[ You have acquired the qualifications to be a <b>Player</b>. ]</p>
+          <p class="n-line">[ <b>Daily Quest:</b> play this week's playlist. The System reads your KovaaK's stats folder and checks you in by itself. No submit button. ]</p>
+          <p class="n-line">[ Ranking is <b>most days completed</b>, never skill. Nobody loses for aiming worse. ]</p>
+          <div class="ask"><i></i><span>Will you accept?</span><i class="r"></i></div>
+          <div class="gate-actions">
+            <button id="login-btn" class="btn dc">
+              <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z" fill="#FFFFFF"/></svg>
+              Accept · sign in with Discord
+            </button>
+            <button id="reject-btn" class="btn ghost sm" type="button">Reject</button>
+            <span id="reject-note" class="n-line tiny">THE SYSTEM DOES NOT RECOMMEND IT</span>
+          </div>
+          <p id="login-error" class="warn" hidden></p>
+          <p class="fine center">Check-ins happen in desktop Chrome or Edge on the PC where KovaaK's runs. From a phone you can still sign in and watch the group.</p>
+        </div>
+        <span class="win-sub gate-foot">[ GROUP TRAINING PROTOCOL // THE SYSTEM IS WATCHING ]</span>
       </div>
     </section>
 
@@ -141,7 +91,7 @@
     <section id="view-admin" class="view"></section>
   </main>
 
-  <footer class="sys-footer">[KOVA STREAK // THE SYSTEM IS WATCHING]</footer>
+  <footer class="sys-footer">[ KOVA STREAK // THE SYSTEM IS WATCHING ]</footer>
 
   <script type="module" src="js/app.js"></script>
 </body>

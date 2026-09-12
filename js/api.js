@@ -59,5 +59,7 @@ export const postRest = (date, on) => call('/api/rest', { method: 'POST', body: 
 export const getChains = () => call('/api/chains');
 export const getRoster = () => call('/api/admin/roster');
 export const reinstate = (userId) => call('/api/admin/reinstate', { method: 'POST', body: { userId } });
+export const runRosterSweep = () => call('/api/admin/roster-sweep', { method: 'POST' });
+export const runShieldSweep = () => call('/api/admin/shield-sweep', { method: 'POST' });
 export const getVault = () => call('/api/vault');
 export const buyVault = (item) => call('/api/vault', { method: 'POST', body: { item } });
