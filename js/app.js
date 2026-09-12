@@ -2246,7 +2246,7 @@ function podiumCard({ w, h, metal, avatar, uid, name, days, tier, rev, style = '
   <img class="portrait" src="${esc(avatar)}" data-uid="${esc(uid)}" alt="" style="left: ${portX}px; top: ${portTop}px; width: ${portW}px; height: ${portH}px;">
   <div class="fade" style="left: ${portX}px; top: ${portTop}px; width: ${portW}px; height: ${portH}px;"></div>
   <div class="sheen" style="left: ${portX}px; top: ${portTop}px; width: ${portW}px; height: ${portH}px;"></div>
-  <div class="band" style="height: ${bandH}px;">
+  <div class="band" style="min-height: ${bandH}px;">
     <span class="nm" style="font-size: ${Math.round(w * 0.092)}px;">${esc(name)}</span>
     <div class="row"><span class="days" style="font-size: ${Math.round(w * 0.13)}px;">${esc(days)}</span><span class="tier">STREAK</span></div>
     <span class="tier">${esc(tier)}</span>
