@@ -1085,6 +1085,20 @@ async function announceTrial(env, trial) {
   } catch { /* the announce is not critical */ }
 }
 
+// A player without a baseline gets one from the first best they sync while
+// the trial is open (a missing baseline used to make the trial unwinnable
+// for them). Last writer wins on a rare concurrent post: a lost capture is
+// simply retaken on the player's next sync.
+async function captureTrialBaseline(env, uid, pbDoc) {
+  const trial = await env.KOVA.get('trial:current', 'json');
+  if (!trial || trial.resolved || !trial.scenario) return;
+  const have = trial.baselines && trial.baselines[uid];
+  const mine = pbDoc[trial.scenario];
+  if (have || !mine || !(mine.s > 0)) return;
+  trial.baselines = { ...(trial.baselines || {}), [uid]: mine.s };
+  await env.KOVA.put('trial:current', JSON.stringify(trial));
+}
+
 async function resolveTrial(env, today) {
   const trial = await env.KOVA.get('trial:current', 'json');
   if (!trial || trial.resolved || trial.weekKey !== weekKeyOf(today)) return [];
@@ -1448,6 +1462,12 @@ async function handleApi(request, env, url, cors, ctx) {
     }
     if (changed) await env.KOVA.put(key, JSON.stringify(doc));
     if (improvements.length && ctx) ctx.waitUntil(announceRecords(env, user, improvements));
+    // The trial baseline arrives late for most players: playlists rotate
+    // fully every week, so at publish time nobody has a stored best on the
+    // trial scenario and the snapshot is empty. The first best a player
+    // syncs during the trial week (their history, before this week's grind)
+    // becomes their baseline; only improvements over it count on Sunday.
+    if (changed) await captureTrialBaseline(env, user.uid, doc);
     return json({ ok: true, improved: improvements.length }, 200, cors);
   }
 

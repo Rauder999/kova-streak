@@ -94,9 +94,13 @@ shows who holds which end and the window tally.
   best as snapshotted at announcement time. Self-relative, never
   absolute score: the ethos holds.
 - Anti-abuse: the baseline is the PB snapshot taken at announcement.
-  PBs are monotonic, so sandbagging is impossible. A player with no
-  prior PB on the scenario sets a baseline this week and becomes
-  eligible next time that scenario rolls around.
+  PBs are monotonic, so sandbagging is impossible. Playlists rotate
+  fully every week, so at announcement almost nobody has a stored PB
+  on the trial scenario: a player without a snapshot gets their
+  baseline from the first best they sync while the trial is open (the
+  site posts the all-time best from local history, so for anyone who
+  opens the site before playing that is the PB from before this
+  week). Only improvements over that baseline count on Sunday.
 - Everyone who beats their snapshot at all earns +1 link (once per
   week). The top improver takes +5 links and the digest headline:
   `[TRIAL COMPLETE // X improved 11.4%. The System took note.]`
