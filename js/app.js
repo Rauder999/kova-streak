@@ -59,6 +59,7 @@ export const state = {
   chains: null,         // current chain window (map data + my links)
   vault: null,          // Vault state for the Today tab card
   vaultMsg: null,
+  trial: null,          // the trial of the half-week (scenario, standings, my baseline)
 };
 
 let pollTimer = null;
@@ -160,6 +161,7 @@ async function boot() {
   refreshGroup();
   loadRest().then(() => { if (state.tab === 'today') renderToday(); });
   loadVault(); // the rest calendar reads the shield and the voucher from it
+  loadTrial();
   if (state.granted) startPolling();
 }
 
@@ -320,6 +322,7 @@ async function refreshStatsPipeline() {
     });
     state.indexProgress = null;
     await maybePostScores(res.added);
+    await maybeReportTrialBaseline();
     // rebuild the report when new files have appeared or there is none yet
     if (state.coachEnabled && (res.added > 0 || !state.report)) {
       await rebuildReport(state.statsDate || state.date);
@@ -343,6 +346,8 @@ async function maybePostScores(added) {
   if (!added && cached !== null) return;
 
   const wanted = new Set(state.playlist.scenarios.map((s) => s.name));
+  // the trial scenario syncs too, even when it is not on the playlist
+  for (const t of [state.trial && state.trial.current, state.trial && state.trial.next]) if (t && t.scenario) wanted.add(t.scenario);
   const runs = await getAllParsedRuns();
   const bests = {};
   for (const r of runs) {
@@ -789,6 +794,7 @@ export function renderToday() {
   if (!fsSupported()) {
     root.append(notice('Check-ins happen on your gaming PC in desktop Chrome or Edge. On this device you can watch the group tab.'));
     root.append(renderRestWindow()); // rest days are convenient to schedule right from the phone
+    root.append(renderTrialWindow());
     return;
   }
   if (!state.playlist || !state.playlist.scenarios || !state.playlist.scenarios.length) {
@@ -855,6 +861,7 @@ export function renderToday() {
   side.append(renderRestWindow());
   const chain = renderMyChainWindow();
   if (chain) side.append(chain);
+  side.append(renderTrialWindow());
   two.append(side);
   root.append(two);
 
@@ -1056,6 +1063,89 @@ function renderSetupGate() {
   return gate;
 }
 
+// ---------- the trial ----------
+
+async function loadTrial() {
+  try {
+    state.trial = await api.getTrial();
+    if (state.tab === 'today') renderToday();
+    // on the Admin tab only the trial window redraws: a playlist file read
+    // but not yet published must survive the refresh
+    if (state.tab === 'admin') {
+      const old = document.querySelector('#view-admin .win.trial-admin');
+      if (old) old.replaceWith(renderTrialAdminWindow());
+    }
+  } catch { /* the trial window is optional */ }
+}
+
+// The trial baseline: the best and the run count on the scenario from BEFORE
+// the window, out of the whole local history. Reported once per trial and
+// again only when the numbers change (late files from the mirror).
+const TRIAL_BASE_KEY = 'kova-streak-trial-baseline';
+async function maybeReportTrialBaseline() {
+  const t = state.trial && state.trial.current;
+  if (!t || t.resolved || !state.user) return;
+  const runs = await getAllParsedRuns();
+  let best = 0;
+  let n = 0;
+  for (const r of runs) {
+    if (r.scenario !== t.scenario || !(r.date < t.start)) continue;
+    n++;
+    if (r.score > best) best = r.score;
+  }
+  const sig = `${t.windowId}|${t.scenario}|${n}|${Math.round(best * 10)}`;
+  let cached = null;
+  try { cached = localStorage.getItem(TRIAL_BASE_KEY); } catch { /* private browsing mode */ }
+  if (cached === sig && state.trial.mine) return;
+  try {
+    await api.postTrialBaseline(t.windowId, best, n);
+    try { localStorage.setItem(TRIAL_BASE_KEY, sig); } catch { /* private browsing mode */ }
+    await loadTrial();
+  } catch (e) {
+    if (handleApiError(e)) return;
+    /* not critical: retried on the next scan */
+  }
+}
+
+// The trial of the half-week: the scenario, where you stand, the leaders
+function renderTrialWindow() {
+  const t = state.trial;
+  const win = mkWin();
+  win.style.cssText = 'display:flex;flex-direction:column;gap:14px';
+  const cur = t && t.current;
+  if (!cur) {
+    win.append(winHead('[ Trial ]', t && t.window ? `${monthDayShort(t.window.start).toUpperCase()} - ${monthDayShort(t.window.last).toUpperCase()}` : 'THIS WINDOW'));
+    win.append(el('span', 'fine', 'No trial this window. Rauder picks the scenario.'));
+    if (t && t.next) win.append(el('span', 'quest-line', `[ Next window: ${t.next.scenario} ]`));
+    return win;
+  }
+  win.append(winHead('[ Trial ]', `${monthDayShort(cur.start).toUpperCase()} - ${monthDayShort(cur.last).toUpperCase()}` + (cur.resolved ? ' · CLOSED' : '')));
+  win.append(el('span', 'trial-scen', cur.scenario));
+  const me = t.mine;
+  const st = el('span', 'quest-line');
+  if (cur.resolved) st.textContent = '[ Closed. The result is in the channel. ]';
+  else if (!me) st.textContent = fsSupported() && state.granted ? '[ Syncing your baseline from your history... ]' : '[ Open the site on your gaming PC to sync your baseline. ]';
+  else if (!me.eligible) st.textContent = `[ Not in the running: ${me.runs} of ${t.minRuns} runs on it before ${monthDayShort(cur.start)}. ]`;
+  else st.innerHTML = `[ Baseline <b>${fmtScore(me.baseline)}</b> · best now <b>${me.best != null ? fmtScore(me.best) : '-'}</b> · ${me.pct > 0 ? '<b style="color: var(--ok)">+' + me.pct.toFixed(1) + '%</b>' : 'not beaten yet'} ]`;
+  win.append(st);
+  const rows = (t.standings || []).filter((r) => r.eligible);
+  if (rows.length) {
+    const list = el('div');
+    rows.slice(0, 3).forEach((r, i) => {
+      const row = el('div', 'tl');
+      row.append(svgPlate(String(i + 1), r.pct > 0 ? METALS[i] : 'plain'));
+      row.append(avatarImg(r, 'av sq', 64));
+      row.append(el('span', 'nm', r.name));
+      row.append(el('span', 'lead'));
+      row.append(el('span', 'pct' + (r.pct > 0 ? ' up' : ' mute'), r.pct > 0 ? '+' + r.pct.toFixed(1) + '%' : '0%'));
+      list.append(row);
+    });
+    win.append(list);
+  }
+  win.append(el('span', 'win-sub', `${rows.length ? rows.length + ' IN THE RUNNING' : 'NOBODY IN THE RUNNING YET'} · +1 LINK FOR BEATING YOUR BASELINE · +5 FOR THE TOP`));
+  return win;
+}
+
 // ---------- The Vault: the artifact exchange ----------
 // Spend chain links on perks (see CHAIN_PROTOCOL.md). Four artifacts on the
 // podium's rarity ladder: the Score point is S (gold, the Monarch's aura), the
@@ -1172,7 +1262,7 @@ function ledgerLine(entry) {
   let what = why.toUpperCase();
   if (why.startsWith('chain ')) what = 'CHAIN FORGED';
   else if (why.startsWith('perfect chain')) what = 'PERFECT CHAIN';
-  else if (why.startsWith('trial')) what = 'WEEKLY TRIAL';
+  else if (why.startsWith('trial')) what = 'TRIAL';
   else if (why.startsWith('vault ')) {
     const it = VAULT_ITEMS.find((x) => x.id === why.slice(6));
     what = 'THE VAULT · ' + (it ? it.name.toUpperCase() : why.slice(6).toUpperCase());
@@ -1936,6 +2026,10 @@ async function refreshGroup() {
       state.chains = await api.getChains();
       if (state.tab === 'group') renderGroup();
     } catch { /* the chain map is optional */ }
+    try {
+      state.trial = await api.getTrial();
+      if (state.tab === 'today') renderToday();
+    } catch { /* the trial window is optional */ }
   }
   clearTimeout(groupTimer);
   groupTimer = setTimeout(refreshGroup, GROUP_REFRESH_MS);
@@ -2471,6 +2565,84 @@ function renderRosterWindow() {
   return win;
 }
 
+// The admin picks the trial: this window or the next, any scenario from
+// this week's list or last week's (a Monday window wants last week's list:
+// everyone has a week of runs behind it).
+let trialAdminFlash = null; // the outcome of the last button, shown once after the redraw
+function renderTrialAdminWindow() {
+  const win = mkWin('trial-admin');
+  const t = state.trial;
+  win.append(winHead('[ Trial ]', 'ONE SCENARIO PER CHAIN WINDOW · YOU PICK IT'));
+  const cur = t && t.current;
+  const eligible = t ? (t.standings || []).filter((r) => r.eligible) : [];
+  const lead = eligible.find((r) => r.pct > 0);
+  const status = el('div', 'quest-line', cur
+    ? `[ This window: ${cur.scenario} · ${monthDayShort(cur.start)} - ${monthDayShort(cur.last)} · ${eligible.length} in the running${lead ? ` · ${lead.name} leads at +${lead.pct.toFixed(1)}%` : ''}${cur.resolved ? ' · closed' : cur.announcedAt ? '' : ' · not announced yet'} ]`
+    : '[ No trial this window. ]');
+  status.style.cssText = 'display:block;margin-top:8px';
+  win.append(status);
+  const nxt = el('div', 'quest-line', t && t.next ? `[ Next window: ${t.next.scenario} · announced at 03:30 on its first day ]` : '[ Next window: nothing queued. ]');
+  nxt.style.cssText = 'display:block;margin-top:4px';
+  win.append(nxt);
+
+  const form = el('div');
+  form.style.cssText = 'display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:18px';
+  const sel = el('select', 'inp');
+  sel.style.minWidth = '320px';
+  const addGroup = (label, list) => {
+    if (!list || !list.length) return;
+    const og = el('optgroup');
+    og.label = label;
+    for (const s of list) {
+      const o = el('option', null, s.name);
+      o.value = s.name;
+      og.append(o);
+    }
+    sel.append(og);
+  };
+  addGroup(state.playlist && state.playlist.weekLabel ? `${state.playlist.weekLabel} (this week)` : 'This week', state.playlist && state.playlist.scenarios);
+  addGroup(state.prevPlaylist && state.prevPlaylist.weekLabel ? `${state.prevPlaylist.weekLabel} (last week)` : 'Last week', state.prevPlaylist && state.prevPlaylist.scenarios);
+  form.append(sel);
+  const target = el('select', 'inp');
+  for (const [v, l] of [['current', 'This window'], ['next', 'Next window']]) {
+    const o = el('option', null, l);
+    o.value = v;
+    target.append(o);
+  }
+  form.append(target);
+  const msg = el('div', 'status');
+  msg.hidden = true;
+  msg.style.marginTop = '14px';
+  const say = (text, cls) => { msg.textContent = text; msg.className = 'status ' + cls; msg.hidden = false; };
+  if (trialAdminFlash) { say(trialAdminFlash, 'ok'); trialAdminFlash = null; }
+  const act = (btn, fn) => btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    try {
+      trialAdminFlash = await fn();
+      await loadTrial(); // redraws this window with the flash
+    } catch (e) {
+      if (handleApiError(e)) return;
+      say('[ ' + e.message + ' ]', 'err');
+      btn.disabled = false;
+    }
+  });
+  const set = el('button', 'btn', 'Set trial');
+  act(set, async () => {
+    const res = await api.setTrial({ scenario: sel.value, target: target.value });
+    return `[ Trial set: ${res.trial.scenario} · ${target.value === 'next' ? 'announced at 03:30 on its first day' : 'announced in the channel'} ]`;
+  });
+  const clear = el('button', 'btn ghost', 'Clear');
+  act(clear, async () => { await api.setTrial({ target: target.value, clear: true }); return '[ Cleared. ]'; });
+  const close = el('button', 'btn ghost', 'Close now');
+  act(close, async () => { const res = await api.resolveTrialNow(); return res.lines && res.lines.length ? res.lines.join(' ') : '[ Nothing to close. ]'; });
+  form.append(set, clear, close);
+  win.append(form, msg);
+  const fine = el('span', 'fine', `Baseline: a player's best from before the window, at least ${t ? t.minRuns : 3} runs on it before the window to be in the running. A Monday window wants a scenario from last week's list, a Thursday window one from this week's.`);
+  fine.style.cssText = 'display:block;margin-top:14px';
+  win.append(fine);
+  return win;
+}
+
 function renderAdmin() {
   const root = $('view-admin');
   root.replaceChildren();
@@ -2625,6 +2797,7 @@ function renderAdmin() {
   two.append(dig);
   root.append(two);
 
+  root.append(renderTrialAdminWindow());
   root.append(renderRosterWindow());
 }
 

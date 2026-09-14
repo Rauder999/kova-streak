@@ -392,9 +392,16 @@ async function getChainPairs(env, date) {
     [uids[i], uids[j]] = [uids[j], uids[i]];
   }
 
-  // best effort: not the same partner as in the previous two windows
+  // Not the same partner as in the previous two windows (per Rauder,
+  // 2026-09-14). The seeded shuffle comes first; then members swap between
+  // groups while a swap removes a repeat without creating one, trios
+  // checked pair by pair. Each accepted swap removes at least one repeating
+  // group, so the loop ends; with a tiny pool a repeat can be unavoidable
+  // and the loop stops when no swap helps.
+  const prev1 = windowOf(shiftDate(win.start, -1));
+  const prev2 = windowOf(shiftDate(prev1.start, -1));
   const prevPartners = new Map();
-  for (const pid of [prevWindowIdOf(win), prevWindowIdOf({ id: prevWindowIdOf(win), start: win.start })]) {
+  for (const pid of [prev1.id, prev2.id]) {
     const prev = await env.KOVA.get(`chain:pairs:${pid}`, 'json').catch(() => null);
     if (!prev) continue;
     for (const g of prev.groups || []) {
@@ -408,14 +415,26 @@ async function getChainPairs(env, date) {
   for (let i = 0; i + 1 < uids.length; i += 2) groups.push([uids[i], uids[i + 1]]);
   if (uids.length % 2 === 1) groups[groups.length - 1].push(uids[uids.length - 1]);
   const bad = (a, b) => prevPartners.has(a) && prevPartners.get(a).has(b);
-  for (let pass = 0; pass < 3; pass++) {
-    for (let i = 0; i < groups.length; i++) {
-      const g = groups[i];
-      if (g.length === 2 && bad(g[0], g[1]) && groups.length > 1) {
-        const j = (i + 1) % groups.length;
-        [g[1], groups[j][1]] = [groups[j][1], g[1]];
+  const repeats = (g) => {
+    for (let i = 0; i < g.length; i++) for (let j = i + 1; j < g.length; j++) if (bad(g[i], g[j])) return true;
+    return false;
+  };
+  for (let iter = 0; iter < 64; iter++) {
+    const gi = groups.findIndex(repeats);
+    if (gi < 0) break;
+    let swapped = false;
+    for (let mi = 0; mi < groups[gi].length && !swapped; mi++) {
+      for (let gj = 0; gj < groups.length && !swapped; gj++) {
+        if (gj === gi) continue;
+        for (let mj = 0; mj < groups[gj].length && !swapped; mj++) {
+          const a = groups[gi].slice();
+          const b = groups[gj].slice();
+          [a[mi], b[mj]] = [b[mj], a[mi]];
+          if (!repeats(a) && !repeats(b)) { groups[gi] = a; groups[gj] = b; swapped = true; }
+        }
       }
     }
+    if (!swapped) break;
   }
 
   // cold members at window start (idle 3+ non-rest days): their chains pay double
@@ -1048,81 +1067,139 @@ async function appendRosterEvents(env, day, patch) {
   await env.KOVA.put(key, JSON.stringify(ev), { expirationTtl: 60 * 60 * 72 });
 }
 
-// The weekly trial: created at playlist publish, resolved in the Sunday
-// digest. Winner = the largest percentage over your own snapshotted PB.
-async function createTrial(env, playlist, publishedOn) {
-  const dowMon = (new Date(publishedOn + 'T00:00:00Z').getUTCDay() + 6) % 7;
-  // a Sunday publish targets the week that starts tomorrow
-  const weekKey = dowMon === 6 ? shiftDate(publishedOn, 1) : weekKeyOf(publishedOn);
-  const existing = await env.KOVA.get('trial:current', 'json');
-  if (existing && existing.weekKey === weekKey) return null; // mid-week republish keeps the trial
-  const rand = seededRng('trial:' + weekKey);
-  const scenario = playlist.scenarios[Math.floor(rand() * playlist.scenarios.length)].name;
-  const { users } = await loadGroup(env);
-  const baselines = {};
-  for (const u of users) {
-    const pb = await env.KOVA.get(`pb:${u.userId}`, 'json');
-    if (pb && pb[scenario] && pb[scenario].s > 0) baselines[u.userId] = pb[scenario].s;
-  }
-  const trial = { scenario, weekKey, baselines, createdAt: Date.now(), resolved: false };
-  await env.KOVA.put('trial:current', JSON.stringify(trial));
+// ---------- The trial ----------
+// One scenario per chain window (Mon-Wed, Thu-Sun), picked by the admin in
+// the Admin tab; nothing is created on its own. Fairness (per Rauder,
+// 2026-09-14): the baseline is the player's best from BEFORE the window,
+// and it takes TRIAL.minRuns runs on the scenario before the window to be
+// in the running, so a first look at a new scenario can never turn into a
+// +200% "improvement". The client reports the baseline out of its whole
+// local history; the server keeps the higher of that and a best it already
+// held from before the window. Winner = the largest improvement over the
+// baseline when the window closes; the 03:30 sweep of the next morning
+// resolves it, pays the links and posts the result.
+const TRIAL = { minRuns: 3 };
+const trialKey = (winId) => `trial:${winId}`;
+const trialBaselinePrefix = (winId) => `trial:${winId}:bl:`;
+const nextWindowOf = (win) => windowOf(shiftDate(win.last, 1));
+
+async function getTrial(env, winId) {
+  return env.KOVA.get(trialKey(winId), 'json');
+}
+async function putTrial(env, trial) {
+  await env.KOVA.put(trialKey(trial.windowId), JSON.stringify(trial), { expirationTtl: 60 * 60 * 24 * 60 });
+}
+// what the clients see
+function publicTrial(t) {
+  return t ? { windowId: t.windowId, start: t.start, last: t.last, scenario: t.scenario, announcedAt: t.announcedAt || null, resolved: !!t.resolved, results: t.results || null } : null;
+}
+
+async function setTrial(env, win, scenario, setBy) {
+  // a replaced scenario's baselines mean nothing for the new one
+  if (await getTrial(env, win.id)) await deleteTrialBaselines(env, win.id);
+  const trial = { windowId: win.id, start: win.start, last: win.last, scenario, setBy, createdAt: Date.now(), announcedAt: null, resolved: false };
+  await putTrial(env, trial);
   return trial;
 }
 
-async function announceTrial(env, trial) {
-  if (!env.DISCORD_WEBHOOK_URL || !trial) return;
+async function clearTrial(env, winId) {
+  await env.KOVA.delete(trialKey(winId));
+  await deleteTrialBaselines(env, winId);
+}
+
+// Baselines live in their own keys, one per player, so twenty clients
+// syncing in the same minute never overwrite each other; the metadata
+// carries the numbers, so the standings cost one list call.
+async function putTrialBaseline(env, winId, uid, b, n) {
+  await env.KOVA.put(trialBaselinePrefix(winId) + uid, JSON.stringify({ b, n, at: Date.now() }), { metadata: { b, n }, expirationTtl: 60 * 60 * 24 * 60 });
+}
+async function trialBaselines(env, winId) {
+  const prefix = trialBaselinePrefix(winId);
+  const out = new Map();
+  for (const k of await listAll(env, prefix)) {
+    const m = k.metadata || {};
+    out.set(k.name.slice(prefix.length), { b: Number(m.b) || 0, n: Number(m.n) || 0 });
+  }
+  return out;
+}
+async function deleteTrialBaselines(env, winId) {
+  for (const k of await listAll(env, trialBaselinePrefix(winId))) await env.KOVA.delete(k.name);
+}
+
+async function postSystemLines(env, lines) {
+  if (!env.DISCORD_WEBHOOK_URL || !lines.length) return;
   try {
-    const lines = [
-      `[WEEKLY TRIAL // ${trial.scenario}]`,
-      '[Beat your own record. The largest improvement takes the crown on Sunday.]',
-      `[Any new personal best on it earns +${LINKS.trialPart} link. The top improver takes +${LINKS.trialWin}.]`,
-    ];
     await fetch(env.DISCORD_WEBHOOK_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content: systemBlock(lines), allowed_mentions: { parse: [] } }),
     });
-  } catch { /* the announce is not critical */ }
+  } catch { /* the channel is not critical */ }
 }
 
-// A player without a baseline gets one from the first best they sync while
-// the trial is open (a missing baseline used to make the trial unwinnable
-// for them). Last writer wins on a rare concurrent post: a lost capture is
-// simply retaken on the player's next sync.
-async function captureTrialBaseline(env, uid, pbDoc) {
-  const trial = await env.KOVA.get('trial:current', 'json');
-  if (!trial || trial.resolved || !trial.scenario) return;
-  const have = trial.baselines && trial.baselines[uid];
-  const mine = pbDoc[trial.scenario];
-  if (have || !mine || !(mine.s > 0)) return;
-  trial.baselines = { ...(trial.baselines || {}), [uid]: mine.s };
-  await env.KOVA.put('trial:current', JSON.stringify(trial));
+async function announceTrial(env, trial) {
+  if (!trial) return;
+  await postSystemLines(env, [
+    `[TRIAL // ${trial.scenario}]`,
+    `[${shortDate(trial.start)} - ${shortDate(trial.last)}. Beat your own best from before the window. The largest improvement takes the crown when it closes.]`,
+    `[Baseline: your best before ${shortDate(trial.start)}, at least ${TRIAL.minRuns} runs on it to be in the running. Beating it: +${LINKS.trialPart} link. The top improver: +${LINKS.trialWin}.]`,
+  ]);
+  trial.announcedAt = Date.now();
+  await putTrial(env, trial);
 }
 
-async function resolveTrial(env, today) {
-  const trial = await env.KOVA.get('trial:current', 'json');
-  if (!trial || trial.resolved || trial.weekKey !== weekKeyOf(today)) return [];
-  const { users } = await loadGroup(env);
-  const improvers = [];
+// live standings: everyone with a baseline, the eligible ranked by improvement
+async function trialStandings(env, trial) {
+  const [{ users }, baselines] = await Promise.all([loadGroup(env), trialBaselines(env, trial.windowId)]);
+  const rows = [];
   for (const u of users) {
-    const base = trial.baselines[u.userId];
-    if (!base) continue;
+    if (u.inactive) continue;
+    const bl = baselines.get(u.userId);
+    if (!bl) continue;
+    const eligible = bl.n >= TRIAL.minRuns && bl.b > 0;
     const pb = await env.KOVA.get(`pb:${u.userId}`, 'json');
-    const cur = pb && pb[trial.scenario] && pb[trial.scenario].s;
-    if (cur && cur > base) improvers.push({ uid: u.userId, name: u.displayName, pct: ((cur - base) / base) * 100 });
+    const cur = (pb && pb[trial.scenario] && pb[trial.scenario].s) || null;
+    const pct = eligible && cur && cur > bl.b ? ((cur - bl.b) / bl.b) * 100 : 0;
+    rows.push({ userId: u.userId, name: u.displayName, avatar: u.avatar, baseline: bl.b, runs: bl.n, eligible, best: cur, pct });
   }
+  rows.sort((a, b) => Number(b.eligible) - Number(a.eligible) || b.pct - a.pct || a.name.localeCompare(b.name));
+  return rows;
+}
+
+async function resolveTrialFor(env, winId) {
+  const trial = await getTrial(env, winId);
+  if (!trial || trial.resolved) return [];
+  const rows = (await trialStandings(env, trial)).filter((r) => r.eligible);
+  const improvers = rows.filter((r) => r.pct > 0);
   trial.resolved = true;
-  await env.KOVA.put('trial:current', JSON.stringify(trial));
-  if (!improvers.length) return [`[TRIAL COMPLETE // ${trial.scenario}. No records fell this week.]`];
-  improvers.sort((a, b) => b.pct - a.pct);
+  trial.resolvedAt = Date.now();
+  trial.results = improvers.slice(0, 10).map((r) => ({ userId: r.userId, name: r.name, pct: Math.round(r.pct * 10) / 10 }));
+  await putTrial(env, trial);
+  if (!improvers.length) {
+    return [`[TRIAL COMPLETE // ${trial.scenario}. ${rows.length ? 'No best fell this window.' : 'Nobody was in the running.'}]`];
+  }
   const top = improvers[0];
   for (const im of improvers) {
-    const win = im.pct === top.pct;
-    await addLinks(env, im.uid, LINKS.trialPart + (win ? LINKS.trialWin : 0), `trial ${trial.weekKey}`);
+    const crown = im.pct === top.pct;
+    await addLinks(env, im.userId, LINKS.trialPart + (crown ? LINKS.trialWin : 0), `trial ${trial.windowId}`);
   }
-  const lines = [`[TRIAL COMPLETE // ${top.name} improved ${top.pct.toFixed(1)}%. The System took note. +${LINKS.trialWin + LINKS.trialPart} links.]`];
+  const lines = [`[TRIAL COMPLETE // ${top.name} improved ${top.pct.toFixed(1)}% on ${trial.scenario}. The System took note. +${LINKS.trialWin + LINKS.trialPart} links.]`];
   if (improvers.length > 1) lines.push(`[${improvers.length} players beat their record. +${LINKS.trialPart} link each.]`);
   return lines;
+}
+
+// The 03:30 sweep on a window's first morning: the window that just closed
+// resolves, a trial queued for the new window is announced.
+async function trialTurnover(env) {
+  const today = groupDate(env);
+  const win = windowOf(today);
+  if (win.start !== today) return;
+  try {
+    const lines = await resolveTrialFor(env, prevWindowIdOf(win));
+    if (lines.length) await postSystemLines(env, lines);
+  } catch { /* a broken resolution never blocks the announce */ }
+  const cur = await getTrial(env, win.id);
+  if (cur && !cur.announcedAt && !cur.resolved) await announceTrial(env, cur);
 }
 
 // ---------- Discord OAuth ----------
@@ -1296,11 +1373,8 @@ async function handleApi(request, env, url, cors, ctx) {
       await env.KOVA.put('playlist:prev', JSON.stringify({ ...old, replacedOn: groupDate(env) }));
     }
     await env.KOVA.put('playlist:current', JSON.stringify(playlist));
-    // the weekly trial rides the playlist publish (see CHAIN_PROTOCOL.md)
-    if (ctx) ctx.waitUntil((async () => {
-      const trial = await createTrial(env, playlist, groupDate(env));
-      await announceTrial(env, trial);
-    })());
+    // the trial does not ride the publish any more: the admin picks a
+    // scenario per chain window (see CHAIN_PROTOCOL.md, section 6)
     return json(playlist, 200, cors);
   }
 
@@ -1462,12 +1536,6 @@ async function handleApi(request, env, url, cors, ctx) {
     }
     if (changed) await env.KOVA.put(key, JSON.stringify(doc));
     if (improvements.length && ctx) ctx.waitUntil(announceRecords(env, user, improvements));
-    // The trial baseline arrives late for most players: playlists rotate
-    // fully every week, so at publish time nobody has a stored best on the
-    // trial scenario and the snapshot is empty. The first best a player
-    // syncs during the trial week (their history, before this week's grind)
-    // becomes their baseline; only improvements over it count on Sunday.
-    if (changed) await captureTrialBaseline(env, user.uid, doc);
     return json({ ok: true, improved: improvements.length }, 200, cors);
   }
 
@@ -1563,11 +1631,75 @@ async function handleApi(request, env, url, cors, ctx) {
     return json({ ok: true, absorbed: used }, 200, cors);
   }
 
-  // manual trial resolution (the Sunday digest does this on its own)
+  // manual close of this window's trial (the 03:30 sweep after the window
+  // does this on its own); the result is posted the way the sweep would
   if (path === '/api/admin/resolve-trial' && request.method === 'POST') {
     if (!user.admin) return json({ error: 'Admin only' }, 403, cors);
-    const lines = await resolveTrial(env, groupDate(env));
+    const lines = await resolveTrialFor(env, windowOf(groupDate(env)).id);
+    if (lines.length) await postSystemLines(env, lines);
     return json({ ok: true, lines }, 200, cors);
+  }
+
+  // the admin picks the trial scenario for this window or the next one;
+  // this window's is announced at once, the next one at its 03:30 sweep
+  if (path === '/api/admin/trial' && request.method === 'POST') {
+    if (!user.admin) return json({ error: 'Admin only' }, 403, cors);
+    const body = (await request.json().catch(() => null)) || {};
+    const win = body.target === 'next' ? nextWindowOf(windowOf(groupDate(env))) : windowOf(groupDate(env));
+    if (body.clear) {
+      await clearTrial(env, win.id);
+      return json({ ok: true, windowId: win.id, cleared: true }, 200, cors);
+    }
+    const scenario = String(body.scenario || '').trim().slice(0, 120);
+    if (!scenario) return json({ error: 'scenario is required' }, 400, cors);
+    const existing = await getTrial(env, win.id);
+    if (existing && existing.resolved) return json({ error: 'That window is already closed' }, 400, cors);
+    const trial = await setTrial(env, win, scenario, user.name);
+    if (body.target !== 'next') await announceTrial(env, trial);
+    return json({ ok: true, trial: publicTrial(trial) }, 200, cors);
+  }
+
+  // The trial: this window's scenario, the standings, the caller's baseline
+  if (path === '/api/trial' && request.method === 'GET') {
+    const win = windowOf(groupDate(env));
+    const next = nextWindowOf(win);
+    const [cur, nxt] = await Promise.all([getTrial(env, win.id), getTrial(env, next.id)]);
+    const standings = cur ? await trialStandings(env, cur) : [];
+    const mine = standings.find((r) => r.userId === user.uid) || null;
+    const pct1 = (x) => Math.round(x * 10) / 10;
+    return json({
+      minRuns: TRIAL.minRuns,
+      window: { id: win.id, start: win.start, last: win.last },
+      current: publicTrial(cur),
+      next: publicTrial(nxt),
+      standings: standings.map((r) => ({ userId: r.userId, name: r.name, avatar: r.avatar, eligible: r.eligible, runs: r.runs, pct: pct1(r.pct) })),
+      mine: mine ? { baseline: mine.baseline, runs: mine.runs, eligible: mine.eligible, best: mine.best, pct: pct1(mine.pct) } : null,
+    }, 200, cors);
+  }
+
+  // The client reports its baseline: best and run count on the trial
+  // scenario from BEFORE the window, out of its whole local history.
+  if (path === '/api/trial/baseline' && request.method === 'POST') {
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body.windowId !== 'string') return json({ error: 'windowId is required' }, 400, cors);
+    const trial = await getTrial(env, body.windowId);
+    if (!trial || trial.resolved) return json({ error: 'No open trial for that window' }, 400, cors);
+    if (trial.windowId !== windowOf(groupDate(env)).id) return json({ error: 'That window is not open' }, 400, cors);
+    const best = Math.max(0, Number(body.best) || 0);
+    const runs = Math.max(0, Math.min(100000, Math.floor(Number(body.runs) || 0)));
+    // a best the server already held from before the window counts too: a
+    // local history can be shorter than the server's memory (a lost mirror),
+    // and a baseline never goes down once reported
+    const [pb, prev] = await Promise.all([
+      env.KOVA.get(`pb:${user.uid}`, 'json'),
+      env.KOVA.get(trialBaselinePrefix(trial.windowId) + user.uid, 'json'),
+    ]);
+    const held = pb && pb[trial.scenario];
+    const heldBefore = held && held.s > 0 && groupDate(env, held.at || 0) < trial.start ? held.s : 0;
+    const b = Math.max(best, heldBefore, (prev && prev.b) || 0);
+    const n = Math.max(runs, (prev && prev.n) || 0);
+    await putTrialBaseline(env, trial.windowId, user.uid, b, n);
+    return json({ ok: true, baseline: b, runs: n, eligible: n >= TRIAL.minRuns && b > 0 }, 200, cors);
   }
 
   // Roster Protocol: who is out, who is on final notice, and the way back
@@ -2066,10 +2198,16 @@ async function postDigest(env) {
     lines.push(`[${done.length}/${players.length} cleared. Gate closes at midnight.]`);
   }
 
-  // Sunday: the weekly trial resolves inside the digest
+  // an open trial keeps a pulse in the digest: the leader so far
   try {
-    const dowMon = (new Date(today + 'T00:00:00Z').getUTCDay() + 6) % 7;
-    if (dowMon === 6) lines.push(...await resolveTrial(env, today));
+    const trial = await getTrial(env, windowOf(today).id);
+    if (trial && !trial.resolved) {
+      const rows = (await trialStandings(env, trial)).filter((r) => r.eligible);
+      const lead = rows.find((r) => r.pct > 0);
+      lines.push(lead
+        ? `[TRIAL // ${trial.scenario}: ${lead.name} leads at +${lead.pct.toFixed(1)}%. ${rows.length} in the running, closes ${shortDate(trial.last)}.]`
+        : `[TRIAL // ${trial.scenario}: no best has fallen yet. ${rows.length} in the running, closes ${shortDate(trial.last)}.]`);
+    }
   } catch { /* the trial never breaks the digest */ }
 
   const roleId = await env.KOVA.get('config:aimChadRoleId');
@@ -2172,6 +2310,9 @@ export default {
         // the roster sweep runs after the shield sweep so a shield-covered
         // day is already a rest day and does not count as silence
         await rosterSweep(env);
+        // trials ride the chain windows: on a window's first morning the one
+        // that just closed resolves and the queued one is announced
+        await trialTurnover(env);
       })());
       return;
     }

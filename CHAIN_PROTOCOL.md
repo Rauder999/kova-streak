@@ -11,10 +11,12 @@ constellation on the dimension background).
   windows: Monday-Wednesday (3 days) and Thursday-Sunday (4 days).
   Two shuffles a week (the middle ground Rauder asked for: daily was
   too short to actually pressure a partner, weekly too stale).
-- Pairing is a deterministic shuffle seeded by the window key, so
-  every client and the worker derive the same pairs with no stored
-  state. Constraint: never the same partner as in the previous two
-  windows (derivable from the previous window seeds).
+- Pairing is a deterministic shuffle seeded by the window key, stored
+  at the window's first access so a mid-window roster change never
+  reshuffles anyone. Constraint: never the same partner as in the
+  previous two windows. After the shuffle, members swap between groups
+  while a swap removes a repeat without creating one; with a tiny pool
+  a repeat can be unavoidable and stays.
 - Odd headcount: exactly one TRIPLE that window (never a bye). A
   triple's day forges only when all three complete.
 - Within a window the pair is fixed. EACH DAY both members complete,
@@ -72,7 +74,8 @@ closed (no double-crediting confusion), it is consumed automatically
     right, a glowing chain between, the caption. Attached to the
     message.
 - Digest additions: `[Chains forged today: N/M.]`, shield consumptions,
-  and on Sundays the weekly trial resolution.
+  and the leader of an open trial. The trial itself closes at the 03:30
+  sweep after its window (section 6).
 
 ## 5. The chain map (site)
 
@@ -85,28 +88,34 @@ and brightens with each forged day of the window (1/3, 2/3...), a
 perfect-chain-so-far pair burns gold. Triples draw as triangles. Hover
 shows who holds which end and the window tally.
 
-## 6. The weekly trial (challenge)
+## 6. The trial (challenge)
 
-- One scenario from the current playlist becomes the TRIAL for the
-  week, announced with the Monday playlist publish
-  (`[WEEKLY TRIAL // <scenario>]`).
-- Winner = the largest PERCENTAGE improvement over your own personal
-  best as snapshotted at announcement time. Self-relative, never
-  absolute score: the ethos holds.
-- Anti-abuse: the baseline is the PB snapshot taken at announcement.
-  PBs are monotonic, so sandbagging is impossible. Playlists rotate
-  fully every week, so at announcement almost nobody has a stored PB
-  on the trial scenario: a player without a snapshot gets their
-  baseline from the first best they sync while the trial is open (the
-  site posts the all-time best from local history, so for anyone who
-  opens the site before playing that is the PB from before this
-  week). Only improvements over that baseline count on Sunday.
-- Everyone who beats their snapshot at all earns +1 link (once per
-  week). The top improver takes +5 links and the digest headline:
-  `[TRIAL COMPLETE // X improved 11.4%. The System took note.]`
-- Cadence decision: WEEKLY, not daily (recommended and pending final
-  confirmation): chains carry the daily dopamine, the trial carries
-  the weekly arc and gives Sundays a finale.
+- One scenario per chain window (Monday-Wednesday, Thursday-Sunday),
+  picked by Rauder in the Admin tab: this window's trial is announced
+  at once (`[TRIAL // <scenario>]`), a trial queued for the next window
+  is announced by the 03:30 sweep on the window's first day. Nothing is
+  created on its own; a window without a pick has no trial.
+- Winner = the largest PERCENTAGE improvement over your own baseline.
+  Self-relative, never absolute score: the ethos holds.
+- Baseline (fairness, per Rauder 2026-09-14) = your best on the
+  scenario from BEFORE the window, out of your whole local history. The
+  site reports it; the server keeps the higher of that report and any
+  best it already held from before the window, and a baseline never
+  goes down once reported. It takes at least 3 runs on the scenario
+  before the window to be in the running, so a first look at a new
+  scenario can never turn into a +200% "improvement". PBs are
+  monotonic, so sandbagging is impossible.
+- Practical pick: a Monday window wants a scenario from LAST week's
+  list (everyone has a week of runs behind it; the site keeps syncing
+  bests on the trial scenario even when it is not on the playlist), a
+  Thursday window one from this week's list (three days of runs).
+- Everyone who beats their baseline earns +1 link (once per trial).
+  The top improver takes +5 links and the headline when the window
+  closes, posted by the next 03:30 sweep:
+  `[TRIAL COMPLETE // X improved 11.4% on <scenario>. The System took note.]`
+  While a trial is open, the evening digest carries the leader so far.
+- Chains and trials share the cadence: chains carry the daily
+  dopamine, the trial gives every window a finale.
 
 ## 7. Edge rules
 

@@ -419,6 +419,20 @@ button.cell:disabled { cursor: default; }
 .dot-sq.broken { background: rgba(229, 72, 77, 0.25); border-color: rgba(229, 72, 77, 0.5); }
 .dot-sq.upcoming { border-style: dashed; }
 
+/* the trial of the half-week */
+.trial-scen { font-family: var(--font-sys); text-transform: uppercase; letter-spacing: .08em; font-weight: 700; font-size: 18px; line-height: 1.15; color: #FFFFFF; text-shadow: 0 0 14px color-mix(in oklab, var(--accent) 50%, transparent); }
+.quest-line b { font-weight: 700; color: var(--text-0); }
+.tl { display: flex; align-items: center; gap: 10px; min-height: 38px; border-bottom: 1px solid var(--line-2); }
+.tl:last-child { border-bottom: 0; }
+.tl .av { width: 24px; height: 24px; }
+.tl .plate { width: 28px; height: 28px; }
+.tl .nm { font-size: 13px; font-weight: 500; color: var(--text-0); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tl .pct { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 700; font-size: 12px; flex: none; }
+.tl .pct.up { color: var(--ok); }
+.tl .pct.mute { color: var(--text-2); }
+select.inp { width: auto; padding-right: 32px; cursor: pointer; }
+select.inp option, select.inp optgroup { background: var(--win); color: var(--text-0); }
+
 .help-line { display: flex; align-items: center; gap: 14px; padding: 4px 4px 0; flex-wrap: wrap; }
 .help-line .code { height: 30px; font-size: 11px; }
 .playlist-line { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; }
