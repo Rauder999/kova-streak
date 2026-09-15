@@ -57,6 +57,7 @@ export const state = {
   coachError: null,
   restDates: [],        // scheduled rest days (dates)
   restFree: [],         // of those, the ones that cost no quota (admin-granted, shield-absorbed)
+  restReturnedFor: null, // the date whose rest permit came back because the day closed anyway
   restError: null,
   chains: null,         // current chain window (map data + my links)
   vault: null,          // Vault state for the Today tab card
@@ -696,6 +697,13 @@ function rememberPosted(key, date, runs) {
 const POSTED_KEY = 'kova-streak-posted';
 const POSTED_PREV_KEY = 'kova-streak-posted-prev';
 
+// A rest day the server handed back because the day was closed anyway: the
+// calendar has to drop the permit at once, and the ceremony says so.
+function noteRestReturned(date) {
+  state.restReturnedFor = date;
+  loadRest().then(() => { if (state.tab === 'today') renderToday(); });
+}
+
 // Posting for yesterday: the grace top-up for a night session and the fix for
 // "played yesterday but the tab was not open". The server accepts yesterday
 // within its date window and never downgrades an already closed day, so the post is safe.
@@ -716,12 +724,13 @@ async function maybePostPrev() {
         state.lastPostedPrevRuns = p.completedRuns; // another tab already sent exactly this
         return;
       }
-      await api.postCompletion({
+      const res = await api.postCompletion({
         date,
         completedRuns: p.completedRuns,
         requiredRuns: p.requiredRuns,
         done: p.done,
       });
+      if (res && res.restReturned) noteRestReturned(date);
       rememberPosted(POSTED_PREV_KEY, date, p.completedRuns);
       state.lastPostedPrevRuns = p.completedRuns;
       state.lastPrevPostAt = Date.now();
@@ -762,6 +771,7 @@ async function maybePost() {
       rememberPosted(POSTED_KEY, date, p.completedRuns);
       state.lastPostedRuns = p.completedRuns;
       state.lastPostAt = Date.now();
+      if (res && res.restReturned) noteRestReturned(date);
       if (res && res.streak !== undefined) state.streak = res;
       if (state.tab === 'today') renderToday();
     });
@@ -1544,7 +1554,7 @@ function renderRestWindow() {
   // the rules and the current situation, one legend
   const legend = el('span', 'legend');
   legend.style.cssText = 'display:block;margin-top:14px';
-  const lines = [`<b>${REST_QUOTA_PER_WEEK} PER WEEK</b> · THE STREAK PASSES OVER A REST DAY · SET IT BEFORE THE DAY STARTS · TODAY IS LOCKED`];
+  const lines = [`<b>${REST_QUOTA_PER_WEEK} PER WEEK</b> · THE STREAK PASSES OVER A REST DAY · SET IT BEFORE THE DAY STARTS · TODAY IS LOCKED · CLOSE THE PLAYLIST ANYWAY AND THE PERMIT COMES BACK`];
   const bits = [];
   const upcoming = state.restDates.filter((d) => d > today).sort();
   if (upcoming.length) bits.push(upcoming.map((d) => monthDayShort(d).toUpperCase()).join(', ') + ' SCHEDULED');
@@ -1873,6 +1883,8 @@ function startCelebration(test = false, p = { date: state.date, night: false }) 
     // is still in flight when the ceremony starts. A past day is never given
     // a streak: the number on hand belongs to today, not to that day.
     streak: past ? null : () => (state.streak ? state.streak.streak : null),
+    // read at verdict time too: the post that reports it is still in flight
+    restReturned: () => state.restReturnedFor === p.date,
     weekLabel: past ? null : state.playlist && state.playlist.weekLabel,
   });
 }
@@ -2840,7 +2852,7 @@ function renderAdminRestWindow() {
       row.append(t);
       body.append(row);
     }
-    const fine = el('span', 'fine', `A rest day is transparent: the streak passes over it and it is never a missed day. Past days work too, which is how a day is forgiven after the fact. Days you grant here do not count against the player's own ${r.quota} a week, so they can still schedule their own.`);
+    const fine = el('span', 'fine', `A rest day is transparent: the streak passes over it and it is never a missed day. Past days work too, which is how a day is forgiven after the fact. Days you grant here do not count against the player's own ${r.quota} a week, so they can still schedule their own. If they train through a rest day and close the playlist, the day counts as done and the permit goes back to them.`);
     fine.style.cssText = 'display:block;margin-top:14px';
     body.append(fine);
   };

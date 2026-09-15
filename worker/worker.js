@@ -1458,6 +1458,32 @@ async function handleApi(request, env, url, cors, ctx) {
     const profile = await env.KOVA.get(`user:${user.uid}`, 'json');
     const restArr = (await env.KOVA.get(`rest:${user.uid}`, 'json')) || [];
     const rest = new Set(restArr);
+
+    // An unused rest day comes back (per Rauder, 2026-09-15). Somebody with a
+    // day off who trains anyway closes the day like every other day, and the
+    // permit they never spent returns to that week's quota. Only a fully
+    // closed day returns it: partial progress on a rest day changes nothing,
+    // so nobody loses a permit by playing three runs and stopping.
+    let restReturned = false;
+    if (done && rest.has(body.date)) {
+      rest.delete(body.date);
+      const vault = await getVault(env, user.uid);
+      const wasGranted = (vault.grantedDays || []).includes(body.date);
+      const wasShielded = (vault.shieldDays || []).includes(body.date);
+      const writes = [env.KOVA.put(`rest:${user.uid}`, JSON.stringify([...rest].sort()))];
+      if (wasGranted || wasShielded) {
+        if (wasGranted) vault.grantedDays = vault.grantedDays.filter((d) => d !== body.date);
+        if (wasShielded) {
+          vault.shieldDays = vault.shieldDays.filter((d) => d !== body.date);
+          // the shield absorbed a miss that turned out not to be a miss: arm it again
+          vault.shield = true;
+        }
+        writes.push(putVault(env, user.uid, vault));
+      }
+      await Promise.all(writes);
+      restReturned = true;
+    }
+
     // Streak anchor = the player's topmost closed day. A player east of the group
     // lives a day ahead: their "tomorrow" is already closed, the streak runs from there.
     const upD = shiftDate(today, 1);
@@ -1472,6 +1498,7 @@ async function handleApi(request, env, url, cors, ctx) {
       ok: true,
       done,
       streak,
+      restReturned,
       missedDays: computeMissed(all, anchor.slice(0, 7), anchor, profile && profile.joinedDate, rest),
     }, 200, cors);
   }

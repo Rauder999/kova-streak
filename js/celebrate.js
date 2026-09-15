@@ -690,6 +690,8 @@ export function startCelebration(opts = {}) {
         ? `[ Daily Quest for <b>${day}</b>: <b>cleared</b>${opts.night ? ' in the night' : ' with the tab shut'}. ${runs} of the playlist in the books, counted toward that day. ]`
         : `[ Daily Quest: <b>cleared</b>. ${runs} of ${opts.weekLabel ? opts.weekLabel + "'s playlist" : 'the playlist'} in the books, checked in automatically. ]`,
       streak ? `[ Streak: <b>${streak}</b>. The chain holds. ]` : null,
+      (typeof opts.restReturned === 'function' ? opts.restReturned() : opts.restReturned)
+        ? '[ You trained through a scheduled rest day. The permit is <b>back in your week</b>. ]' : null,
       `[ Reward: <b>+1 day</b> to this month's record. ]`,
       '[ The System took note. Come back tomorrow. ]',
     ].filter(Boolean);
