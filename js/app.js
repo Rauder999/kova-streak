@@ -9,6 +9,7 @@ import {
   countRunsAroundMidnight, applyGraceWindow,
 } from './fs.js';
 import { getAllParsedRuns, kvGet, kvSet } from './db.js';
+import { startCelebration as runCeremony } from './celebrate.js';
 import { buildDailyReport, coachPayload, buildTrackingLine } from './stats.js';
 import { annotateTerms, initGlossary } from './glossary.js';
 
@@ -1826,72 +1827,12 @@ function notice(text, kind = '') {
   return el('div', 'notice ' + kind, text);
 }
 
-// ---------- 100% celebration: a pentagon of targets, KovaaK's style ----------
-// Dim for ~a second, five "3D" balls appear one by one with a spin-up and a
-// rising spawn sound. Click = shot sound (always the same) + a kill sound
-// that gets higher with every hit. The fifth: a chord and the card.
-// The sounds are real ones from Pasha's KovaaK's folder: 808 perc (spawn),
-// rxSound11 (shot), kick-deep (kill). If they fail to load, synth fallback.
+// ---------- the 100% ceremony ----------
+// The cores, the cracks and the black hole live in celebrate.js; this is
+// only the gate: once a day, only while the tab is visible, with the
+// numbers the verdict window shows.
 
 const CELEBRATED_KEY = 'kova-celebrated';
-const HIT_NOTES = [392.0, 440.0, 493.88, 587.33, 659.25]; // fallback: G4 A4 B4 D5 E5
-const FINAL_CHORD = [523.25, 659.25, 783.99, 1046.5];     // C E G C
-const KILL_RATES = [1, 1.19, 1.41, 1.68, 2.0];    // +3 semitones per hit
-const SPAWN_RATES = [1, 1.12, 1.26, 1.41, 1.59];  // +2 semitones per spawn
-
-let actx = null;
-function ensureCtx() {
-  actx = actx || new (window.AudioContext || window.webkitAudioContext)();
-  if (actx.state === 'suspended') actx.resume();
-  return actx;
-}
-
-function tone(freq, dur = 0.22, gainV = 0.16) {
-  try {
-    const ctx = ensureCtx();
-    const t = ctx.currentTime;
-    const o = ctx.createOscillator();
-    const g = ctx.createGain();
-    o.type = 'triangle';
-    o.frequency.value = freq;
-    g.gain.setValueAtTime(gainV, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-    o.connect(g).connect(ctx.destination);
-    o.start(t);
-    o.stop(t + dur + 0.05);
-  } catch { /* sound is optional */ }
-}
-
-let sndBuffers = null; // null = not loaded yet, false = failed, object = ready
-async function loadSounds() {
-  if (sndBuffers !== null) return;
-  try {
-    const ctx = ensureCtx();
-    const load = async (url) => ctx.decodeAudioData(await (await fetch(url)).arrayBuffer());
-    const [spawn, shot, kill] = await Promise.all(
-      ['assets/spawn-808.ogg', 'assets/shot-rx11.ogg', 'assets/kill-kick.ogg'].map(load));
-    sndBuffers = { spawn, shot, kill };
-  } catch {
-    sndBuffers = false;
-  }
-}
-
-function playBuf(name, rate = 1, gain = 0.5) {
-  if (!sndBuffers || !sndBuffers[name]) return false;
-  try {
-    const ctx = ensureCtx();
-    const s = ctx.createBufferSource();
-    s.buffer = sndBuffers[name];
-    s.playbackRate.value = rate;
-    const g = ctx.createGain();
-    g.gain.value = gain;
-    s.connect(g).connect(ctx.destination);
-    s.start();
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 function maybeCelebrate() {
   if (localStorage.getItem(CELEBRATED_KEY) === state.date) return;
@@ -1900,109 +1841,12 @@ function maybeCelebrate() {
 }
 
 function startCelebration(test = false) {
-  if (document.querySelector('.celebrate-overlay')) return;
   if (!test) localStorage.setItem(CELEBRATED_KEY, state.date);
-  loadSounds(); // decoding the three small ogg files finishes before the first spawn
-
-  const overlay = el('div', 'celebrate-overlay');
-  const finale = () => {
-    FINAL_CHORD.forEach((f, i) => setTimeout(() => tone(f, 0.7, 0.14), i * 70));
-    overlay.replaceChildren();
-    const fin = el('div', 'celebrate-final');
-    // the verdict stage: ritual ring + guild frame + shockwaves behind the
-    // number, a scanline sweep and rising sparks over it
-    const stage = el('div', 'final-stage');
-    const ring = el('img', 'final-ring');
-    ring.src = 'assets/ornament-ring-gold.svg'; ring.alt = '';
-    stage.append(ring);
-    stage.append(el('span', 'final-wave'));
-    stage.append(el('span', 'final-wave w2'));
-    const fr = el('img', 'final-frame');
-    fr.src = 'assets/frame-gold.svg'; fr.alt = '';
-    stage.append(fr);
-    const pct = el('div', 'final-pct');
-    stage.append(pct);
-    stage.append(el('span', 'final-scanline'));
-    stage.append(el('span', 'final-sparks'));
-    fin.append(stage);
-    fin.append(el('div', 'final-sys mono', '[DAY SECURED]'));
-    fin.append(el('div', 'final-sub', state.streak && state.streak.streak
-      ? `${state.streak.streak} day streak, checked in automatically`
-      : 'checked in automatically'));
-    overlay.append(fin);
-
-    // the number decodes into place: glyphs settle left to right
-    const target = '100%';
-    const motionOk = !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-    if (!motionOk) {
-      pct.textContent = target;
-    } else {
-      const glyphs = '0123456789#$&';
-      let t0 = null;
-      const step = (ts) => {
-        if (!fin.isConnected || pct.dataset.done) return;
-        if (t0 === null) t0 = ts;
-        const p = Math.min(1, (ts - t0) / 820);
-        const settled = Math.floor(p * (target.length + 0.99));
-        let s = target.slice(0, settled);
-        for (let i = settled; i < target.length; i++) s += glyphs[Math.floor(Math.random() * glyphs.length)];
-        pct.textContent = s;
-        if (p < 1) requestAnimationFrame(step);
-      };
-      requestAnimationFrame(step);
-      // rAF can stall (hidden window, game overlay): the verdict still lands
-      setTimeout(() => { pct.dataset.done = '1'; pct.textContent = target; }, 950);
-    }
-    setTimeout(() => overlay.remove(), 4000);
-  };
-
-  // respect reduced motion: no shooting gallery, straight to the card
-  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    document.body.append(overlay);
-    finale();
-    return;
-  }
-
-  const hint = el('div', 'celebrate-hint', 'shoot the targets');
-  overlay.append(hint);
-
-  const R = Math.max(140, Math.min(300, Math.min(window.innerWidth, window.innerHeight) * 0.3));
-  const balls = [];
-  let left = 5;
-  for (let i = 0; i < 5; i++) {
-    const ang = (-90 + i * 72) * Math.PI / 180;
-    const ball = el('button', 'celebrate-ball');
-    ball.style.left = `calc(50% + ${Math.round(Math.cos(ang) * R)}px)`;
-    ball.style.top = `calc(50% + ${Math.round(Math.sin(ang) * R)}px)`;
-    ball.addEventListener('click', () => {
-      if (ball.classList.contains('hit') || !ball.classList.contains('spawned')) return;
-      ball.classList.add('hit');
-      const idx = 5 - left;
-      // the shot is always the same, the kill sound rises with every hit
-      if (!playBuf('shot', 1, 0.5)) tone(660, 0.05, 0.07);
-      if (!playBuf('kill', KILL_RATES[idx], 0.6)) tone(HIT_NOTES[idx]);
-      hint.classList.add('gone');
-      left--;
-      if (left === 0) setTimeout(finale, 220);
-    });
-    overlay.append(ball);
-    balls.push(ball);
-  }
-
-  const skip = el('button', 'celebrate-skip ghost', 'skip');
-  skip.addEventListener('click', () => overlay.remove());
-  overlay.append(skip);
-
-  document.body.append(overlay);
-
-  // dim for ~0.9s, then balls one by one: spin-up + spawn sound higher and higher
-  balls.forEach((b, i) => {
-    setTimeout(() => {
-      if (!overlay.isConnected) return; // skip could have been pressed during the spawn
-      b.classList.add('spawned');
-      if (!playBuf('spawn', SPAWN_RATES[i], 0.45)) tone(280 * SPAWN_RATES[i], 0.14, 0.07);
-      if (i === balls.length - 1) hint.classList.add('shown');
-    }, 900 + i * 190);
+  runCeremony({
+    test,
+    runs: state.progress ? state.progress.requiredRuns : null,
+    streak: state.streak ? state.streak.streak : null,
+    weekLabel: state.playlist && state.playlist.weekLabel,
   });
 }
 

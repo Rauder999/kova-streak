@@ -144,10 +144,16 @@ verdict chips per niche (colored by code severity), assignment lines in
 mono, "Same focus as yesterday" rendered as a repeat marker. Day chips
 become mono date tabs. Tables keep tabular-nums.
 
-**Celebration.** Stays as mechanics (orbs, sounds, kill rates). Visual
-pass: orbs brighter at spawn (rim light), caption scales up in mono,
-completion moment flashes a gold OPERATOR frame around the final score
-line. This is the one place ceremony and terminal fully merge.
+**Celebration.** Rebuilt 2026-09-15 (js/celebrate.js): five mana cores
+materialize over the page on beams of light; every core you break bursts
+into shards, shakes the screen and cracks the glass a little more (canvas
+cracks that keep spreading); the fifth shatters it and the whole page is
+pulled into a black hole (accretion disk, light streaks, #page scaled
+into the center). Out of the dark: the System's verdict window, rails
+and the "!" header, 100% decoding in place, the reward line in gold.
+Sounds: the three KovaaK's samples plus synthesized cracks, the collapse
+and the verdict chord. This is the one place ceremony and terminal fully
+merge.
 
 **Admin.** Styled file input, System eyebrows. Lowest priority: one
 viewer.
