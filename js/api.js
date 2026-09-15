@@ -65,6 +65,13 @@ export const getTrial = () => call('/api/trial');
 // report: { best, runs, days } from before the window, { windowBest, windowRuns } inside it
 export const postTrialBaseline = (windowId, report) => call('/api/trial/baseline', { method: 'POST', body: { windowId, ...report } });
 export const setTrial = (body) => call('/api/admin/trial', { method: 'POST', body });
+// The Gate: the push-your-luck sink for links (THE_GATE.md)
+export const getGate = () => call('/api/gate');
+export const gateEnter = (gate) => call('/api/gate/enter', { method: 'POST', body: { gate } });
+export const gateDescend = () => call('/api/gate/descend', { method: 'POST' });
+export const gateExtract = () => call('/api/gate/extract', { method: 'POST' });
+export const setGate = (body) => call('/api/admin/gate', { method: 'POST', body });
+
 export const getAdminRest = () => call('/api/admin/rest');
 // body: { userId, on, and one of date | dates | from+to }
 export const setAdminRest = (body) => call('/api/admin/rest', { method: 'POST', body });

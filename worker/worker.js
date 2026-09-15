@@ -445,11 +445,16 @@ async function getChainPairs(env, date) {
   return { win, doc };
 }
 
-async function addLinks(env, uid, delta, why) {
+// onceKey: an idempotency tag written next to the entry. A second call with
+// the same tag is ignored, so two tabs racing the same payout credit it once.
+async function addLinks(env, uid, delta, why, onceKey = null) {
   const key = `links:${uid}`;
   const doc = (await env.KOVA.get(key, 'json')) || { total: 0, log: [] };
+  if (onceKey && doc.log.some((e) => e.k === onceKey)) return doc.total;
   doc.total += delta;
-  doc.log.push({ at: Date.now(), d: delta, why });
+  const entry = { at: Date.now(), d: delta, why };
+  if (onceKey) entry.k = onceKey;
+  doc.log.push(entry);
   doc.log = doc.log.slice(-40);
   await env.KOVA.put(key, JSON.stringify(doc), { metadata: { t: doc.total } });
   return doc.total;
@@ -1253,6 +1258,153 @@ async function trialTurnover(env) {
   if (cur && !cur.announcedAt && !cur.resolved) await announceTrial(env, cur);
 }
 
+// ---------- The Gate ----------
+// A push-your-luck sink for links (see THE_GATE.md). Close the day's quest
+// and a Gate opens: pour links in, descend E -> D -> C -> B -> A -> S, walk
+// out whenever you like. Every multiplier is 0.95 / P(reaching that rank),
+// so the return is the same wherever you stop and there is no depth to
+// solve for; the missing 5% piles up in the Vault and goes to whoever
+// clears an S-rank.
+//
+// The whole run is decided at entry: the server rolls how deep it goes and
+// keeps that number to itself, and a descent only reveals one more rank of
+// a result that already exists. KV has no transactions, so this is the only
+// shape where parallel requests have nothing to race for.
+// Payouts are whole links written out by hand, never a multiplier applied to
+// a stake: links are integers, and rounding a multiplier turned out to make
+// one depth pay over 100% (a 1.9x on any stake rounds to exactly 2.0x), which
+// would have let the Gate print links. Every number below is checked against
+// its probability by scratchpad/gate-math.mjs.
+//
+// The S-rank floor pays its own step AND the whole Vault. That makes the
+// last descent worth it only while the Vault is fat, and the Vault is fat
+// only because nobody has cleared an S-rank lately: the deal fixes itself.
+const GATE = {
+  ranks: ['E', 'D', 'C', 'B', 'A', 'S'],
+  survive: [0.90, 0.80, 0.70, 0.60, 0.50, 0.40],
+  gates: [
+    { id: 'lesser', name: 'Lesser Gate', cost: 3, pays: [3, 4, 5, 9, 19, 25] },
+    { id: 'greater', name: 'Greater Gate', cost: 5, pays: [5, 6, 9, 15, 31, 42] },
+    { id: 'monarch', name: "Monarch's Gate", cost: 8, pays: [8, 10, 15, 25, 50, 68] },
+  ],
+  runsPerDay: 3,
+  stakePerDay: 12,
+};
+const gateById = (id) => GATE.gates.find((g) => g.id === id) || null;
+const gateRunKey = (uid) => `gate:run:${uid}`;
+const gateDayKey = (uid, date) => `gate:day:${uid}:${date}`;
+const GATE_POT_KEY = 'gate:pot';
+const GATE_CLOSED_KEY = 'gate:closed';
+
+// A fair coin the client cannot see coming. The pairing RNG in this file is
+// seeded and deterministic on purpose; nothing here may use it.
+function gateRandom() {
+  const b = new Uint32Array(1);
+  crypto.getRandomValues(b);
+  return b[0] / 4294967296;
+}
+
+// How many ranks this run will clear before the Gate collapses (0..6).
+function rollDepth() {
+  let depth = 0;
+  for (let i = 0; i < GATE.survive.length; i++) {
+    if (gateRandom() < GATE.survive[i]) depth++;
+    else break;
+  }
+  return depth;
+}
+
+const gatePayout = (run, floor) => (floor > 0 ? (run.pays || (gateById(run.gate) || { pays: [] }).pays)[floor - 1] || 0 : 0);
+
+async function getPot(env) {
+  const doc = await env.KOVA.get(GATE_POT_KEY, 'json');
+  return (doc && Number(doc.pot)) || 0;
+}
+async function addPot(env, delta) {
+  const pot = (await getPot(env)) + delta;
+  await env.KOVA.put(GATE_POT_KEY, JSON.stringify({ pot, updatedAt: Date.now() }));
+  return pot;
+}
+
+async function gateDay(env, uid, date) {
+  const doc = await env.KOVA.get(gateDayKey(uid, date), 'json');
+  return { runs: (doc && doc.runs) || 0, staked: (doc && doc.staked) || 0 };
+}
+
+// What the client is allowed to know: the ladder, the pot, today's spend and
+// the ranks of the open run that have already been revealed. Never the depth.
+function publicRun(run) {
+  if (!run) return null;
+  const dead = run.floor > run.depth;
+  const def = gateById(run.gate);
+  return {
+    id: run.id,
+    gate: run.gate,
+    gateName: def ? def.name : 'Gate',
+    stake: run.stake,
+    pays: run.pays || (def ? def.pays : []),
+    floor: dead ? run.depth : run.floor,
+    diedAt: dead ? run.floor : null,
+    dead,
+    cleared: !dead && run.floor >= GATE.ranks.length,
+    holding: dead ? 0 : gatePayout(run, run.floor),
+    next: dead || run.floor >= GATE.ranks.length ? null : {
+      rank: GATE.ranks[run.floor],
+      survive: GATE.survive[run.floor],
+      pays: gatePayout(run, run.floor + 1),
+      vault: run.floor + 1 === GATE.ranks.length,
+    },
+  };
+}
+
+async function gateState(env, user) {
+  const date = groupDate(env);
+  const [runRaw, linksDoc, pot, closed, day, rec, rest] = await Promise.all([
+    env.KOVA.get(gateRunKey(user.uid), 'json'),
+    env.KOVA.get(`links:${user.uid}`, 'json'),
+    getPot(env),
+    env.KOVA.get(GATE_CLOSED_KEY),
+    gateDay(env, user.uid, date),
+    env.KOVA.get(`completion:${user.uid}:${date}`, 'json'),
+    env.KOVA.get(`rest:${user.uid}`, 'json'),
+  ]);
+  const questDone = !!(rec && rec.done);
+  const resting = Array.isArray(rest) && rest.includes(date);
+  const runsLeft = Math.max(0, GATE.runsPerDay - day.runs);
+  const stakeLeft = Math.max(0, GATE.stakePerDay - day.staked);
+  let why = null;
+  if (closed) why = 'The System has sealed the Gate.';
+  else if (!questDone) why = resting
+    ? 'A Gate does not open on a rest day. Close a quest and it will.'
+    : 'The Gate opens once today\'s quest is closed.';
+  else if (!runsLeft) why = `That is all ${GATE.runsPerDay} Gates for today. Another opens tomorrow.`;
+  else if (!stakeLeft) why = `Today's ${GATE.stakePerDay} links are spent. Another Gate opens tomorrow.`;
+  const links = (linksDoc && linksDoc.total) || 0;
+  return {
+    ranks: GATE.ranks,
+    survive: GATE.survive,
+    gates: GATE.gates.map((g) => ({
+      ...g,
+      affordable: links >= g.cost,
+      withinDay: g.cost <= stakeLeft,
+    })),
+    runsPerDay: GATE.runsPerDay,
+    stakePerDay: GATE.stakePerDay,
+    links,
+    pot: Math.max(0, Math.floor(pot)),
+    runsLeft,
+    stakeLeft,
+    questDone,
+    open: !closed && questDone && runsLeft > 0 && stakeLeft >= GATE.gates[0].cost,
+    why,
+    run: publicRun(runRaw),
+  };
+}
+
+async function announceGate(env, lines) {
+  await postSystemLines(env, lines);
+}
+
 // ---------- Discord OAuth ----------
 
 function discordRedirectUri(request) {
@@ -1883,6 +2035,129 @@ async function handleApi(request, env, url, cors, ctx) {
     return json({ ok: true, userId: uid, displayName: profile.displayName || 'unknown', dates, granted: vault.grantedDays, changed }, 200, cors);
   }
 
+  // ---------- The Gate ----------
+
+  if (path === '/api/gate' && request.method === 'GET') {
+    return json(await gateState(env, user), 200, cors);
+  }
+
+  // Pour links into a Gate. The stake leaves the balance here, before the run
+  // exists, and the run's depth is rolled and hidden in the same breath.
+  if (path === '/api/gate/enter' && request.method === 'POST') {
+    const body = (await request.json().catch(() => null)) || {};
+    const def = gateById(String(body.gate || ''));
+    const st = await gateState(env, user);
+    if (st.run && !st.run.dead) return json({ error: 'A Gate is already open. Finish that descent first.' }, 400, cors);
+    if (!st.open) return json({ error: st.why || 'The Gate is shut.' }, 400, cors);
+    if (!def) return json({ error: 'Unknown gate' }, 400, cors);
+    const stake = def.cost;
+    if (stake > st.stakeLeft) return json({ error: `Only ${st.stakeLeft} staked links left today` }, 400, cors);
+    if (st.links < stake) return json({ error: `Not enough links: ${st.links}/${stake}` }, 400, cors);
+
+    const date = groupDate(env);
+    const day = await gateDay(env, user.uid, date);
+    const run = {
+      id: `${user.uid}-${date}-${day.runs + 1}-${Date.now().toString(36)}`,
+      gate: def.id,
+      stake,
+      pays: def.pays, // frozen into the run: a later rebalance never changes a run in flight
+      depth: rollDepth(), // the whole run, decided now and never shown
+      floor: 0,
+      date,
+      startedAt: Date.now(),
+    };
+    await addLinks(env, user.uid, -stake, `gate ${def.id}`);
+    await addPot(env, stake);
+    await Promise.all([
+      env.KOVA.put(gateDayKey(user.uid, date), JSON.stringify({ runs: day.runs + 1, staked: day.staked + stake }), { expirationTtl: 60 * 60 * 72 }),
+      env.KOVA.put(gateRunKey(user.uid), JSON.stringify(run), { expirationTtl: 60 * 60 * 72 }),
+    ]);
+    return json({ ok: true, ...(await gateState(env, user)) }, 200, cors);
+  }
+
+  // One more rank of a result that already exists.
+  if (path === '/api/gate/descend' && request.method === 'POST') {
+    const run = await env.KOVA.get(gateRunKey(user.uid), 'json');
+    if (!run) return json({ error: 'No Gate is open' }, 400, cors);
+    if (run.floor > run.depth) return json({ error: 'That Gate has already collapsed' }, 400, cors);
+    if (run.floor >= GATE.ranks.length) return json({ error: 'The S-rank is cleared. Take what you are holding.' }, 400, cors);
+
+    run.floor++;
+    const dead = run.floor > run.depth;
+    if (dead) {
+      // the stake went into the Vault at entry and stays there
+      await env.KOVA.delete(gateRunKey(user.uid));
+      const rank = GATE.ranks[run.floor - 1];
+      if (run.floor >= 5 && ctx) {
+        ctx.waitUntil(announceGate(env, [
+          `[GATE // ${user.name} reached the ${rank}-rank floor and did not come back. ${run.stake} ${run.stake === 1 ? 'link' : 'links'} stay in the Vault.]`,
+        ]));
+      }
+    } else {
+      await env.KOVA.put(gateRunKey(user.uid), JSON.stringify(run), { expirationTtl: 60 * 60 * 72 });
+    }
+    return json({
+      ok: true,
+      dead,
+      rank: GATE.ranks[run.floor - 1],
+      ...(await gateState(env, user)),
+      run: publicRun(dead ? { ...run, floor: run.floor } : run),
+    }, 200, cors);
+  }
+
+  // Walk out with what the Gate owes.
+  if (path === '/api/gate/extract' && request.method === 'POST') {
+    const run = await env.KOVA.get(gateRunKey(user.uid), 'json');
+    if (!run) return json({ error: 'No Gate is open' }, 400, cors);
+    if (run.floor > run.depth) return json({ error: 'That Gate has already collapsed' }, 400, cors);
+    if (run.floor < 1) return json({ error: 'Clear a rank first' }, 400, cors);
+
+    const cleared = run.floor >= GATE.ranks.length;
+    const payout = gatePayout(run, run.floor);
+    let pot = await addPot(env, -payout);
+    let bonus = 0;
+    if (cleared) {
+      bonus = Math.max(0, Math.floor(pot));
+      if (bonus > 0) pot = await addPot(env, -bonus);
+    }
+    // the run id makes the credit idempotent: two tabs racing pay once
+    const total = await addLinks(env, user.uid, payout + bonus, `gate ${GATE.ranks[run.floor - 1]}-rank`, run.id);
+    await env.KOVA.delete(gateRunKey(user.uid));
+
+    if (ctx && (cleared || payout - run.stake >= 8)) {
+      ctx.waitUntil(announceGate(env, cleared
+        ? [
+          `[GATE // ${user.name} CLEARED THE S-RANK.]`,
+          `[${run.stake} in, ${payout} out${bonus ? `, and the Vault opens: +${bonus}` : ''}. ${payout + bonus} links. The System has seen this ${GATE.ranks.length}-floor descent and has nothing to say.]`,
+        ]
+        : [`[GATE // ${user.name} walked out of the ${GATE.ranks[run.floor - 1]}-rank floor holding ${payout} links on a stake of ${run.stake}.]`]));
+    }
+    return json({
+      ok: true,
+      payout,
+      bonus,
+      cleared,
+      rank: GATE.ranks[run.floor - 1],
+      links: total,
+      ...(await gateState(env, user)),
+    }, 200, cors);
+  }
+
+  // The admin can seal the Gate for everyone and can look at, or seed, the Vault
+  if (path === '/api/admin/gate' && request.method === 'POST') {
+    if (!user.admin) return json({ error: 'Admin only' }, 403, cors);
+    const body = (await request.json().catch(() => null)) || {};
+    if (typeof body.closed === 'boolean') {
+      if (body.closed) await env.KOVA.put(GATE_CLOSED_KEY, '1');
+      else await env.KOVA.delete(GATE_CLOSED_KEY);
+    }
+    if (body.pot !== undefined) {
+      const pot = Math.max(0, Math.min(100000, Number(body.pot) || 0));
+      await env.KOVA.put(GATE_POT_KEY, JSON.stringify({ pot, updatedAt: Date.now() }));
+    }
+    return json({ ok: true, closed: !!(await env.KOVA.get(GATE_CLOSED_KEY)), pot: Math.floor(await getPot(env)) }, 200, cors);
+  }
+
   // Roster Protocol: who is out, who is on final notice, and the way back
   if (path === '/api/admin/roster' && request.method === 'GET') {
     if (!user.admin) return json({ error: 'Admin only' }, 403, cors);
@@ -2391,6 +2666,12 @@ async function postDigest(env) {
         : `[TRIAL // ${trial.scenario}: no baseline has fallen yet. ${taking} taking part, closes ${shortDate(trial.last)}.]`);
     }
   } catch { /* the trial never breaks the digest */ }
+
+  // the Gate's Vault, so the pot is public pressure
+  try {
+    const pot = Math.floor(await getPot(env));
+    if (pot >= 10) lines.push(`[GATE // the Vault holds ${pot} links. An S-rank clear takes all of it.]`);
+  } catch { /* the Gate never breaks the digest */ }
 
   const roleId = await env.KOVA.get('config:aimChadRoleId');
   const content = (roleId ? `<@&${roleId}>\n` : '') + systemBlock(lines).slice(0, 1900);

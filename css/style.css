@@ -736,6 +736,34 @@ select.inp option, select.inp optgroup { background: var(--win); color: var(--te
 .ro .s { font-family: var(--font-mono); font-size: 11px; letter-spacing: .02em; color: var(--text-2); margin-top: 2px; }
 .ro .av { width: 30px; height: 30px; }
 .sweeps { display: flex; align-items: center; gap: 12px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line-0); flex-wrap: wrap; }
+/* The Gate: the ladder of ranks, the stake bar, the collapse */
+.thegate { overflow: hidden; }
+.thegate.shake { animation: gate-shake .45s cubic-bezier(.36, .07, .19, .97); }
+@keyframes gate-shake { 10%, 90% { transform: translateX(-2px); } 20%, 80% { transform: translateX(4px); } 30%, 50%, 70% { transform: translateX(-7px); } 40%, 60% { transform: translateX(7px); } }
+.gl { display: flex; flex-direction: column; margin-top: 18px; }
+.gl-step { display: flex; align-items: center; gap: 14px; min-height: 46px; padding: 4px 10px 4px 0; border-bottom: 1px solid var(--line-2); opacity: .55; transition: opacity .2s, background .2s; }
+.gl-step:last-child { border-bottom: 0; }
+.gl-step.cleared { opacity: 1; background: linear-gradient(90deg, color-mix(in oklab, var(--ok) 10%, transparent), transparent 60%); }
+.gl-step.next { opacity: 1; background: linear-gradient(90deg, color-mix(in oklab, var(--accent) 16%, transparent), transparent 70%); box-shadow: inset 2px 0 0 var(--accent); }
+.gl-step.broke { opacity: 1; background: linear-gradient(90deg, color-mix(in oklab, var(--bad) 18%, transparent), transparent 70%); box-shadow: inset 2px 0 0 var(--bad); }
+.gl-step.broke .gl-p { color: var(--bad); text-decoration: line-through; }
+.gl-t { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.gl-r { font-family: var(--font-sys); text-transform: uppercase; letter-spacing: .14em; font-weight: 700; font-size: 13px; color: var(--text-0); }
+.gl-o { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .04em; color: var(--text-2); }
+.gl-p { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 700; font-size: 16px; color: var(--gold); flex: none; }
+.gl-v { font-family: var(--font-mono); font-size: 9px; letter-spacing: .16em; color: var(--gold-2); border: 1px solid color-mix(in oklab, var(--gold) 60%, transparent); padding: 2px 6px 1px; clip-path: var(--chamfer-4); flex: none; }
+.gate-doors { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 18px; }
+.gdoor { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 12px 14px; cursor: pointer; text-align: left; background: rgba(255, 255, 255, 0.02); border: 1px solid var(--line-1); clip-path: var(--chamfer-6); }
+.gdoor .n { font-family: var(--font-sys); text-transform: uppercase; letter-spacing: .12em; font-weight: 700; font-size: 13px; color: var(--text-0); }
+.gdoor .c { font-family: var(--font-mono); font-size: 14px; font-weight: 700; color: var(--gold); }
+.gdoor .s { font-family: var(--font-mono); font-size: 10px; letter-spacing: .04em; color: var(--text-2); }
+.gdoor:hover { border-color: var(--text-2); }
+.gdoor.on { border-color: var(--accent); background: color-mix(in oklab, var(--accent) 14%, transparent); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 30%, transparent); }
+.gdoor.poor { opacity: .45; }
+.gate-bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line-0); }
+.gate-hold { display: flex; align-items: baseline; gap: 10px; margin-right: 6px; }
+.gate-hold .v { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 30px; font-weight: 700; color: var(--gold); line-height: 1; }
+
 /* rest days handed out by the admin */
 .rest-form { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 16px; }
 .rest-form .inp { min-width: 200px; }

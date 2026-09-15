@@ -61,6 +61,7 @@ export const state = {
   restError: null,
   chains: null,         // current chain window (map data + my links)
   vault: null,          // Vault state for the Today tab card
+  gate: null,           // The Gate: ladder, pot, daily allowance, the open run
   vaultMsg: null,
   trial: null,          // the trial of the half-week (scenario, standings, my baseline)
 };
@@ -192,7 +193,7 @@ function switchTab(tab) {
   if (tab === 'today') renderToday();
   if (tab === 'stats') renderStats();
   if (tab === 'group') { renderGroup(); refreshGroup(); }
-  if (tab === 'vault') { renderVault(); loadVault(); }
+  if (tab === 'vault') { renderVault(); loadVault(); loadGate(); }
   if (tab === 'admin') renderAdmin();
 }
 
@@ -1387,6 +1388,8 @@ function renderVault() {
 
   if (!v) return;
 
+  root.append(renderGateWindow());
+
   // ---- the exchange ----
   const shop = mkWin();
   shop.append(winHead('[ Exchange ]', 'FOUR ARTIFACTS · THE SAME RARITY LADDER AS THE PODIUM'));
@@ -1455,6 +1458,190 @@ async function loadVault() {
     if (state.tab === 'vault') renderVault();
     if (state.tab === 'today') renderToday();
   } catch { /* the shop window is optional */ }
+}
+
+// ---------- The Gate: push your luck with links (THE_GATE.md) ----------
+// Close the day's quest and a Gate opens. Pour links in, descend rank by
+// rank, walk out whenever you like. The server decided the whole run at
+// entry and reveals it one rank at a time, so nothing here can be rerolled
+// and this code never learns anything it has not already paid for.
+
+let gateBusy = false;
+let gateFlash = null;   // the last outcome, shown until the next action
+let gatePick = 'lesser'; // which gate the selector is on
+
+async function loadGate(render = true) {
+  try {
+    state.gate = await api.getGate();
+    if (render && state.tab === 'vault') renderVault();
+  } catch { /* the Gate is optional */ }
+}
+
+async function gateAct(fn) {
+  if (gateBusy) return null;
+  gateBusy = true;
+  try {
+    const res = await fn();
+    state.gate = res;
+    // the wallet above the Gate reads the vault, not the Gate: keep the two
+    // numbers from disagreeing about how many links are in hand
+    if (state.vault) state.vault = { ...state.vault, links: res.links };
+    loadVault();
+    return res;
+  } catch (e) {
+    if (handleApiError(e)) return null;
+    gateFlash = { kind: 'err', text: '[ ' + e.message + ' ]' };
+    await loadGate(false);
+    return null;
+  } finally {
+    gateBusy = false;
+  }
+}
+
+function renderGateWindow() {
+  const g = state.gate;
+  const win = mkWin('thegate');
+  const pot = g ? g.pot : 0;
+  win.append(winHead('[ The Gate ]', g ? `VAULT ${pot} ${pot === 1 ? 'LINK' : 'LINKS'} · ${g.runsLeft} OF ${g.runsPerDay} GATES LEFT TODAY` : 'OPENING...'));
+  if (!g) {
+    win.append(el('div', 'quest-line', '[ Reading the Gate... ]'));
+    return win;
+  }
+  const run = g.run && !g.run.dead ? g.run : null;
+  const dead = g.run && g.run.dead ? g.run : null;
+  const picked = run ? g.gates.find((x) => x.id === run.gate)
+    : g.gates.find((x) => x.id === gatePick) || g.gates[0];
+
+  // ---- which gate: three doors at three prices ----
+  if (!run) {
+    const doors = el('div', 'gate-doors');
+    for (const d of g.gates) {
+      const b = el('button', 'gdoor' + (d.id === picked.id ? ' on' : ''));
+      b.type = 'button';
+      b.append(el('span', 'n', d.name));
+      b.append(el('span', 'c', `${d.cost} links`));
+      b.append(el('span', 's', `S-rank pays ${d.pays[5]} + the Vault`));
+      if (!d.affordable) b.classList.add('poor');
+      b.addEventListener('click', () => { gatePick = d.id; renderVault(); });
+      doors.append(b);
+    }
+    win.append(doors);
+  }
+
+  // ---- the ladder: every rank, its odds and what this gate pays ----
+  const pays = run ? run.pays : picked.pays;
+  const ladder = el('div', 'gl');
+  g.ranks.forEach((rank, i) => {
+    const step = el('div', 'gl-step');
+    const at = run ? run.floor : 0;
+    if (run && i < at) step.classList.add('cleared');
+    else if (run && i === at) step.classList.add('next');
+    if (dead && i === dead.diedAt - 1) step.classList.add('broke');
+    else if (dead && i < dead.floor) step.classList.add('cleared');
+    step.append(svgPlate(rank, i >= 4 ? METALS[0] : i >= 2 ? METALS[1] : 'plain'));
+    const t = el('div', 'gl-t');
+    t.append(el('span', 'gl-r', `${rank}-RANK`));
+    t.append(el('span', 'gl-o', `${Math.round(g.survive[i] * 100)}% through`));
+    step.append(t);
+    step.append(el('span', 'lead'));
+    step.append(el('span', 'gl-p', String(pays[i])));
+    if (i === g.ranks.length - 1) step.append(el('span', 'gl-v', '+VAULT'));
+    ladder.append(step);
+  });
+  win.append(ladder);
+
+  // ---- the controls: enter, or descend and walk out ----
+  const bar = el('div', 'gate-bar');
+  if (run) {
+    if (run.floor > 0) {
+      const hold = el('div', 'gate-hold');
+      hold.append(el('span', 'lbl', 'Holding'));
+      hold.append(el('span', 'v', String(run.holding)));
+      bar.append(hold);
+    } else {
+      bar.append(el('span', 'quest-line', `[ ${run.stake} links are in the Gate. Nothing is yours until a floor is cleared. ]`));
+    }
+    if (run.cleared) {
+      const take = el('button', 'btn gold', `Take ${run.holding} and the Vault`);
+      take.addEventListener('click', () => doExtract());
+      bar.append(take);
+    } else {
+      const deeper = el('button', 'btn', `Descend to ${run.next.rank}-rank · ${Math.round(run.next.survive * 100)}%`);
+      deeper.addEventListener('click', () => doDescend());
+      bar.append(deeper);
+      if (run.floor > 0) {
+        const out = el('button', 'btn ghost', `Walk out with ${run.holding}`);
+        out.addEventListener('click', () => doExtract());
+        bar.append(out);
+      }
+    }
+  } else if (g.open) {
+    const enter = el('button', 'btn', `Open the ${picked.name} · ${picked.cost} links`);
+    enter.disabled = !picked.affordable || !picked.withinDay;
+    if (!picked.affordable) enter.title = `You hold ${g.links} links`;
+    else if (!picked.withinDay) enter.title = `Only ${g.stakeLeft} staked links left today`;
+    enter.addEventListener('click', () => doEnter(picked.id));
+    bar.append(enter);
+    bar.append(el('span', 'quest-line', `[ ${g.links} links in hand · ${g.stakeLeft} of today's ${g.stakePerDay} still stakeable ]`));
+  } else {
+    bar.append(el('div', 'quest-line', `[ ${g.why || 'The Gate is shut.'} ]`));
+  }
+  win.append(bar);
+
+  if (gateFlash) {
+    const s = el('div', 'status ' + (gateFlash.kind === 'err' ? 'err' : 'ok'), gateFlash.text);
+    s.style.marginTop = '14px';
+    win.append(s);
+  }
+  const fine = el('span', 'fine', `Every floor pays less than it costs to reach, so there is no depth to solve for and no way to farm the Gate: the only real choice is how far you push. What the Gate keeps piles up in the Vault, and the Vault goes to whoever clears the S-rank floor, which is why the last descent is only worth it once the Vault is fat. ${g.runsPerDay} Gates and ${g.stakePerDay} staked links a day, and a Gate opens only on a day you have already closed.`);
+  fine.style.cssText = 'display:block;margin-top:16px';
+  win.append(fine);
+  return win;
+}
+
+async function doEnter(gateId) {
+  gateFlash = null;
+  const res = await gateAct(() => api.gateEnter(gateId));
+  if (res && res.run) gateFlash = { kind: 'note', text: `[ ${res.run.gateName} is open. ${res.run.stake} links are inside it. ]` };
+  renderVault();
+}
+
+async function doDescend() {
+  const before = state.gate && state.gate.run;
+  gateFlash = null;
+  renderVault();
+  const res = await gateAct(() => api.gateDescend());
+  if (res) {
+    gateFlash = res.dead
+      ? { kind: 'err', text: `[ The ${res.rank}-rank floor took it. ${before ? before.stake : ''} links stay in the Vault. ]` }
+      : { kind: 'win', text: `[ ${res.rank}-rank cleared. You are holding ${res.run.holding}. ]` };
+    if (res.dead) gateShake();
+  }
+  renderVault();
+}
+
+async function doExtract() {
+  gateFlash = null;
+  const res = await gateAct(() => api.gateExtract());
+  if (res) {
+    gateFlash = {
+      kind: 'win',
+      text: res.cleared && res.bonus
+        ? `[ S-RANK CLEARED. ${res.payout} links, and the Vault opens: +${res.bonus}. ]`
+        : `[ Out of the ${res.rank}-rank floor with ${res.payout} ${res.payout === 1 ? 'link' : 'links'}. ]`,
+    };
+    await loadVault();
+  }
+  renderVault();
+}
+
+// a short jolt of the Gate window when a floor gives way
+function gateShake() {
+  const w = document.querySelector('.thegate');
+  if (!w) return;
+  w.classList.remove('shake');
+  void w.offsetWidth;
+  w.classList.add('shake');
 }
 
 // ---------- rest days: the permit calendar ----------
@@ -2588,6 +2775,7 @@ function renderTrialAdminWindow() {
 function renderAdmin() {
   const root = $('view-admin');
   root.replaceChildren();
+  if (!state.gate) loadGate(false).then(() => { if (state.tab === 'admin') renderAdmin(); });
 
   // ---- the playlist of the week: drop the JSON, name the week, publish ----
   const win = mkWin();
@@ -2741,7 +2929,55 @@ function renderAdmin() {
 
   root.append(renderTrialAdminWindow());
   root.append(renderAdminRestWindow());
+  root.append(renderGateAdminWindow());
   root.append(renderRosterWindow());
+}
+
+// The Gate's two admin levers: seal it for everyone, and set the Vault.
+let gateAdminFlash = null;
+function renderGateAdminWindow() {
+  const win = mkWin('gate-admin');
+  win.append(winHead('[ The Gate ]', 'THE LINK SINK · SEE THE_GATE.MD'));
+  const g = state.gate;
+  const status = el('div', 'quest-line', g
+    ? `[ Vault: ${g.pot} ${g.pot === 1 ? 'link' : 'links'} · ${g.runsPerDay} gates and ${g.stakePerDay} staked links per player per day · opens only on a closed day ]`
+    : '[ Reading the Gate... ]');
+  status.style.cssText = 'display:block;margin-top:8px';
+  win.append(status);
+
+  const form = el('div', 'rest-form');
+  const potIn = el('input', 'inp date');
+  potIn.type = 'number';
+  potIn.min = '0';
+  potIn.value = g ? String(g.pot) : '0';
+  const msg = el('div', 'status');
+  msg.hidden = true;
+  const say = (t, c) => { msg.textContent = t; msg.className = 'status ' + c; msg.hidden = false; };
+  if (gateAdminFlash) { say(gateAdminFlash, 'ok'); gateAdminFlash = null; }
+  const act = (btn, fn) => btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    try {
+      gateAdminFlash = await fn();
+      await loadGate(false);
+      renderAdmin();
+    } catch (e) {
+      if (handleApiError(e)) return;
+      say('[ ' + e.message + ' ]', 'err');
+      btn.disabled = false;
+    }
+  });
+  const setPot = el('button', 'btn ghost', 'Set the Vault');
+  act(setPot, async () => { const r = await api.setGate({ pot: Number(potIn.value) }); return `[ Vault set to ${r.pot}. ]`; });
+  const seal = el('button', 'btn ghost', 'Seal the Gate');
+  act(seal, async () => { const r = await api.setGate({ closed: true }); return r.closed ? '[ Sealed. Nobody can enter. ]' : '[ Open. ]'; });
+  const open = el('button', 'btn ghost', 'Open the Gate');
+  act(open, async () => { const r = await api.setGate({ closed: false }); return r.closed ? '[ Sealed. ]' : '[ Open again. ]'; });
+  form.append(el('span', 'rest-dash', 'vault'), potIn, setPot, seal, open);
+  win.append(form, msg);
+  const fine = el('span', 'fine', 'The Gate returns 0.95 of every link staked, wherever a player stops, and the rest piles up in the Vault until somebody clears the S-rank floor. Seal it if it ever stops being fun. Setting the Vault by hand is for testing.');
+  fine.style.cssText = 'display:block;margin-top:14px';
+  win.append(fine);
+  return win;
 }
 
 // Rest days handed out by the admin (per Rauder, 2026-09-15): any player,
