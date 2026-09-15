@@ -56,6 +56,7 @@ export const state = {
   coachHash: null,
   coachError: null,
   restDates: [],        // scheduled rest days (dates)
+  restFree: [],         // of those, the ones that cost no quota (admin-granted, shield-absorbed)
   restError: null,
   chains: null,         // current chain window (map data + my links)
   vault: null,          // Vault state for the Today tab card
@@ -1463,6 +1464,7 @@ async function loadRest() {
   try {
     const res = await api.getRest();
     state.restDates = res.dates || [];
+    state.restFree = res.free || [];
   } catch { /* not critical */ }
 }
 
@@ -1481,6 +1483,9 @@ function renderRestWindow() {
   const today = state.date;
   const me = state.group && state.group.players.find((p) => p.userId === state.user.uid);
   const restSet = new Set(state.restDates);
+  // granted by Rauder or absorbed by a shield: a rest day like any other,
+  // but not one the player spent, so it never counts against the weekly quota
+  const freeSet = new Set(state.restFree);
   const horizon = addDays(today, REST_HORIZON_DAYS);
   const t0 = new Date(today + 'T12:00:00');
   const monday = addDays(today, -((t0.getDay() + 6) % 7));
@@ -1510,13 +1515,15 @@ function renderRestWindow() {
       } else if (isRest) st = 'rest';
       else if (restPending && restPending.date === date) st = 'pend';
       else if (date > horizon) st = 'lock';
-      if (st === 'rest') used++;
+      const free = st === 'rest' && freeSet.has(date);
+      if (st === 'rest' && !free) used++;
 
       const clickable = date > today && (st === 'open' || st === 'rest' || st === 'pend');
-      const cell = el(clickable ? 'button' : 'span', 'cell ' + st);
+      const cell = el(clickable ? 'button' : 'span', 'cell ' + st + (free ? ' given' : ''));
       if (clickable) {
         cell.type = 'button';
-        cell.title = st === 'rest' ? `${date}: scheduled rest day, click to cancel` : `${date}: click to schedule a rest day`;
+        cell.title = free ? `${date}: rest day given to you, it costs you no quota. Click to cancel`
+          : st === 'rest' ? `${date}: scheduled rest day, click to cancel` : `${date}: click to schedule a rest day`;
         cell.addEventListener('click', () => {
           restPending = { date, on: st !== 'rest' };
           state.restError = null;
@@ -1541,6 +1548,8 @@ function renderRestWindow() {
   const bits = [];
   const upcoming = state.restDates.filter((d) => d > today).sort();
   if (upcoming.length) bits.push(upcoming.map((d) => monthDayShort(d).toUpperCase()).join(', ') + ' SCHEDULED');
+  const given = upcoming.filter((d) => freeSet.has(d));
+  if (given.length) bits.push(`${given.length} GIVEN TO YOU · NO QUOTA SPENT`);
   if (restPending) bits.push(monthDayShort(restPending.date).toUpperCase() + (restPending.on ? ' PENDING' : ' CANCEL PENDING'));
   const v = state.vault;
   if (v) {
@@ -2719,7 +2728,124 @@ function renderAdmin() {
   root.append(two);
 
   root.append(renderTrialAdminWindow());
+  root.append(renderAdminRestWindow());
   root.append(renderRosterWindow());
+}
+
+// Rest days handed out by the admin (per Rauder, 2026-09-15): any player,
+// any stretch of days, past or future, no weekly quota. The player's own
+// calendar on Today keeps all of its guards; this window is the way around
+// them for the cases only a human can judge, an illness or a week away.
+let adminRestFlash = null; // the outcome of the last button, shown once after the redraw
+function renderAdminRestWindow() {
+  const win = mkWin('rest-admin');
+  win.append(winHead('[ Rest days ]', 'ANY PLAYER · ANY DAYS · NO WEEKLY LIMIT'));
+  const body = el('div');
+  body.append(el('div', 'quest-line', '[ Loading the group... ]'));
+  win.append(body);
+
+  const load = async () => {
+    let r;
+    try {
+      r = await api.getAdminRest();
+    } catch (e) {
+      if (handleApiError(e)) return;
+      body.replaceChildren(el('div', 'quest-line', '[ ' + e.message + ' ]'));
+      return;
+    }
+    body.replaceChildren();
+    const granted = new Set();
+    for (const p of r.players) for (const d of p.granted || []) granted.add(p.userId + '|' + d);
+
+    // ---- the form: who, from when, to when ----
+    const form = el('div', 'rest-form');
+    const who = el('select', 'inp');
+    for (const p of r.players) {
+      const o = el('option', null, p.displayName);
+      o.value = p.userId;
+      who.append(o);
+    }
+    const from = el('input', 'inp date');
+    from.type = 'date';
+    from.value = r.today;
+    const to = el('input', 'inp date');
+    to.type = 'date';
+    to.value = r.today;
+    // a single day is the common case: moving the start drags the end along
+    from.addEventListener('change', () => { if (!to.value || to.value < from.value) to.value = from.value; });
+    const dash = el('span', 'rest-dash', 'to');
+    form.append(who, from, dash, to);
+
+    const msg = el('div', 'status');
+    msg.hidden = true;
+    const say = (text, cls) => { msg.textContent = text; msg.className = 'status ' + cls; msg.hidden = false; };
+    if (adminRestFlash) { say(adminRestFlash, 'ok'); adminRestFlash = null; }
+
+    const act = (btn, on) => btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      const name = who.options[who.selectedIndex] ? who.options[who.selectedIndex].textContent : 'the player';
+      try {
+        const res = await api.setAdminRest({ userId: who.value, from: from.value, to: to.value, on });
+        const span = from.value === to.value ? monthDayShort(from.value) : `${monthDayShort(from.value)} - ${monthDayShort(to.value)}`;
+        adminRestFlash = res.changed
+          ? `[ ${name}: ${span} ${on ? 'granted' : 'withdrawn'} · ${res.changed} ${res.changed === 1 ? 'day' : 'days'} changed ]`
+          : `[ ${name}: nothing to change, ${span} was already ${on ? 'off' : 'a normal day'} ]`;
+        renderAdmin();
+      } catch (e) {
+        if (handleApiError(e)) return;
+        say('[ ' + e.message + ' ]', 'err');
+        btn.disabled = false;
+      }
+    });
+    const give = el('button', 'btn', 'Grant rest');
+    act(give, true);
+    const take = el('button', 'btn ghost', 'Withdraw');
+    act(take, false);
+    form.append(give, take);
+    body.append(form, msg);
+
+    // ---- who is off, and when ----
+    const withDays = r.players.filter((p) => p.dates.some((d) => d >= r.today));
+    const head = el('div', 'sec');
+    head.append(el('span', null, `[ SCHEDULED FROM TODAY · ${withDays.length} ${withDays.length === 1 ? 'PLAYER' : 'PLAYERS'} ]`), el('i'));
+    body.append(head);
+    if (!withDays.length) body.append(el('div', 'quest-line', '[ Nobody has a rest day ahead. ]'));
+    for (const p of withDays) {
+      const row = el('div', 'ro rest-row');
+      row.append(svgPlate(String(p.dates.filter((d) => d >= r.today).length).padStart(2, '0'), 'plain'));
+      row.append(avatarImg(p));
+      const t = el('div');
+      t.append(el('div', 'n', p.displayName));
+      const chips = el('div', 'rest-chips');
+      for (const d of p.dates.filter((x) => x >= r.today)) {
+        const chip = el('button', 'rest-chip' + (granted.has(p.userId + '|' + d) ? ' granted' : ''));
+        chip.type = 'button';
+        chip.title = (granted.has(p.userId + '|' + d) ? 'Granted by you. ' : 'Scheduled by the player. ') + 'Click to withdraw ' + d;
+        chip.append(el('span', null, monthDayShort(d).toUpperCase()), el('i', null, '×'));
+        chip.addEventListener('click', async () => {
+          chip.disabled = true;
+          try {
+            await api.setAdminRest({ userId: p.userId, date: d, on: false });
+            adminRestFlash = `[ ${p.displayName}: ${monthDayShort(d)} withdrawn ]`;
+            renderAdmin();
+          } catch (e) {
+            if (handleApiError(e)) return;
+            say('[ ' + e.message + ' ]', 'err');
+            chip.disabled = false;
+          }
+        });
+        chips.append(chip);
+      }
+      t.append(chips);
+      row.append(t);
+      body.append(row);
+    }
+    const fine = el('span', 'fine', `A rest day is transparent: the streak passes over it and it is never a missed day. Past days work too, which is how a day is forgiven after the fact. Days you grant here do not count against the player's own ${r.quota} a week, so they can still schedule their own.`);
+    fine.style.cssText = 'display:block;margin-top:14px';
+    body.append(fine);
+  };
+  load();
+  return win;
 }
 
 // the playlist as quest goals: open boxes for a preview, checked for the

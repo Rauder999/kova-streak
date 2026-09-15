@@ -1480,8 +1480,18 @@ async function handleApi(request, env, url, cors, ctx) {
   // time. Not retroactively and not during the day: that is exactly the guard against
   // "forgot to play, will file a rest day in the evening".
   if (path === '/api/rest' && request.method === 'GET') {
-    const dates = (await env.KOVA.get(`rest:${user.uid}`, 'json')) || [];
-    return json({ dates, quota: REST_QUOTA_PER_WEEK, today: groupDate(env) }, 200, cors);
+    const [dates, vault] = await Promise.all([
+      env.KOVA.get(`rest:${user.uid}`, 'json'),
+      getVault(env, user.uid),
+    ]);
+    // days the admin handed out or a shield absorbed are named, so the
+    // calendar can show them without charging them to the weekly quota
+    return json({
+      dates: dates || [],
+      free: [...new Set([...(vault.grantedDays || []), ...(vault.shieldDays || [])])].sort(),
+      quota: REST_QUOTA_PER_WEEK,
+      today: groupDate(env),
+    }, 200, cors);
   }
 
   if (path === '/api/rest' && request.method === 'POST') {
@@ -1499,10 +1509,11 @@ async function handleApi(request, env, url, cors, ctx) {
     let dates = (await env.KOVA.get(`rest:${user.uid}`, 'json')) || [];
     if (body.on) {
       if (!dates.includes(body.date)) {
-        // shield-converted days are emergencies, they never eat the weekly quota
+        // shield-converted days are emergencies and admin-granted days are
+        // not the player's doing: neither eats the weekly quota
         const vault = await getVault(env, user.uid);
-        const shieldDays = new Set(vault.shieldDays || []);
-        const sameWeek = dates.filter((d) => weekKeyOf(d) === weekKeyOf(body.date) && !shieldDays.has(d)).length;
+        const free = new Set([...(vault.shieldDays || []), ...(vault.grantedDays || [])]);
+        const sameWeek = dates.filter((d) => weekKeyOf(d) === weekKeyOf(body.date) && !free.has(d)).length;
         if (sameWeek >= REST_QUOTA_PER_WEEK) {
           // a held Vault voucher buys ONE day over the quota, once a calendar month
           const month = body.date.slice(0, 7);
@@ -1736,6 +1747,86 @@ async function handleApi(request, env, url, cors, ctx) {
     };
     await putTrialBaseline(env, trial.windowId, user.uid, rec);
     return json({ ok: true, baseline: rec.b, runs: rec.n, days: rec.d, windowBest: rec.wb, windowRuns: rec.wr, eligible: crownEligible(rec), taking: rec.wr >= TRIAL.partRuns }, 200, cors);
+  }
+
+  // Rest days from the admin's hand (per Rauder, 2026-09-15: "let me hand
+  // out rest days myself, as many as I see fit, without coming to you every
+  // time"). The player's own /api/rest keeps every guard: 2 a week, only
+  // before the day starts, 3 weeks ahead. This one has none of them, because
+  // the guards exist to stop a player covering their own missed evening, and
+  // the admin granting a week off is the opposite situation. Granted days are
+  // remembered in the vault so they never eat the player's own weekly quota,
+  // exactly the way shield-converted days work.
+  if (path === '/api/admin/rest' && request.method === 'GET') {
+    if (!user.admin) return json({ error: 'Admin only' }, 403, cors);
+    const today = groupDate(env);
+    const { users } = await loadGroup(env);
+    const active = users.filter((u) => !u.inactive).sort((a, b) => a.displayName.localeCompare(b.displayName));
+    const lists = await Promise.all(active.map((u) => env.KOVA.get(`rest:${u.userId}`, 'json')));
+    const vaults = await Promise.all(active.map((u) => getVault(env, u.userId)));
+    return json({
+      today,
+      quota: REST_QUOTA_PER_WEEK,
+      players: active.map((u, i) => ({
+        userId: u.userId,
+        displayName: u.displayName,
+        avatar: u.avatar,
+        dates: (Array.isArray(lists[i]) ? lists[i] : []).sort(),
+        granted: (vaults[i] && vaults[i].grantedDays) || [],
+      })),
+    }, 200, cors);
+  }
+
+  if (path === '/api/admin/rest' && request.method === 'POST') {
+    if (!user.admin) return json({ error: 'Admin only' }, 403, cors);
+    const body = (await request.json().catch(() => null)) || {};
+    const uid = String(body.userId || '');
+    if (!/^\d{1,25}$/.test(uid)) return json({ error: 'userId is required' }, 400, cors);
+    const profile = await env.KOVA.get(`user:${uid}`, 'json');
+    if (!profile) return json({ error: 'No such player' }, 404, cors);
+    const on = body.on !== false; // default: grant
+    const today = groupDate(env);
+    // a window wide enough for "he is away all of next month" and for fixing
+    // a day back in the past, but not wide enough to grow the key forever
+    const floor = shiftDate(today, -120);
+    const ceiling = shiftDate(today, 180);
+
+    // either an explicit list of dates or an inclusive from..to range
+    let wanted = [];
+    if (Array.isArray(body.dates)) wanted = body.dates.filter(isDate);
+    else if (isDate(body.from)) {
+      const to = isDate(body.to) ? body.to : body.from;
+      if (to < body.from) return json({ error: 'The range ends before it starts' }, 400, cors);
+      for (let d = body.from, i = 0; d <= to && i <= 90; d = shiftDate(d, 1), i++) wanted.push(d);
+    } else if (isDate(body.date)) wanted = [body.date];
+    wanted = [...new Set(wanted)];
+    if (!wanted.length) return json({ error: 'A date, a list of dates or a from/to range is required' }, 400, cors);
+    if (wanted.length > 90) return json({ error: 'At most 90 days at a time' }, 400, cors);
+    const out = wanted.filter((d) => d < floor || d > ceiling);
+    if (out.length) return json({ error: `Out of range: ${out[0]}. Anything from ${floor} to ${ceiling}.` }, 400, cors);
+
+    let dates = (await env.KOVA.get(`rest:${uid}`, 'json')) || [];
+    const vault = await getVault(env, uid);
+    const granted = new Set(vault.grantedDays || []);
+    const had = new Set(dates);
+    let changed = 0;
+    for (const d of wanted) {
+      if (on) {
+        if (!had.has(d)) { dates.push(d); changed++; }
+        granted.add(d); // never charged to the player's own weekly quota
+      } else {
+        if (had.has(d)) changed++;
+        granted.delete(d);
+      }
+    }
+    if (!on) dates = dates.filter((d) => !wanted.includes(d));
+    dates = [...new Set(dates)].filter((d) => d >= floor).sort();
+    vault.grantedDays = [...granted].filter((d) => d >= floor).sort().slice(-400);
+    await Promise.all([
+      env.KOVA.put(`rest:${uid}`, JSON.stringify(dates)),
+      putVault(env, uid, vault),
+    ]);
+    return json({ ok: true, userId: uid, displayName: profile.displayName || 'unknown', dates, granted: vault.grantedDays, changed }, 200, cors);
   }
 
   // Roster Protocol: who is out, who is on final notice, and the way back

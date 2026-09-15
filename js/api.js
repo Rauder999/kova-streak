@@ -65,6 +65,9 @@ export const getTrial = () => call('/api/trial');
 // report: { best, runs, days } from before the window, { windowBest, windowRuns } inside it
 export const postTrialBaseline = (windowId, report) => call('/api/trial/baseline', { method: 'POST', body: { windowId, ...report } });
 export const setTrial = (body) => call('/api/admin/trial', { method: 'POST', body });
+export const getAdminRest = () => call('/api/admin/rest');
+// body: { userId, on, and one of date | dates | from+to }
+export const setAdminRest = (body) => call('/api/admin/rest', { method: 'POST', body });
 export const resolveTrialNow = () => call('/api/admin/resolve-trial', { method: 'POST' });
 export const getVault = () => call('/api/vault');
 export const buyVault = (item) => call('/api/vault', { method: 'POST', body: { item } });

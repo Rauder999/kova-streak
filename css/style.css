@@ -397,6 +397,9 @@ button:disabled { cursor: default; }
 .cell.miss .dn { color: var(--bad); }
 .cell.rest { border-color: var(--accent); background: color-mix(in oklab, var(--accent) 24%, transparent); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 35%, transparent); }
 .cell.rest .dn, .cell.rest .wd { color: #FFFFFF; }
+/* a rest day that was given, not spent: same day, marked in the teal of a gift */
+.cell.rest.given { border-color: var(--teal); background: color-mix(in oklab, var(--teal) 20%, transparent); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--teal) 35%, transparent); }
+.cell.rest.given .m path { fill: var(--teal); }
 .cell.today { border-color: var(--text-0); box-shadow: inset 0 0 0 1px rgba(230, 235, 242, 0.3); }
 .cell.today .dn { color: #FFFFFF; }
 .cell.today .wd { color: var(--text-0); }
@@ -733,6 +736,21 @@ select.inp option, select.inp optgroup { background: var(--win); color: var(--te
 .ro .s { font-family: var(--font-mono); font-size: 11px; letter-spacing: .02em; color: var(--text-2); margin-top: 2px; }
 .ro .av { width: 30px; height: 30px; }
 .sweeps { display: flex; align-items: center; gap: 12px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line-0); flex-wrap: wrap; }
+/* rest days handed out by the admin */
+.rest-form { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 16px; }
+.rest-form .inp { min-width: 200px; }
+.rest-form .inp.date { min-width: 0; width: 160px; font-family: var(--font-mono); font-size: 12.5px; }
+.rest-dash { font-family: var(--font-mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--text-2); }
+.rest-admin .sec { margin-top: 22px; }
+.rest-row { align-items: start; }
+.rest-row .n { margin-top: 3px; }
+.rest-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.rest-chip { display: inline-flex; align-items: center; gap: 7px; padding: 3px 8px 2px; cursor: pointer; background: rgba(255, 255, 255, 0.02); border: 1px solid var(--line-1); clip-path: var(--chamfer-4); font-family: var(--font-mono); font-size: 10px; letter-spacing: .1em; color: var(--text-1); }
+.rest-chip.granted { border-color: color-mix(in oklab, var(--accent) 55%, transparent); color: var(--accent-soft); background: color-mix(in oklab, var(--accent) 12%, transparent); }
+.rest-chip i { font-style: normal; font-size: 12px; line-height: 1; color: var(--text-2); }
+.rest-chip:hover { border-color: color-mix(in oklab, var(--bad) 60%, transparent); color: var(--bad); }
+.rest-chip:hover i { color: var(--bad); }
+.rest-chip:disabled { opacity: .45; cursor: default; }
 
 /* ---------- the 100% ceremony: five cores, the cracks, the hole, the verdict ---------- */
 
