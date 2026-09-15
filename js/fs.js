@@ -74,26 +74,38 @@ export async function countRunsAroundMidnight(handle, today, prevDate) {
   return { prev, grace, cur, scanned };
 }
 
-// Grace window (per Pasha's request, 2026-08-28): if yesterday was STARTED
-// but not closed, night runs (before GRACE_HOURS) are counted toward
-// yesterday, not today: a session that crawled past midnight closes its own
-// day. If yesterday is closed or never started, night runs belong to today.
+// Grace window (per Pasha, 2026-08-28; widened 2026-09-15): the day's gate
+// closes at GRACE_HOURS, not at midnight. Night runs (before GRACE_HOURS)
+// count toward yesterday until it closes, even when yesterday had nothing
+// before midnight: a session that starts at 01:00 closes the day that just
+// ended. Scenario by scenario the night runs fill what yesterday still
+// needs; the surplus is today's. If yesterday is closed, or is a scheduled
+// rest day (opts.prevRest), night runs belong to today.
 // prevScenarios: the playlist that was ACTIVE yesterday. Across a weekly
 // swap yesterday is judged by its own playlist, not by today's (2026-09-05),
 // otherwise the files stop matching and the day cannot heal.
 // Pure function, tested in node without a browser.
-export function applyGraceWindow(scenarios, prev, grace, cur, prevScenarios = scenarios) {
+export function applyGraceWindow(scenarios, prev, grace, cur, prevScenarios = scenarios, opts = {}) {
   const merge = (a, b) => {
     const m = new Map(a);
     for (const [k, v] of b) m.set(k, (m.get(k) || 0) + v);
     return m;
   };
   const prevAlone = matchPlaylist(prevScenarios, prev);
-  if (!prevAlone.done && prevAlone.completedRuns > 0 && grace.size) {
+  if (!prevAlone.done && !opts.prevRest && grace.size) {
+    const toPrev = new Map();
+    const toCur = new Map();
+    for (const [name, n] of grace) {
+      const s = prevScenarios.find((x) => x.name === name);
+      const need = s ? Math.max(0, s.requiredRuns - (prev.get(name) || 0)) : 0;
+      const take = Math.min(n, need);
+      if (take > 0) toPrev.set(name, take);
+      if (n - take > 0) toCur.set(name, n - take);
+    }
     return {
-      prevProgress: matchPlaylist(prevScenarios, merge(prev, grace)),
-      todayProgress: matchPlaylist(scenarios, cur),
-      graceUsed: [...grace.values()].reduce((a, b) => a + b, 0),
+      prevProgress: matchPlaylist(prevScenarios, merge(prev, toPrev)),
+      todayProgress: matchPlaylist(scenarios, merge(cur, toCur)),
+      graceUsed: [...toPrev.values()].reduce((a, b) => a + b, 0),
     };
   }
   return {

@@ -264,12 +264,15 @@ async function tick() {
 
     const prevDate = prevDateOf(state.date);
     const { prev, grace, cur, scanned } = await countRunsAroundMidnight(state.handle, state.date, prevDate);
-    const split = applyGraceWindow(state.playlist.scenarios, prev, grace, cur, prevScenariosFor(prevDate));
+    // night runs close yesterday even from zero, unless yesterday was a scheduled rest day
+    const split = applyGraceWindow(state.playlist.scenarios, prev, grace, cur, prevScenariosFor(prevDate),
+      { prevRest: state.restDates.includes(prevDate) });
     state.progress = split.todayProgress;
     state.progress.scanned = scanned;
     state.graceUsed = split.graceUsed;
-    // yesterday's progress is posted only if anything was played at all:
-    // covers both the grace top-up and fixing "played yesterday but the tab was closed"
+    // yesterday's progress is posted only if anything was played at all (before midnight
+    // or in the grace window): covers the grace top-up, a night session that started
+    // after midnight, and fixing "played yesterday but the tab was closed"
     state.prevProgress = split.prevProgress.completedRuns > 0 ? split.prevProgress : null;
     state.scanError = null;
     if (state.progress.done) maybeCelebrate();
