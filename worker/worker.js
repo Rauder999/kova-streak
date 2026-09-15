@@ -1070,15 +1070,20 @@ async function appendRosterEvents(env, day, patch) {
 // ---------- The trial ----------
 // One scenario per chain window (Mon-Wed, Thu-Sun), picked by the admin in
 // the Admin tab; nothing is created on its own. Fairness (per Rauder,
-// 2026-09-14): the baseline is the player's best from BEFORE the window,
-// and it takes TRIAL.minRuns runs on the scenario before the window to be
-// in the running, so a first look at a new scenario can never turn into a
-// +200% "improvement". The client reports the baseline out of its whole
-// local history; the server keeps the higher of that and a best it already
-// held from before the window. Winner = the largest improvement over the
-// baseline when the window closes; the 03:30 sweep of the next morning
-// resolves it, pays the links and posts the result.
-const TRIAL = { minRuns: 3 };
+// 2026-09-14, tightened 2026-09-15): the baseline is the player's best from
+// BEFORE the window, and the crown needs an established one: crownRuns runs
+// on crownDays different days before the window, so a first look at a new
+// scenario (or three bad first runs) can never turn into a +200%
+// "improvement". Anyone who plays the scenario partRuns times inside the
+// window takes part, newcomers included. The client reports both halves out
+// of its whole local history (best, runs and days before the window; best
+// and runs inside it); the server keeps the higher of that and a best it
+// already held. Everything pays once, when the window closes: the 03:30
+// sweep of the next morning resolves it, pays the links and posts the
+// result. Taking part: +LINKS.trialPart. The largest improvement over the
+// baseline among the crown-eligible who took part: +LINKS.trialWin on top.
+const TRIAL = { crownRuns: 10, crownDays: 5, partRuns: 3 };
+const crownEligible = (bl) => bl.b > 0 && bl.n >= TRIAL.crownRuns && bl.d >= TRIAL.crownDays;
 const trialKey = (winId) => `trial:${winId}`;
 const trialBaselinePrefix = (winId) => `trial:${winId}:bl:`;
 const nextWindowOf = (win) => windowOf(shiftDate(win.last, 1));
@@ -1110,16 +1115,17 @@ async function clearTrial(env, winId) {
 // Baselines live in their own keys, one per player, so twenty clients
 // syncing in the same minute never overwrite each other; the metadata
 // carries the numbers, so the standings cost one list call.
-async function putTrialBaseline(env, winId, uid, b, n) {
-  await env.KOVA.put(trialBaselinePrefix(winId) + uid, JSON.stringify({ b, n, at: Date.now() }), { metadata: { b, n }, expirationTtl: 60 * 60 * 24 * 60 });
+// b/n/d: best, runs and distinct days BEFORE the window; wb/wr: best and
+// runs INSIDE it.
+const trialNums = (m) => ({ b: Number(m.b) || 0, n: Number(m.n) || 0, d: Number(m.d) || 0, wb: Number(m.wb) || 0, wr: Number(m.wr) || 0 });
+async function putTrialBaseline(env, winId, uid, rec) {
+  const m = trialNums(rec);
+  await env.KOVA.put(trialBaselinePrefix(winId) + uid, JSON.stringify({ ...m, at: Date.now() }), { metadata: m, expirationTtl: 60 * 60 * 24 * 60 });
 }
 async function trialBaselines(env, winId) {
   const prefix = trialBaselinePrefix(winId);
   const out = new Map();
-  for (const k of await listAll(env, prefix)) {
-    const m = k.metadata || {};
-    out.set(k.name.slice(prefix.length), { b: Number(m.b) || 0, n: Number(m.n) || 0 });
-  }
+  for (const k of await listAll(env, prefix)) out.set(k.name.slice(prefix.length), trialNums(k.metadata || {}));
   return out;
 }
 async function deleteTrialBaselines(env, winId) {
@@ -1142,13 +1148,14 @@ async function announceTrial(env, trial) {
   await postSystemLines(env, [
     `[TRIAL // ${trial.scenario}]`,
     `[${shortDate(trial.start)} - ${shortDate(trial.last)}. Beat your own best from before the window. The largest improvement takes the crown when it closes.]`,
-    `[Baseline: your best before ${shortDate(trial.start)}, at least ${TRIAL.minRuns} runs on it to be in the running. Beating it: +${LINKS.trialPart} link. The top improver: +${LINKS.trialWin}.]`,
+    `[Play it ${TRIAL.partRuns} times this window and you are in: +${LINKS.trialPart} link, newcomers too. The crown needs a real baseline: ${TRIAL.crownRuns} runs on ${TRIAL.crownDays} different days before ${shortDate(trial.start)}. The crown: +${LINKS.trialWin} on top.]`,
   ]);
   trial.announcedAt = Date.now();
   await putTrial(env, trial);
 }
 
-// live standings: everyone with a baseline, the eligible ranked by improvement
+// live standings: everyone whose client synced, the crown-eligible ranked
+// by improvement, then the rest by how much they played inside the window
 async function trialStandings(env, trial) {
   const [{ users }, baselines] = await Promise.all([loadGroup(env), trialBaselines(env, trial.windowId)]);
   const rows = [];
@@ -1156,35 +1163,55 @@ async function trialStandings(env, trial) {
     if (u.inactive) continue;
     const bl = baselines.get(u.userId);
     if (!bl) continue;
-    const eligible = bl.n >= TRIAL.minRuns && bl.b > 0;
+    const eligible = crownEligible(bl);
+    // the window best: what the client reported, or a best the server saw
+    // land inside the window (a client that has not re-synced yet)
     const pb = await env.KOVA.get(`pb:${u.userId}`, 'json');
-    const cur = (pb && pb[trial.scenario] && pb[trial.scenario].s) || null;
-    const pct = eligible && cur && cur > bl.b ? ((cur - bl.b) / bl.b) * 100 : 0;
-    rows.push({ userId: u.userId, name: u.displayName, avatar: u.avatar, baseline: bl.b, runs: bl.n, eligible, best: cur, pct });
+    const held = pb && pb[trial.scenario];
+    const heldDay = held && held.s > 0 ? groupDate(env, held.at || 0) : null;
+    const heldInside = heldDay && heldDay >= trial.start && heldDay <= trial.last ? held.s : 0;
+    const best = Math.max(bl.wb, heldInside) || null;
+    const windowRuns = Math.max(bl.wr, heldInside ? 1 : 0);
+    const taking = windowRuns >= TRIAL.partRuns;
+    const pct = eligible && best && best > bl.b ? ((best - bl.b) / bl.b) * 100 : 0;
+    rows.push({ userId: u.userId, name: u.displayName, avatar: u.avatar, baseline: bl.b, runs: bl.n, days: bl.d, eligible, best, windowRuns, taking, pct });
   }
-  rows.sort((a, b) => Number(b.eligible) - Number(a.eligible) || b.pct - a.pct || a.name.localeCompare(b.name));
+  rows.sort((a, b) => Number(b.eligible) - Number(a.eligible) || b.pct - a.pct || b.windowRuns - a.windowRuns || a.name.localeCompare(b.name));
   return rows;
 }
 
+// Pays once, when the window closes: the participation link to everyone who
+// played the scenario partRuns times inside the window, the crown on top to
+// the largest improvement among those with a real baseline who also took
+// part. A tie shares the crown.
 async function resolveTrialFor(env, winId) {
   const trial = await getTrial(env, winId);
   if (!trial || trial.resolved) return [];
-  const rows = (await trialStandings(env, trial)).filter((r) => r.eligible);
-  const improvers = rows.filter((r) => r.pct > 0);
+  const rows = await trialStandings(env, trial);
+  const participants = rows.filter((r) => r.taking);
+  const improvers = rows.filter((r) => r.eligible && r.taking && r.pct > 0);
+  const top = improvers[0] || null;
+  const crowned = top ? improvers.filter((r) => r.pct === top.pct) : [];
   trial.resolved = true;
   trial.resolvedAt = Date.now();
   trial.results = improvers.slice(0, 10).map((r) => ({ userId: r.userId, name: r.name, pct: Math.round(r.pct * 10) / 10 }));
+  trial.participants = participants.map((r) => r.userId);
+  trial.crowned = crowned.map((r) => r.userId);
   await putTrial(env, trial);
-  if (!improvers.length) {
-    return [`[TRIAL COMPLETE // ${trial.scenario}. ${rows.length ? 'No best fell this window.' : 'Nobody was in the running.'}]`];
+  for (const r of participants) await addLinks(env, r.userId, LINKS.trialPart, `trial ${trial.windowId}`);
+  for (const r of crowned) await addLinks(env, r.userId, LINKS.trialWin, `trial crown ${trial.windowId}`);
+  const lines = [];
+  if (top) {
+    const names = crowned.map((r) => r.name).join(' and ');
+    lines.push(crowned.length > 1
+      ? `[TRIAL COMPLETE // ${names} share the crown: +${top.pct.toFixed(1)}% on ${trial.scenario}. +${LINKS.trialWin} links on top each.]`
+      : `[TRIAL COMPLETE // ${names} takes the crown: +${top.pct.toFixed(1)}% on ${trial.scenario}. +${LINKS.trialWin} links on top.]`);
+  } else {
+    lines.push(`[TRIAL COMPLETE // ${trial.scenario}. No baseline fell this window, the crown stays with the System.]`);
   }
-  const top = improvers[0];
-  for (const im of improvers) {
-    const crown = im.pct === top.pct;
-    await addLinks(env, im.userId, LINKS.trialPart + (crown ? LINKS.trialWin : 0), `trial ${trial.windowId}`);
-  }
-  const lines = [`[TRIAL COMPLETE // ${top.name} improved ${top.pct.toFixed(1)}% on ${trial.scenario}. The System took note. +${LINKS.trialWin + LINKS.trialPart} links.]`];
-  if (improvers.length > 1) lines.push(`[${improvers.length} players beat their record. +${LINKS.trialPart} link each.]`);
+  lines.push(participants.length
+    ? `[${participants.length} ${participants.length === 1 ? 'player' : 'players'} took part. +${LINKS.trialPart} link each.]`
+    : '[Nobody took part.]');
   return lines;
 }
 
@@ -1659,7 +1686,7 @@ async function handleApi(request, env, url, cors, ctx) {
     return json({ ok: true, trial: publicTrial(trial) }, 200, cors);
   }
 
-  // The trial: this window's scenario, the standings, the caller's baseline
+  // The trial: this window's scenario, the whole board, the caller's own numbers
   if (path === '/api/trial' && request.method === 'GET') {
     const win = windowOf(groupDate(env));
     const next = nextWindowOf(win);
@@ -1667,39 +1694,48 @@ async function handleApi(request, env, url, cors, ctx) {
     const standings = cur ? await trialStandings(env, cur) : [];
     const mine = standings.find((r) => r.userId === user.uid) || null;
     const pct1 = (x) => Math.round(x * 10) / 10;
+    const pub = (r) => ({ userId: r.userId, name: r.name, avatar: r.avatar, baseline: r.baseline, runs: r.runs, days: r.days, eligible: r.eligible, best: r.best, windowRuns: r.windowRuns, taking: r.taking, pct: pct1(r.pct) });
     return json({
-      minRuns: TRIAL.minRuns,
+      rules: { ...TRIAL, part: LINKS.trialPart, crown: LINKS.trialWin },
+      minRuns: TRIAL.crownRuns, // clients from before 2026-09-15 print this one number
       window: { id: win.id, start: win.start, last: win.last },
       current: publicTrial(cur),
       next: publicTrial(nxt),
-      standings: standings.map((r) => ({ userId: r.userId, name: r.name, avatar: r.avatar, eligible: r.eligible, runs: r.runs, pct: pct1(r.pct) })),
-      mine: mine ? { baseline: mine.baseline, runs: mine.runs, eligible: mine.eligible, best: mine.best, pct: pct1(mine.pct) } : null,
+      standings: standings.map(pub),
+      mine: mine ? pub(mine) : null,
     }, 200, cors);
   }
 
-  // The client reports its baseline: best and run count on the trial
-  // scenario from BEFORE the window, out of its whole local history.
+  // The client reports its numbers on the trial scenario out of its whole
+  // local history: best, runs and days from BEFORE the window, best and runs
+  // INSIDE it. Clients from before 2026-09-15 send only the first two.
   if (path === '/api/trial/baseline' && request.method === 'POST') {
     const body = await request.json().catch(() => null);
     if (!body || typeof body.windowId !== 'string') return json({ error: 'windowId is required' }, 400, cors);
     const trial = await getTrial(env, body.windowId);
     if (!trial || trial.resolved) return json({ error: 'No open trial for that window' }, 400, cors);
     if (trial.windowId !== windowOf(groupDate(env)).id) return json({ error: 'That window is not open' }, 400, cors);
-    const best = Math.max(0, Number(body.best) || 0);
-    const runs = Math.max(0, Math.min(100000, Math.floor(Number(body.runs) || 0)));
+    const count = (x) => Math.max(0, Math.min(100000, Math.floor(Number(x) || 0)));
+    const score = (x) => Math.max(0, Number(x) || 0);
     // a best the server already held from before the window counts too: a
     // local history can be shorter than the server's memory (a lost mirror),
-    // and a baseline never goes down once reported
+    // and nothing reported ever goes down
     const [pb, prev] = await Promise.all([
       env.KOVA.get(`pb:${user.uid}`, 'json'),
       env.KOVA.get(trialBaselinePrefix(trial.windowId) + user.uid, 'json'),
     ]);
     const held = pb && pb[trial.scenario];
     const heldBefore = held && held.s > 0 && groupDate(env, held.at || 0) < trial.start ? held.s : 0;
-    const b = Math.max(best, heldBefore, (prev && prev.b) || 0);
-    const n = Math.max(runs, (prev && prev.n) || 0);
-    await putTrialBaseline(env, trial.windowId, user.uid, b, n);
-    return json({ ok: true, baseline: b, runs: n, eligible: n >= TRIAL.minRuns && b > 0 }, 200, cors);
+    const old = trialNums(prev || {});
+    const rec = {
+      b: Math.max(score(body.best), heldBefore, old.b),
+      n: Math.max(count(body.runs), old.n),
+      d: Math.max(count(body.days), old.d),
+      wb: Math.max(score(body.windowBest), old.wb),
+      wr: Math.max(count(body.windowRuns), old.wr),
+    };
+    await putTrialBaseline(env, trial.windowId, user.uid, rec);
+    return json({ ok: true, baseline: rec.b, runs: rec.n, days: rec.d, windowBest: rec.wb, windowRuns: rec.wr, eligible: crownEligible(rec), taking: rec.wr >= TRIAL.partRuns }, 200, cors);
   }
 
   // Roster Protocol: who is out, who is on final notice, and the way back
@@ -2202,11 +2238,12 @@ async function postDigest(env) {
   try {
     const trial = await getTrial(env, windowOf(today).id);
     if (trial && !trial.resolved) {
-      const rows = (await trialStandings(env, trial)).filter((r) => r.eligible);
-      const lead = rows.find((r) => r.pct > 0);
+      const rows = await trialStandings(env, trial);
+      const lead = rows.find((r) => r.eligible && r.taking && r.pct > 0);
+      const taking = rows.filter((r) => r.taking).length;
       lines.push(lead
-        ? `[TRIAL // ${trial.scenario}: ${lead.name} leads at +${lead.pct.toFixed(1)}%. ${rows.length} in the running, closes ${shortDate(trial.last)}.]`
-        : `[TRIAL // ${trial.scenario}: no best has fallen yet. ${rows.length} in the running, closes ${shortDate(trial.last)}.]`);
+        ? `[TRIAL // ${trial.scenario}: ${lead.name} leads at +${lead.pct.toFixed(1)}%. ${taking} taking part, closes ${shortDate(trial.last)}.]`
+        : `[TRIAL // ${trial.scenario}: no baseline has fallen yet. ${taking} taking part, closes ${shortDate(trial.last)}.]`);
     }
   } catch { /* the trial never breaks the digest */ }
 

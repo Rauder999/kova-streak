@@ -62,7 +62,8 @@ export const reinstate = (userId) => call('/api/admin/reinstate', { method: 'POS
 export const runRosterSweep = () => call('/api/admin/roster-sweep', { method: 'POST' });
 export const runShieldSweep = () => call('/api/admin/shield-sweep', { method: 'POST' });
 export const getTrial = () => call('/api/trial');
-export const postTrialBaseline = (windowId, best, runs) => call('/api/trial/baseline', { method: 'POST', body: { windowId, best, runs } });
+// report: { best, runs, days } from before the window, { windowBest, windowRuns } inside it
+export const postTrialBaseline = (windowId, report) => call('/api/trial/baseline', { method: 'POST', body: { windowId, ...report } });
 export const setTrial = (body) => call('/api/admin/trial', { method: 'POST', body });
 export const resolveTrialNow = () => call('/api/admin/resolve-trial', { method: 'POST' });
 export const getVault = () => call('/api/vault');

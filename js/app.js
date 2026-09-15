@@ -1081,9 +1081,10 @@ async function loadTrial() {
   } catch { /* the trial window is optional */ }
 }
 
-// The trial baseline: the best and the run count on the scenario from BEFORE
-// the window, out of the whole local history. Reported once per trial and
-// again only when the numbers change (late files from the mirror).
+// The trial report, out of the whole local history: the best, the run count
+// and the distinct days on the scenario from BEFORE the window (the
+// baseline), plus the best and the run count INSIDE it. Sent once per trial
+// and again only when the numbers change (a new run, late files from the mirror).
 const TRIAL_BASE_KEY = 'kova-streak-trial-baseline';
 async function maybeReportTrialBaseline() {
   const t = state.trial && state.trial.current;
@@ -1091,17 +1092,26 @@ async function maybeReportTrialBaseline() {
   const runs = await getAllParsedRuns();
   let best = 0;
   let n = 0;
+  let windowBest = 0;
+  let windowRuns = 0;
+  const days = new Set();
   for (const r of runs) {
-    if (r.scenario !== t.scenario || !(r.date < t.start)) continue;
-    n++;
-    if (r.score > best) best = r.score;
+    if (r.scenario !== t.scenario) continue;
+    if (r.date < t.start) {
+      n++;
+      days.add(r.date);
+      if (r.score > best) best = r.score;
+    } else if (r.date <= t.last) {
+      windowRuns++;
+      if (r.score > windowBest) windowBest = r.score;
+    }
   }
-  const sig = `${t.windowId}|${t.scenario}|${n}|${Math.round(best * 10)}`;
+  const sig = `${t.windowId}|${t.scenario}|${n}|${days.size}|${Math.round(best * 10)}|${windowRuns}|${Math.round(windowBest * 10)}`;
   let cached = null;
   try { cached = localStorage.getItem(TRIAL_BASE_KEY); } catch { /* private browsing mode */ }
   if (cached === sig && state.trial.mine) return;
   try {
-    await api.postTrialBaseline(t.windowId, best, n);
+    await api.postTrialBaseline(t.windowId, { best, runs: n, days: days.size, windowBest, windowRuns });
     try { localStorage.setItem(TRIAL_BASE_KEY, sig); } catch { /* private browsing mode */ }
     await loadTrial();
   } catch (e) {
@@ -1110,12 +1120,18 @@ async function maybeReportTrialBaseline() {
   }
 }
 
-// The trial of the half-week: the scenario, where you stand, the leaders
+// The trial of the half-week: the scenario, your own numbers, and the whole
+// board in the open (per Rauder, 2026-09-15: transparency, dressed up): the
+// baseline, the best inside the window and the delta for everyone who synced.
+const TRIAL_RULES_FALLBACK = { crownRuns: 10, crownDays: 5, partRuns: 3, part: 1, crown: 5 };
+const TRIAL_BOARD_SHORT = 5;
+let trialBoardOpen = false; // the "show all" toggle survives a redraw
 function renderTrialWindow() {
   const t = state.trial;
   const win = mkWin();
   win.style.cssText = 'display:flex;flex-direction:column;gap:14px';
   const cur = t && t.current;
+  const rules = (t && t.rules) || TRIAL_RULES_FALLBACK;
   if (!cur) {
     win.append(winHead('[ Trial ]', t && t.window ? `${monthDayShort(t.window.start).toUpperCase()} - ${monthDayShort(t.window.last).toUpperCase()}` : 'THIS WINDOW'));
     win.append(el('span', 'fine', 'No trial this window. Rauder picks the scenario.'));
@@ -1124,28 +1140,64 @@ function renderTrialWindow() {
   }
   win.append(winHead('[ Trial ]', `${monthDayShort(cur.start).toUpperCase()} - ${monthDayShort(cur.last).toUpperCase()}` + (cur.resolved ? ' · CLOSED' : '')));
   win.append(el('span', 'trial-scen', cur.scenario));
+
+  // your own line: where the baseline stands, whether you are in, the delta
   const me = t.mine;
   const st = el('span', 'quest-line');
   if (cur.resolved) st.textContent = '[ Closed. The result is in the channel. ]';
-  else if (!me) st.textContent = fsSupported() && state.granted ? '[ Syncing your baseline from your history... ]' : '[ Open the site on your gaming PC to sync your baseline. ]';
-  else if (!me.eligible) st.textContent = `[ Not in the running: ${me.runs} of ${t.minRuns} runs on it before ${monthDayShort(cur.start)}. ]`;
-  else st.innerHTML = `[ Baseline <b>${fmtScore(me.baseline)}</b> · best now <b>${me.best != null ? fmtScore(me.best) : '-'}</b> · ${me.pct > 0 ? '<b style="color: var(--ok)">+' + me.pct.toFixed(1) + '%</b>' : 'not beaten yet'} ]`;
-  win.append(st);
-  const rows = (t.standings || []).filter((r) => r.eligible);
-  if (rows.length) {
-    const list = el('div');
-    rows.slice(0, 3).forEach((r, i) => {
-      const row = el('div', 'tl');
-      row.append(svgPlate(String(i + 1), r.pct > 0 ? METALS[i] : 'plain'));
-      row.append(avatarImg(r, 'av sq', 64));
-      row.append(el('span', 'nm', r.name));
-      row.append(el('span', 'lead'));
-      row.append(el('span', 'pct' + (r.pct > 0 ? ' up' : ' mute'), r.pct > 0 ? '+' + r.pct.toFixed(1) + '%' : '0%'));
-      list.append(row);
-    });
-    win.append(list);
+  else if (!me) st.textContent = fsSupported() && state.granted ? '[ Syncing your numbers from your history... ]' : '[ Open the site on your gaming PC to sync your numbers. ]';
+  else {
+    const bits = [];
+    if (me.eligible) {
+      bits.push(`Baseline <b>${fmtScore(me.baseline)}</b>`);
+      if (me.best != null) bits.push(`best now <b>${fmtScore(me.best)}</b> · ${me.pct > 0 ? '<b style="color: var(--ok)">+' + me.pct.toFixed(1) + '%</b>' : 'not beaten yet'}`);
+    } else {
+      bits.push(`No crown baseline: <b>${me.runs}/${rules.crownRuns}</b> runs on <b>${me.days}/${rules.crownDays}</b> days before ${monthDayShort(cur.start)}`);
+    }
+    bits.push(me.taking ? `<b>${me.windowRuns}</b> runs this window, you are in` : `<b>${me.windowRuns}/${rules.partRuns}</b> runs this window to be in`);
+    st.innerHTML = `[ ${bits.join(' · ')} ]`;
   }
-  win.append(el('span', 'win-sub', `${rows.length ? rows.length + ' IN THE RUNNING' : 'NOBODY IN THE RUNNING YET'} · +1 LINK FOR BEATING YOUR BASELINE · +5 FOR THE TOP`));
+  win.append(st);
+
+  // the board: everyone who synced, the crown-eligible ranked first
+  const rows = t.standings || [];
+  if (rows.length) {
+    const board = el('div', 'tboard');
+    const shown = trialBoardOpen ? rows : rows.slice(0, TRIAL_BOARD_SHORT);
+    let rank = 0;
+    for (const r of shown) {
+      const row = el('div', 'tr' + (state.user && r.userId === state.user.uid ? ' you' : ''));
+      if (r.eligible && r.pct > 0 && rank < 3) row.append(svgPlate(String(rank + 1), METALS[rank]));
+      else row.append(el('span', 'rk', r.eligible ? '·' : ''));
+      if (r.eligible && r.pct > 0) rank++;
+      row.append(avatarImg(r, 'av sq', 64));
+      const nm = el('span', 'nm');
+      nm.append(el('span', 'txt', r.name));
+      if (row.classList.contains('you')) nm.append(el('span', 'tag you', 'YOU'));
+      row.append(nm);
+      const sub = el('span', 'sub');
+      if (r.eligible) {
+        sub.innerHTML = `<b>${fmtScore(r.baseline)}</b> <i>&rarr;</i> <b>${r.best != null ? fmtScore(r.best) : '-'}</b>` + (r.taking ? ` · ${r.windowRuns} in` : ` · ${r.windowRuns}/${rules.partRuns} in`);
+      } else {
+        sub.innerHTML = `<span class="rookie">no baseline</span> ${r.runs}/${rules.crownRuns} runs · ${r.days}/${rules.crownDays} days` + (r.taking ? ` · ${r.windowRuns} in` : ` · ${r.windowRuns}/${rules.partRuns} in`);
+      }
+      row.append(sub);
+      const pct = el('span', 'pct' + (r.pct > 0 ? ' up' : ' mute'), r.eligible ? (r.pct > 0 ? '+' + r.pct.toFixed(1) + '%' : '0%') : (r.taking ? '+' + rules.part : '-'));
+      pct.title = r.eligible ? 'improvement over the baseline' : r.taking ? `in for the +${rules.part} link, no crown without a baseline` : `${rules.partRuns} runs this window to be in`;
+      row.append(pct);
+      board.append(row);
+    }
+    win.append(board);
+    if (rows.length > TRIAL_BOARD_SHORT) {
+      const more = el('button', 'tb-more', trialBoardOpen ? '[ show top 5 ]' : `[ show all ${rows.length} ]`);
+      more.type = 'button';
+      more.addEventListener('click', () => { trialBoardOpen = !trialBoardOpen; renderToday(); });
+      win.append(more);
+    }
+  }
+  const taking = rows.filter((r) => r.taking).length;
+  const eligibleCnt = rows.filter((r) => r.eligible).length;
+  win.append(el('span', 'win-sub', `${taking} TAKING PART · ${eligibleCnt} CROWN-ELIGIBLE · +${rules.part} LINK FOR ${rules.partRuns} RUNS · +${rules.crown} FOR THE CROWN`));
   return win;
 }
 
@@ -1265,6 +1317,7 @@ function ledgerLine(entry) {
   let what = why.toUpperCase();
   if (why.startsWith('chain ')) what = 'CHAIN FORGED';
   else if (why.startsWith('perfect chain')) what = 'PERFECT CHAIN';
+  else if (why.startsWith('trial crown')) what = 'CROWN';
   else if (why.startsWith('trial')) what = 'TRIAL';
   else if (why.startsWith('vault ')) {
     const it = VAULT_ITEMS.find((x) => x.id === why.slice(6));
@@ -2577,10 +2630,13 @@ function renderTrialAdminWindow() {
   const t = state.trial;
   win.append(winHead('[ Trial ]', 'ONE SCENARIO PER CHAIN WINDOW · YOU PICK IT'));
   const cur = t && t.current;
-  const eligible = t ? (t.standings || []).filter((r) => r.eligible) : [];
-  const lead = eligible.find((r) => r.pct > 0);
+  const rows = t ? (t.standings || []) : [];
+  const eligible = rows.filter((r) => r.eligible);
+  const taking = rows.filter((r) => r.taking);
+  const rules = (t && t.rules) || TRIAL_RULES_FALLBACK;
+  const lead = eligible.find((r) => r.taking && r.pct > 0);
   const status = el('div', 'quest-line', cur
-    ? `[ This window: ${cur.scenario} · ${monthDayShort(cur.start)} - ${monthDayShort(cur.last)} · ${eligible.length} in the running${lead ? ` · ${lead.name} leads at +${lead.pct.toFixed(1)}%` : ''}${cur.resolved ? ' · closed' : cur.announcedAt ? '' : ' · not announced yet'} ]`
+    ? `[ This window: ${cur.scenario} · ${monthDayShort(cur.start)} - ${monthDayShort(cur.last)} · ${taking.length} taking part · ${eligible.length} crown-eligible${lead ? ` · ${lead.name} leads at +${lead.pct.toFixed(1)}%` : ''}${cur.resolved ? ' · closed' : cur.announcedAt ? '' : ' · not announced yet'} ]`
     : '[ No trial this window. ]');
   status.style.cssText = 'display:block;margin-top:8px';
   win.append(status);
@@ -2640,7 +2696,7 @@ function renderTrialAdminWindow() {
   act(close, async () => { const res = await api.resolveTrialNow(); return res.lines && res.lines.length ? res.lines.join(' ') : '[ Nothing to close. ]'; });
   form.append(set, clear, close);
   win.append(form, msg);
-  const fine = el('span', 'fine', `Baseline: a player's best from before the window, at least ${t ? t.minRuns : 3} runs on it before the window to be in the running. A Monday window wants a scenario from last week's list, a Thursday window one from this week's.`);
+  const fine = el('span', 'fine', `Everything pays when the window closes. Playing the scenario ${rules.partRuns} times inside the window: +${rules.part} link, newcomers too. The crown (+${rules.crown} on top) goes to the largest improvement over a real baseline: the player's best from before the window, with at least ${rules.crownRuns} runs on ${rules.crownDays} different days behind it. A Monday window wants a scenario from last week's list, a Thursday window one from this week's.`);
   fine.style.cssText = 'display:block;margin-top:14px';
   win.append(fine);
   return win;
