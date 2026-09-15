@@ -223,6 +223,14 @@ class Scene {
     window.removeEventListener('resize', this.onResize);
   }
 
+  // Wipes the canvas and stops drawing. Called once the verdict is up: there
+  // is nothing left to animate, and a stalled frame (the tab throttled by
+  // the browser) must never leave the white flash washing over the verdict.
+  clear() {
+    this.stop();
+    try { this.ctx.clearRect(0, 0, this.W, this.H); } catch { /* the canvas is going away anyway */ }
+  }
+
   // eight lights orbiting a core
   addMotes(id, x, y) {
     for (let i = 0; i < 8; i++) {
@@ -674,11 +682,12 @@ export function startCelebration(opts = {}) {
     const runs = opts.runs ? `${opts.runs} runs` : 'every run';
     const streakN = typeof opts.streak === 'function' ? opts.streak() : opts.streak;
     const streak = streakN && streakN > 0 ? `${streakN} ${streakN === 1 ? 'day' : 'days'}` : null;
-    // a day closed by the night runs is named: the person may be looking at an empty today
-    const day = opts.night && opts.date ? new Date(opts.date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null;
+    // a day closed while the site was shut is named: the person is looking at
+    // an empty today and has to know which day the System is closing
+    const day = opts.past && opts.date ? new Date(opts.date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null;
     const texts = [
       day
-        ? `[ Daily Quest for <b>${day}</b>: <b>cleared</b> in the night. ${runs} of the playlist in the books, counted toward that day. ]`
+        ? `[ Daily Quest for <b>${day}</b>: <b>cleared</b>${opts.night ? ' in the night' : ' with the tab shut'}. ${runs} of the playlist in the books, counted toward that day. ]`
         : `[ Daily Quest: <b>cleared</b>. ${runs} of ${opts.weekLabel ? opts.weekLabel + "'s playlist" : 'the playlist'} in the books, checked in automatically. ]`,
       streak ? `[ Streak: <b>${streak}</b>. The chain holds. ]` : null,
       `[ Reward: <b>+1 day</b> to this month's record. ]`,
@@ -719,6 +728,9 @@ export function startCelebration(opts = {}) {
       // rAF can stall (hidden window, game overlay): the verdict still lands
       later(() => { pct.dataset.done = '1'; pct.textContent = target; }, 950);
     }
+    // the flash has burned off by now; drop the canvas so a throttled frame
+    // cannot leave it washing over the verdict
+    later(() => { if (scene) scene.clear(); }, 1200);
     later(teardown, 16000);
   };
 

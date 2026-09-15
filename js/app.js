@@ -276,11 +276,14 @@ async function tick() {
     // after midnight, and fixing "played yesterday but the tab was closed"
     state.prevProgress = split.prevProgress.completedRuns > 0 ? split.prevProgress : null;
     state.scanError = null;
-    // the ceremony: today closed, or yesterday closed by the night runs
-    // (per Rauder, 2026-09-15: a finished playlist is a finished playlist,
-    // whether the site was open at the time or not)
+    // The ceremony (per Rauder, 2026-09-15: a finished playlist is a finished
+    // playlist, whether the site was open at the time or not). Today closed,
+    // or a yesterday found closed in the files and never celebrated on this
+    // device: the night runs that healed it, or an evening session played
+    // with the tab shut. The key holds the last date celebrated, so nothing
+    // is played twice.
     if (state.progress.done) maybeCelebrate(state.date, false);
-    else if (state.prevProgress && state.prevProgress.done && split.graceUsed > 0) maybeCelebrate(prevDate, true);
+    else if (state.prevProgress && state.prevProgress.done) maybeCelebrate(prevDate, split.graceUsed > 0);
     let scanLine = state.progress.done
       ? 'today is done'
       : `${state.progress.completedRuns} / ${state.progress.requiredRuns} runs`;
@@ -1849,16 +1852,19 @@ function maybeCelebrate(date, night) {
 
 function startCelebration(test = false, p = { date: state.date, night: false }) {
   if (!test) localStorage.setItem(CELEBRATED_KEY, p.date);
-  const progress = p.night ? state.prevProgress : state.progress;
+  const past = p.date !== state.date;
+  const progress = past ? state.prevProgress : state.progress;
   runCeremony({
     test,
     date: p.date,
+    past,
     night: p.night,
     runs: progress ? progress.requiredRuns : null,
     // read at verdict time: the completion post that carries the fresh streak
-    // is still in flight when the ceremony starts
-    streak: () => (state.streak ? state.streak.streak : null),
-    weekLabel: p.night ? null : state.playlist && state.playlist.weekLabel,
+    // is still in flight when the ceremony starts. A past day is never given
+    // a streak: the number on hand belongs to today, not to that day.
+    streak: past ? null : () => (state.streak ? state.streak.streak : null),
+    weekLabel: past ? null : state.playlist && state.playlist.weekLabel,
   });
 }
 
