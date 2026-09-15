@@ -481,11 +481,16 @@ async function memberDayStatus(env, uid, date, userMap) {
 // Runs after every first completion of a day. Forges the chain when every
 // end is held, pings the laggards when not. Backfilled dates (the grace
 // window, healing) award quietly: links yes, channel noise no.
-async function chainCheck(env, user, date) {
+// opts.seedCompleted: the caller just posted their own completion, which KV
+// may not serve back yet, so they count as done without being asked. A
+// re-check after a rest day was granted passes false and asks about every
+// end honestly. opts.quiet: never touch the channel, whatever the date.
+async function chainCheck(env, user, date, opts = {}) {
+  const seedCompleted = opts.seedCompleted !== false;
   try {
     if (!firstInWindow(`chain:${user.uid}:${date}`, 30000)) return;
     const today = groupDate(env);
-    const quiet = date !== today;
+    const quiet = opts.quiet === true || date !== today;
     const { win, doc } = await getChainPairs(env, date);
     const gi = doc.groups.findIndex((g) => g.includes(user.uid));
     if (gi < 0) return;
@@ -496,14 +501,18 @@ async function chainCheck(env, user, date) {
     const { users } = await loadGroup(env);
     const userMap = new Map(users.filter((u) => !u.inactive).map((u) => [u.userId, u]));
 
-    const completed = [user.uid];
+    const completed = seedCompleted ? [user.uid] : [];
     const waiting = [];
     for (const uid of group) {
-      if (uid === user.uid) continue;
+      if (seedCompleted && uid === user.uid) continue;
       const st = await memberDayStatus(env, uid, date, userMap);
       if (st === 'done') completed.push(uid);
       else if (st === 'waiting') waiting.push(uid);
     }
+    // every end held and nobody actually trained: there is no chain to forge
+    // and nothing to pay, and the perfect-chain check reads such a day as
+    // neutral on its own
+    if (!completed.length) return;
 
     if (waiting.length > 0) {
       if (quiet) return;
@@ -559,6 +568,21 @@ async function chainCheck(env, user, date) {
       await announceChainForged(env, members, delta, rescue, perfectNow);
     }
   } catch { /* chains never break a check-in */ }
+}
+
+// A rest day granted for a day that has already passed can unstick that
+// day's chain: the end that was silent now reads as held, so the partner who
+// did close the day finally gets the link they were owed. Quiet by design -
+// links yes, no cards and no pings for a day that is already over.
+async function chainRecheckAfterRest(env, uid, dates, today) {
+  const floor = shiftDate(today, -14);
+  for (const date of [...new Set(dates)].sort().slice(-10)) {
+    if (date > today || date < floor) continue;
+    const win = windowOf(date);
+    // a window that never paired anyone must not be paired retroactively now
+    if (!(await env.KOVA.get(`chain:pairs:${win.id}`))) continue;
+    await chainCheck(env, { uid, name: '' }, date, { seedCompleted: false, quiet: true });
+  }
 }
 
 async function announceChainWaiting(env, completerName, laggardIds) {
@@ -1853,6 +1877,9 @@ async function handleApi(request, env, url, cors, ctx) {
       env.KOVA.put(`rest:${uid}`, JSON.stringify(dates)),
       putVault(env, uid, vault),
     ]);
+    // a day off granted after the fact settles that end of the chain: a
+    // partner who closed the day and got nothing collects their link now
+    if (on && changed && ctx) ctx.waitUntil(chainRecheckAfterRest(env, uid, wanted, today));
     return json({ ok: true, userId: uid, displayName: profile.displayName || 'unknown', dates, granted: vault.grantedDays, changed }, 200, cors);
   }
 
