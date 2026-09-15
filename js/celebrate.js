@@ -5,17 +5,18 @@
 // the System's verdict: 100%.
 //
 // Self-contained: DOM, one canvas and WebAudio, nothing here touches app
-// state. app.js decides WHEN (once a day, tab visible) and hands over the
-// numbers for the verdict window. The three samples are real KovaaK's
-// sounds from Pasha's folder: 808 perc (a core arrives), rxSound11 (the
-// hit), kick-deep (the break, higher with every core); the cracks, the
-// collapse and the verdict chord are synthesized, so nothing depends on
-// the files loading in time.
+// state. app.js decides WHEN (once per closed day, tab visible) and hands
+// over the numbers for the verdict window. Two samples are real KovaaK's
+// sounds from Pasha's folder: rxSound11 (the hit) and kick-deep (the break,
+// higher with every core); a core's arrival, the cracks, the collapse and
+// the verdict chord are synthesized, so nothing depends on the files
+// loading in time.
 
 const ACCENT = '#8B7CFF';
 const ACCENT_SOFT = '#CFC9FF';
 const CYAN = '#4FC3FF';
 const CORES = 5;
+const PULL_MS = 1500; // how long the page takes to fall into the hole (per Rauder: 1.5 s)
 
 const el = (tag, cls, text) => {
   const n = document.createElement(tag);
@@ -63,9 +64,8 @@ async function loadSounds() {
   try {
     const ctx = ensureCtx();
     const load = async (url) => ctx.decodeAudioData(await (await fetch(url)).arrayBuffer());
-    const [spawn, shot, kill] = await Promise.all(
-      ['assets/spawn-808.ogg', 'assets/shot-rx11.ogg', 'assets/kill-kick.ogg'].map(load));
-    sndBuffers = { spawn, shot, kill };
+    const [shot, kill] = await Promise.all(['assets/shot-rx11.ogg', 'assets/kill-kick.ogg'].map(load));
+    sndBuffers = { shot, kill };
   } catch {
     sndBuffers = false;
   }
@@ -88,9 +88,20 @@ function playBuf(name, rate = 1, gain = 0.5) {
   }
 }
 
-// filtered noise: glass giving way, the shatter, the boom at the bottom of the hole
+// a gain envelope: straight up over `attack` of the length, then a decay to nothing
+function envelope(ctx, g, t, dur, gain, attack) {
+  if (attack > 0) {
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(gain, t + dur * attack);
+  } else {
+    g.gain.setValueAtTime(gain, t);
+  }
+  g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+}
+
+// filtered noise: a core's whoosh, glass giving way, the wind of the collapse
 let noiseBuf = null;
-function crackle({ dur = 0.14, gain = 0.2, from = 2200, to = 600, type = 'bandpass', q = 1.4, delay = 0 } = {}) {
+function crackle({ dur = 0.14, gain = 0.2, from = 2200, to = 600, type = 'bandpass', q = 1.4, delay = 0, attack = 0 } = {}) {
   try {
     const ctx = ensureCtx();
     if (!noiseBuf) {
@@ -102,22 +113,22 @@ function crackle({ dur = 0.14, gain = 0.2, from = 2200, to = 600, type = 'bandpa
     const t = ctx.currentTime + delay;
     const src = ctx.createBufferSource();
     src.buffer = noiseBuf;
+    src.loop = true;
     const f = ctx.createBiquadFilter();
     f.type = type;
     f.Q.value = q;
     f.frequency.setValueAtTime(from, t);
     f.frequency.exponentialRampToValueAtTime(Math.max(20, to), t + dur);
     const g = ctx.createGain();
-    g.gain.setValueAtTime(gain, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    envelope(ctx, g, t, dur, gain, attack);
     src.connect(f).connect(g).connect(ctx.destination);
     src.start(t);
     src.stop(t + dur + 0.05);
   } catch { /* sound is optional */ }
 }
 
-// a sine falling in pitch: the floor shaking under a core, the sub of the collapse
-function thud(from = 90, to = 36, dur = 0.28, gain = 0.32, delay = 0) {
+// a sine sliding in pitch: the floor shaking under a core, the subs of the collapse
+function thud(from = 90, to = 36, dur = 0.28, gain = 0.32, delay = 0, attack = 0) {
   try {
     const ctx = ensureCtx();
     const t = ctx.currentTime + delay;
@@ -126,12 +137,22 @@ function thud(from = 90, to = 36, dur = 0.28, gain = 0.32, delay = 0) {
     o.type = 'sine';
     o.frequency.setValueAtTime(from, t);
     o.frequency.exponentialRampToValueAtTime(to, t + dur);
-    g.gain.setValueAtTime(gain, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    envelope(ctx, g, t, dur, gain, attack);
     o.connect(g).connect(ctx.destination);
     o.start(t);
     o.stop(t + dur + 0.05);
   } catch { /* sound is optional */ }
+}
+
+// a core arrives: a whoosh sweeping up that snaps shut as it lands, and a
+// glassy ping on top, a little higher with every core (the 808 sample it
+// replaced sounded like a drum machine, per Rauder)
+function summonSound(i) {
+  const rate = SPAWN_RATES[i];
+  crackle({ dur: 0.42, gain: 0.09, from: 260, to: 3600, type: 'bandpass', q: 1.1, attack: 0.7 });
+  tone(880 * rate, 0.6, 0.07, 'sine', 0.34);
+  tone(880 * rate * 1.5, 0.4, 0.025, 'sine', 0.34);
+  tone(880 * rate * 2, 0.28, 0.014, 'sine', 0.36);
 }
 
 function breakSound(level) {
@@ -141,13 +162,19 @@ function breakSound(level) {
   if (level >= 3) thud(80 + level * 6, 34, 0.3 + level * 0.05, 0.22 + level * 0.04);
 }
 
+// the collapse: low and wide, not loud (per Rauder: about 30% quieter than
+// the first cut, and it has to feel like something big happened). One bright
+// crack as the glass gives, then a wind falling in pitch while it swells and
+// two subs beating against each other, and at the bottom of the hole a
+// boom with a long tail.
 function collapseSound() {
-  // the pull darkens over 1.6 s, the sub falls into nothing, then the boom
-  crackle({ dur: 0.5, gain: 0.55, from: 5000, to: 800, type: 'bandpass', q: 0.7 });
-  crackle({ dur: 1.7, gain: 0.35, from: 3200, to: 90, type: 'lowpass', q: 0.8 });
-  thud(110, 22, 1.7, 0.35);
-  crackle({ dur: 0.4, gain: 0.5, from: 420, to: 60, type: 'lowpass', q: 0.9, delay: 1.6 });
-  thud(72, 28, 0.55, 0.45, 1.6);
+  const pull = PULL_MS / 1000;
+  crackle({ dur: 0.3, gain: 0.26, from: 4200, to: 700, type: 'bandpass', q: 0.8 });
+  crackle({ dur: pull, gain: 0.2, from: 1400, to: 45, type: 'lowpass', q: 0.7, attack: 0.55 });
+  thud(60, 17, pull, 0.2, 0, 0.5);
+  thud(63.5, 19, pull, 0.14, 0, 0.5);
+  thud(52, 24, 1.1, 0.3, pull - 0.06);
+  crackle({ dur: 0.6, gain: 0.22, from: 240, to: 40, type: 'lowpass', q: 0.7, delay: pull - 0.06 });
 }
 
 function verdictSound() {
@@ -645,9 +672,14 @@ export function startCelebration(opts = {}) {
     v.append(pct);
     const lines = el('div', 'cel-lines');
     const runs = opts.runs ? `${opts.runs} runs` : 'every run';
-    const streak = opts.streak && opts.streak > 0 ? `${opts.streak} ${opts.streak === 1 ? 'day' : 'days'}` : null;
+    const streakN = typeof opts.streak === 'function' ? opts.streak() : opts.streak;
+    const streak = streakN && streakN > 0 ? `${streakN} ${streakN === 1 ? 'day' : 'days'}` : null;
+    // a day closed by the night runs is named: the person may be looking at an empty today
+    const day = opts.night && opts.date ? new Date(opts.date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null;
     const texts = [
-      `[ Daily Quest: <b>cleared</b>. ${runs} of ${opts.weekLabel ? opts.weekLabel + "'s playlist" : 'the playlist'} in the books, checked in automatically. ]`,
+      day
+        ? `[ Daily Quest for <b>${day}</b>: <b>cleared</b> in the night. ${runs} of the playlist in the books, counted toward that day. ]`
+        : `[ Daily Quest: <b>cleared</b>. ${runs} of ${opts.weekLabel ? opts.weekLabel + "'s playlist" : 'the playlist'} in the books, checked in automatically. ]`,
       streak ? `[ Streak: <b>${streak}</b>. The chain holds. ]` : null,
       `[ Reward: <b>+1 day</b> to this month's record. ]`,
       '[ The System took note. Come back tomorrow. ]',
@@ -756,8 +788,8 @@ export function startCelebration(opts = {}) {
         page.classList.add('cel-vortex');
       }
     }, 140);
-    later(() => { overlay.classList.add('black'); scene.closeHole(); }, 1800);
-    later(verdict, 2300);
+    later(() => { overlay.classList.add('black'); scene.closeHole(); }, 200 + PULL_MS);
+    later(verdict, 700 + PULL_MS);
   };
 
   const breakCore = (i) => {
@@ -789,7 +821,7 @@ export function startCelebration(opts = {}) {
       core.classList.add('spawned');
       scene.addMotes(i, x, y);
       scene.waves.push({ x, y, r: 0, max: 90, t: 0, dur: 0.45, c: ACCENT_SOFT, w: 1.2 });
-      if (!playBuf('spawn', SPAWN_RATES[i], 0.45)) tone(280 * SPAWN_RATES[i], 0.14, 0.07);
+      summonSound(i);
       if (i === CORES - 1) {
         hint.textContent = '[ Five cores. Break them. ]';
         hint.classList.add('shown');

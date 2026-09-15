@@ -67,7 +67,7 @@ let pollTimer = null;
 let groupTimer = null;
 let fsObserver = null;
 let lastTickAt = 0;
-let celebrationPending = false;
+let celebrationPending = null; // { date, night }: a 100% that happened while the tab was hidden
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
@@ -99,7 +99,7 @@ async function boot() {
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) return;
     if (pollTimer) tick();
-    if (celebrationPending) { celebrationPending = false; startCelebration(); }
+    if (celebrationPending) { const p = celebrationPending; celebrationPending = null; startCelebration(false, p); }
   });
   window.addEventListener('focus', () => { if (pollTimer) tick(); });
 
@@ -276,7 +276,11 @@ async function tick() {
     // after midnight, and fixing "played yesterday but the tab was closed"
     state.prevProgress = split.prevProgress.completedRuns > 0 ? split.prevProgress : null;
     state.scanError = null;
-    if (state.progress.done) maybeCelebrate();
+    // the ceremony: today closed, or yesterday closed by the night runs
+    // (per Rauder, 2026-09-15: a finished playlist is a finished playlist,
+    // whether the site was open at the time or not)
+    if (state.progress.done) maybeCelebrate(state.date, false);
+    else if (state.prevProgress && state.prevProgress.done && split.graceUsed > 0) maybeCelebrate(prevDate, true);
     let scanLine = state.progress.done
       ? 'today is done'
       : `${state.progress.completedRuns} / ${state.progress.requiredRuns} runs`;
@@ -1829,24 +1833,32 @@ function notice(text, kind = '') {
 
 // ---------- the 100% ceremony ----------
 // The cores, the cracks and the black hole live in celebrate.js; this is
-// only the gate: once a day, only while the tab is visible, with the
-// numbers the verdict window shows.
+// only the gate: once per closed day (the key remembers the last date
+// celebrated), only while the tab is visible, with the numbers the verdict
+// window shows. A day closed with the site shut still gets its ceremony:
+// the first scan after opening finds it done and the key does not match.
 
 const CELEBRATED_KEY = 'kova-celebrated';
 
-function maybeCelebrate() {
-  if (localStorage.getItem(CELEBRATED_KEY) === state.date) return;
-  if (document.hidden) { celebrationPending = true; return; }
-  startCelebration();
+function maybeCelebrate(date, night) {
+  if (localStorage.getItem(CELEBRATED_KEY) === date) return;
+  const p = { date, night };
+  if (document.hidden) { celebrationPending = p; return; }
+  startCelebration(false, p);
 }
 
-function startCelebration(test = false) {
-  if (!test) localStorage.setItem(CELEBRATED_KEY, state.date);
+function startCelebration(test = false, p = { date: state.date, night: false }) {
+  if (!test) localStorage.setItem(CELEBRATED_KEY, p.date);
+  const progress = p.night ? state.prevProgress : state.progress;
   runCeremony({
     test,
-    runs: state.progress ? state.progress.requiredRuns : null,
-    streak: state.streak ? state.streak.streak : null,
-    weekLabel: state.playlist && state.playlist.weekLabel,
+    date: p.date,
+    night: p.night,
+    runs: progress ? progress.requiredRuns : null,
+    // read at verdict time: the completion post that carries the fresh streak
+    // is still in flight when the ceremony starts
+    streak: () => (state.streak ? state.streak.streak : null),
+    weekLabel: p.night ? null : state.playlist && state.playlist.weekLabel,
   });
 }
 

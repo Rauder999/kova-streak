@@ -760,7 +760,7 @@ select.inp option, select.inp optgroup { background: var(--win); color: var(--te
 .cel-glitch i:nth-child(2n) { background: rgba(79, 195, 255, 0.18); }
 .cel-skip { position: absolute; bottom: 5%; left: 50%; transform: translateX(-50%); background: none; border: 0; cursor: pointer; color: var(--text-2); font-family: var(--font-mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; }
 .cel-skip:hover { color: var(--text-0); }
-#page.cel-vortex { transition: transform 1.6s cubic-bezier(.65, 0, 1, .35), filter 1.3s ease-in, opacity 1.5s ease-in; transform: scale(.002) rotate(540deg); filter: blur(3px) brightness(1.8) saturate(1.5); opacity: 0; }
+#page.cel-vortex { transition: transform 1.5s cubic-bezier(.65, 0, 1, .35), filter 1.25s ease-in, opacity 1.4s ease-in; transform: scale(.002) rotate(540deg); filter: blur(3px) brightness(1.8) saturate(1.5); opacity: 0; }
 #page.cel-return { transition: transform .8s cubic-bezier(.2, 1.5, .4, 1), filter .5s ease-out, opacity .35s ease-out; }
 /* the verdict window: the System's notification, slammed in */
 .cel-verdict-wrap { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 16px; }

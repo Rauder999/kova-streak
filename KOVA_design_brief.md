@@ -151,9 +151,10 @@ cracks that keep spreading); the fifth shatters it and the whole page is
 pulled into a black hole (accretion disk, light streaks, #page scaled
 into the center). Out of the dark: the System's verdict window, rails
 and the "!" header, 100% decoding in place, the reward line in gold.
-Sounds: the three KovaaK's samples plus synthesized cracks, the collapse
-and the verdict chord. This is the one place ceremony and terminal fully
-merge.
+Sounds: two KovaaK's samples (the hit, the break) plus a synthesized
+arrival whoosh, cracks, a low wide collapse and the verdict chord. A day
+closed by the night runs gets the same ceremony the next time the site
+is open. This is the one place ceremony and terminal fully merge.
 
 **Admin.** Styled file input, System eyebrows. Lowest priority: one
 viewer.
