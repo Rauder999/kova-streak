@@ -67,7 +67,7 @@ export const postTrialBaseline = (windowId, report) => call('/api/trial/baseline
 export const setTrial = (body) => call('/api/admin/trial', { method: 'POST', body });
 // The Gate: the push-your-luck sink for links (THE_GATE.md)
 export const getGate = () => call('/api/gate');
-export const gateEnter = (gate) => call('/api/gate/enter', { method: 'POST', body: { gate } });
+export const gateEnter = () => call('/api/gate/enter', { method: 'POST', body: {} });
 export const gateDescend = () => call('/api/gate/descend', { method: 'POST' });
 export const gateExtract = () => call('/api/gate/extract', { method: 'POST' });
 export const setGate = (body) => call('/api/admin/gate', { method: 'POST', body });

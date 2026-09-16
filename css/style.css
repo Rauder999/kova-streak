@@ -736,7 +736,66 @@ select.inp option, select.inp optgroup { background: var(--win); color: var(--te
 .ro .s { font-family: var(--font-mono); font-size: 11px; letter-spacing: .02em; color: var(--text-2); margin-top: 2px; }
 .ro .av { width: 30px; height: 30px; }
 .sweeps { display: flex; align-items: center; gap: 12px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line-0); flex-wrap: wrap; }
-/* The Gate: the ladder of ranks, the stake bar, the collapse */
+/* ---------- The Red Gate: the descent overlay (an event, not a window) ---------- */
+
+.rg { position: fixed; inset: 0; z-index: 110; opacity: 0; transition: opacity .45s ease-out; background: radial-gradient(ellipse 80% 60% at 50% 45%, rgba(26, 10, 24, 0.96), rgba(5, 6, 10, 0.985)); }
+.rg.on { opacity: 1; }
+.rg.out { opacity: 0; transition: opacity .4s ease-in; }
+.rg-fx { position: absolute; inset: 0; }
+/* the shaft mouth: a vignette that keeps the eye in the middle of the screen */
+.rg-veil { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse 60% 50% at 50% 42%, transparent 40%, rgba(5, 6, 10, 0.75) 100%); }
+.rg-hud { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; pointer-events: none; transition: opacity .35s; }
+.rg-hud.gone { opacity: 0; }
+.rg-hud > * { pointer-events: auto; }
+.rg-top { width: min(1120px, calc(100% - 48px)); margin-top: 30px; display: flex; align-items: baseline; justify-content: space-between; gap: 20px; animation: rg-in .6s ease-out both; }
+.rg-title { font-family: var(--font-sys); text-transform: uppercase; letter-spacing: .22em; font-weight: 700; font-size: 14px; color: var(--accent); }
+.rg-hoard { display: flex; align-items: baseline; gap: 10px; }
+.rg-hoard .l { font-family: var(--font-sys); text-transform: uppercase; letter-spacing: .2em; font-size: 11px; color: var(--text-2); }
+.rg-hoard .v { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 700; font-size: 22px; color: var(--gold); }
+/* the readouts sit out of the shaft's way, in the left margin */
+.rg-mid { position: absolute; left: max(28px, 4vw); top: 22%; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; text-align: left; animation: rg-in .6s ease-out .15s both; }
+.rg-rank { font-family: var(--font-sys); text-transform: uppercase; letter-spacing: .26em; font-weight: 700; font-size: 14px; color: #FFFFFF; }
+.rg-hold { display: flex; flex-direction: column; align-items: flex-start; gap: 0; }
+.rg-hold .l { font-family: var(--font-sys); text-transform: uppercase; letter-spacing: .24em; font-size: 10px; color: var(--text-2); }
+.rg-hold .v { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 700; font-size: 58px; line-height: 1; color: var(--gold); transform-origin: left center; }
+.rg-hold.lost .v { color: var(--bad); }
+.rg-hold .v.tick { animation: rg-tick .45s cubic-bezier(.2, 1.5, .4, 1); }
+.rg-say { position: absolute; left: 50%; bottom: 20%; transform: translateX(-50%); width: min(620px, calc(100% - 48px)); text-align: center; font-family: var(--font-mono); font-size: 12.5px; letter-spacing: .04em; line-height: 1.6; color: var(--text-1); }
+.rg-say.err { color: var(--bad); }
+.rg-say.gold { color: var(--gold-2); }
+.rg-bar { position: absolute; left: 50%; bottom: 8%; transform: translateX(-50%); display: flex; align-items: stretch; gap: 12px; flex-wrap: wrap; justify-content: center; width: min(720px, calc(100% - 40px)); }
+.rg-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-height: 52px; padding: 8px 24px; cursor: pointer; clip-path: var(--chamfer-8); border: 1px solid color-mix(in oklab, var(--accent) 70%, transparent); background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 30%, transparent), color-mix(in oklab, var(--accent) 14%, transparent)); color: #FFFFFF; animation: rg-in .35s ease-out both; }
+.rg-btn .t { font-family: var(--font-sys); text-transform: uppercase; letter-spacing: .16em; font-weight: 700; font-size: 14px; }
+.rg-btn .s { font-family: var(--font-mono); font-size: 10px; letter-spacing: .1em; color: var(--accent-soft); }
+.rg-btn:hover { filter: brightness(1.25); }
+.rg-btn.out { border-color: color-mix(in oklab, var(--gold) 70%, transparent); background: linear-gradient(180deg, color-mix(in oklab, var(--gold) 22%, transparent), color-mix(in oklab, var(--gold) 9%, transparent)); color: var(--gold-2); }
+.rg-btn.ghost { border-color: var(--line-1); background: rgba(255, 255, 255, 0.02); color: var(--text-1); min-height: 40px; }
+.rg-btn.ghost .t { font-size: 12px; }
+.rg-card { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100% - 40px)); padding: 30px 36px 28px; text-align: center; background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0) 46%), rgba(14, 18, 25, 0.97); border: 1px solid color-mix(in oklab, var(--accent) 45%, var(--line-1)); box-shadow: 0 30px 90px rgba(0, 0, 0, 0.7), 0 0 90px color-mix(in oklab, var(--accent) 16%, transparent); animation: rg-card .5s cubic-bezier(.2, 1.4, .4, 1) both; }
+.rg-card::before, .rg-card::after { content: ''; position: absolute; width: 12px; height: 12px; }
+.rg-card::before { top: -1px; left: -1px; border-top: 2px solid var(--accent); border-left: 2px solid var(--accent); }
+.rg-card::after { bottom: -1px; right: -1px; border-bottom: 2px solid var(--accent); border-right: 2px solid var(--accent); }
+.rg-card.loss { border-color: color-mix(in oklab, var(--bad) 45%, var(--line-1)); box-shadow: 0 30px 90px rgba(0, 0, 0, 0.7), 0 0 90px color-mix(in oklab, var(--bad) 14%, transparent); }
+.rg-card.loss::before { border-top-color: var(--bad); border-left-color: var(--bad); }
+.rg-card.loss::after { border-bottom-color: var(--bad); border-right-color: var(--bad); }
+.rg-card .k { font-family: var(--font-sys); text-transform: uppercase; letter-spacing: .22em; font-weight: 700; font-size: 12px; color: var(--text-1); }
+.rg-card .n { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 700; font-size: 72px; line-height: 1.05; margin-top: 6px; color: var(--gold); }
+.rg-card.loss .n { color: var(--bad); }
+.rg-card .u { font-family: var(--font-mono); font-size: 11px; letter-spacing: .22em; color: var(--text-2); }
+.rg-card .ls { margin-top: 16px; display: flex; flex-direction: column; gap: 8px; }
+.rg-card .ls p { font-size: 13px; line-height: 1.6; color: var(--text-1); }
+.rg-card .rg-btn { margin: 22px auto 0; }
+@keyframes rg-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes rg-tick { 0% { transform: scale(1); } 40% { transform: scale(1.22); } 100% { transform: scale(1); } }
+@keyframes rg-card { from { opacity: 0; transform: translate(-50%, -50%) scale(1.25); filter: blur(6px); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); filter: blur(0); } }
+@media (max-width: 720px) {
+  .rg-hold .v { font-size: 42px; }
+  .rg-card { padding: 22px 20px 20px; }
+  .rg-card .n { font-size: 54px; }
+  .rg-bar { bottom: 5%; }
+}
+
+/* The Red Gate window in the Vault: flat and still, like every other window */
 .thegate { overflow: hidden; }
 .thegate.shake { animation: gate-shake .45s cubic-bezier(.36, .07, .19, .97); }
 @keyframes gate-shake { 10%, 90% { transform: translateX(-2px); } 20%, 80% { transform: translateX(4px); } 30%, 50%, 70% { transform: translateX(-7px); } 40%, 60% { transform: translateX(7px); } }
@@ -752,15 +811,15 @@ select.inp option, select.inp optgroup { background: var(--win); color: var(--te
 .gl-o { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .04em; color: var(--text-2); }
 .gl-p { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 700; font-size: 16px; color: var(--gold); flex: none; }
 .gl-v { font-family: var(--font-mono); font-size: 9px; letter-spacing: .16em; color: var(--gold-2); border: 1px solid color-mix(in oklab, var(--gold) 60%, transparent); padding: 2px 6px 1px; clip-path: var(--chamfer-4); flex: none; }
-.gate-doors { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 18px; }
-.gdoor { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 12px 14px; cursor: pointer; text-align: left; background: rgba(255, 255, 255, 0.02); border: 1px solid var(--line-1); clip-path: var(--chamfer-6); }
-.gdoor .n { font-family: var(--font-sys); text-transform: uppercase; letter-spacing: .12em; font-weight: 700; font-size: 13px; color: var(--text-0); }
-.gdoor .c { font-family: var(--font-mono); font-size: 14px; font-weight: 700; color: var(--gold); }
-.gdoor .s { font-family: var(--font-mono); font-size: 10px; letter-spacing: .04em; color: var(--text-2); }
-.gdoor:hover { border-color: var(--text-2); }
-.gdoor.on { border-color: var(--accent); background: color-mix(in oklab, var(--accent) 14%, transparent); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 30%, transparent); }
-.gdoor.poor { opacity: .45; }
+.gl-step.dry { opacity: .32; }
+.gl-step.dry .gl-p { color: var(--text-2); }
 .gate-bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line-0); }
+/* the keys the System holds for you, one diamond each */
+.rg-keys { display: flex; align-items: center; gap: 6px; }
+.rgk { width: 18px; height: 18px; display: block; }
+.rgk svg { width: 100%; height: 100%; }
+.rgk polygon { fill: none; stroke: var(--line-1); stroke-width: 2; }
+.rgk.on polygon { fill: color-mix(in oklab, var(--accent) 45%, transparent); stroke: var(--accent); }
 .gate-hold { display: flex; align-items: baseline; gap: 10px; margin-right: 6px; }
 .gate-hold .v { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 30px; font-weight: 700; color: var(--gold); line-height: 1; }
 
