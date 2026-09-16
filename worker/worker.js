@@ -1286,6 +1286,7 @@ const GATE = {
   ranks: ['E', 'D', 'C', 'B', 'A', 'S'],
   survive: [0.90, 0.80, 0.70, 0.60, 0.50, 0.40],
   claim: [1, 2, 4, 7, 14, null], // null = the S rank takes the whole Hoard
+  doors: 10, // every chance here is a tenth, so a rank is ten passages
   keysPerDay: 1,
   keysMax: 3,
 };
@@ -1302,14 +1303,22 @@ function gateRandom() {
   return b[0] / 4294967296;
 }
 
-// How many ranks this descent clears before the Gate closes on it (0..6).
-function rollDepth() {
-  let depth = 0;
-  for (let i = 0; i < GATE.survive.length; i++) {
-    if (gateRandom() < GATE.survive[i]) depth++;
-    else break;
-  }
-  return depth;
+// Every rank's rim is GATE.doors passages and the hunter picks one. The
+// whole map is drawn at entry, before anybody has chosen anything, and it
+// never leaves the Worker: that is what keeps a choice from being rerolled.
+// The odds are unchanged, a rank that lets 60% through simply has six open
+// passages out of ten, which is also what makes a card that marks one
+// blocked passage a thing that can exist later.
+function rollLayout() {
+  return GATE.survive.map((p) => {
+    const open = Math.round(p * GATE.doors);
+    const row = Array.from({ length: GATE.doors }, (_, i) => i < open);
+    for (let i = row.length - 1; i > 0; i--) {
+      const j = Math.floor(gateRandom() * (i + 1));
+      [row[i], row[j]] = [row[j], row[i]];
+    }
+    return row;
+  });
 }
 
 async function getHoard(env) {
@@ -1383,22 +1392,21 @@ async function hoardSweep(env) {
   return { date: target, missed, fed, hoard };
 }
 
-// What the client is allowed to know: the ranks revealed so far and what
-// they can be cashed for right now. Never the depth.
+// What the client is allowed to know: how deep it has got and what that can
+// be cashed for right now. Never the map of open passages.
 function publicRun(run, hoard) {
   if (!run) return null;
-  const dead = run.floor > run.depth;
-  const floor = dead ? run.depth : run.floor;
   return {
     id: run.id,
-    floor,
-    diedAt: dead ? run.floor : null,
-    dead,
-    cleared: !dead && run.floor >= GATE.ranks.length,
-    holding: dead ? 0 : gateClaim(floor, hoard),
-    next: dead || run.floor >= GATE.ranks.length ? null : {
+    floor: run.floor,
+    dead: false, // a dead descent is deleted, never handed back
+    cleared: run.floor >= GATE.ranks.length,
+    holding: gateClaim(run.floor, hoard),
+    next: run.floor >= GATE.ranks.length ? null : {
       rank: GATE.ranks[run.floor],
       survive: GATE.survive[run.floor],
+      doors: GATE.doors,
+      open: Math.round(GATE.survive[run.floor] * GATE.doors),
       claim: gateClaim(run.floor + 1, hoard),
       whole: GATE.claim[run.floor] === null,
     },
@@ -1433,6 +1441,7 @@ async function gateState(env, user) {
     // what each rank would hand over if it were reached this second
     claim: GATE.ranks.map((r, i) => gateClaim(i + 1, hoard)),
     share: GATE.claim,
+    doors: GATE.doors,
     keys: keys.n,
     keysMax: GATE.keysMax,
     keyToday: keys.awarded.includes(date),
@@ -2102,7 +2111,7 @@ async function handleApi(request, env, url, cors, ctx) {
     if (left === null) return json({ error: 'No keys.' }, 400, cors);
     const run = {
       id: `${user.uid}-${date}-${Date.now().toString(36)}`,
-      depth: rollDepth(), // the whole descent, decided now and never shown
+      layout: rollLayout(), // every rank's passages, drawn now and never shown
       floor: 0,
       date,
       startedAt: Date.now(),
@@ -2111,15 +2120,27 @@ async function handleApi(request, env, url, cors, ctx) {
     return json({ ok: true, ...(await gateState(env, user)) }, 200, cors);
   }
 
-  // One more rank of a result that already exists.
+  // Take one of the rank's passages. Which of them are open was decided at
+  // entry, so the choice is real and still cannot be rerolled.
   if (path === '/api/gate/descend' && request.method === 'POST') {
+    const body = (await request.json().catch(() => null)) || {};
     const run = await env.KOVA.get(gateRunKey(user.uid), 'json');
     if (!run) return json({ error: 'You are not inside a Gate' }, 400, cors);
-    if (run.floor > run.depth) return json({ error: 'That Gate has already closed on you' }, 400, cors);
     if (run.floor >= GATE.ranks.length) return json({ error: 'The S rank is cleared. Take the Hoard.' }, 400, cors);
+    const door = Math.floor(Number(body.door));
+    if (!(door >= 0 && door < GATE.doors)) return json({ error: 'Pick a passage' }, 400, cors);
+    // the client says which rank it thinks it is on; a stale tab cannot
+    // resolve a rank twice, and the in-isolate guard collapses a burst
+    if (body.floor !== undefined && Number(body.floor) !== run.floor) {
+      return json({ error: 'That rank is already behind you' }, 400, cors);
+    }
+    if (!firstInWindow(`gate:${user.uid}:${run.floor}`, 1500)) {
+      return json({ error: 'One passage at a time' }, 429, cors);
+    }
 
+    const row = run.layout[run.floor] || [];
+    const dead = !row[door];
     run.floor++;
-    const dead = run.floor > run.depth;
     const rank = GATE.ranks[run.floor - 1];
     if (dead) {
       await env.KOVA.delete(gateRunKey(user.uid));
@@ -2143,8 +2164,12 @@ async function handleApi(request, env, url, cors, ctx) {
       ok: true,
       dead,
       rank,
+      door,
+      // the rank is resolved, so its passages can be shown: it tells the
+      // story of the choice and gives away nothing about what is below
+      row,
       ...(await gateState(env, user)),
-      run: publicRun({ ...run, floor: run.floor }, hoard),
+      run: dead ? null : publicRun(run, hoard),
     }, 200, cors);
   }
 
@@ -2152,7 +2177,6 @@ async function handleApi(request, env, url, cors, ctx) {
   if (path === '/api/gate/extract' && request.method === 'POST') {
     const run = await env.KOVA.get(gateRunKey(user.uid), 'json');
     if (!run) return json({ error: 'You are not inside a Gate' }, 400, cors);
-    if (run.floor > run.depth) return json({ error: 'That Gate has already closed on you' }, 400, cors);
     if (run.floor < 1) return json({ error: 'Clear a rank first' }, 400, cors);
 
     const cleared = run.floor >= GATE.ranks.length;

@@ -68,7 +68,9 @@ export const setTrial = (body) => call('/api/admin/trial', { method: 'POST', bod
 // The Gate: the push-your-luck sink for links (THE_GATE.md)
 export const getGate = () => call('/api/gate');
 export const gateEnter = () => call('/api/gate/enter', { method: 'POST', body: {} });
-export const gateDescend = () => call('/api/gate/descend', { method: 'POST' });
+// door: which passage of the rank's rim; floor: the rank the client thinks
+// it is on, so a stale tab cannot resolve the same rank twice
+export const gateDescend = (door, floor) => call('/api/gate/descend', { method: 'POST', body: { door, floor } });
 export const gateExtract = () => call('/api/gate/extract', { method: 'POST' });
 export const setGate = (body) => call('/api/admin/gate', { method: 'POST', body });
 

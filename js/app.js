@@ -1565,7 +1565,7 @@ async function enterDescent(fresh = false) {
     if (!g || !g.run) { gateFlash = { kind: 'err', text: '[ The Gate did not open. ]' }; renderVault(); return; }
     openDescent({
       gate: g,
-      descend: () => api.gateDescend(),
+      descend: (door, floor) => api.gateDescend(door, floor),
       extract: () => api.gateExtract(),
       onEnd: (res) => {
         if (res) {

@@ -738,7 +738,9 @@ select.inp option, select.inp optgroup { background: var(--win); color: var(--te
 .sweeps { display: flex; align-items: center; gap: 12px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line-0); flex-wrap: wrap; }
 /* ---------- The Red Gate: the descent overlay (an event, not a window) ---------- */
 
-.rg { position: fixed; inset: 0; z-index: 110; opacity: 0; transition: opacity .45s ease-out; background: radial-gradient(ellipse 80% 60% at 50% 45%, rgba(26, 10, 24, 0.96), rgba(5, 6, 10, 0.985)); }
+/* opaque on purpose: a translucent ground let the Vault window behind it
+   read as a pale rectangle through the middle of the shaft */
+.rg { position: fixed; inset: 0; z-index: 110; opacity: 0; transition: opacity .45s ease-out; background: radial-gradient(ellipse 70% 55% at 50% 45%, #120714, #05060A 100%), #05060A; }
 .rg.on { opacity: 1; }
 .rg.out { opacity: 0; transition: opacity .4s ease-in; }
 .rg-fx { position: absolute; inset: 0; }
@@ -746,6 +748,15 @@ select.inp option, select.inp optgroup { background: var(--win); color: var(--te
 .rg-veil { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse 60% 50% at 50% 42%, transparent 40%, rgba(5, 6, 10, 0.75) 100%); }
 .rg-hud { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; pointer-events: none; transition: opacity .35s; }
 .rg-hud.gone { opacity: 0; }
+.rg-hud.dim { opacity: .25; }
+/* the grasp: a jumpscare you get out of by hammering the mouse */
+.rg-grasp { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: 12px; pointer-events: none; animation: rg-grab .28s cubic-bezier(.2, 1.6, .4, 1) both; }
+.rg-grasp .g-ttl { font-family: var(--font-sys); text-transform: uppercase; letter-spacing: .3em; font-weight: 700; font-size: clamp(20px, 4vw, 40px); color: var(--bad); text-shadow: 0 0 30px rgba(229, 72, 77, 0.8); animation: rg-throb .32s ease-in-out infinite alternate; }
+.rg-grasp .g-sub { font-family: var(--font-mono); font-size: 12px; letter-spacing: .26em; color: #FFFFFF; }
+.rg-grasp .g-track { width: min(420px, 64vw); height: 8px; border: 1px solid color-mix(in oklab, var(--bad) 60%, transparent); background: rgba(0, 0, 0, 0.5); clip-path: var(--chamfer-4); }
+.rg-grasp .g-track i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--bad), #FF9A84); transition: width .06s linear; }
+@keyframes rg-grab { from { opacity: 0; transform: translate(-50%, -50%) scale(1.5); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
+@keyframes rg-throb { from { transform: scale(1); } to { transform: scale(1.06); } }
 .rg-hud > * { pointer-events: auto; }
 .rg-top { width: min(1120px, calc(100% - 48px)); margin-top: 30px; display: flex; align-items: baseline; justify-content: space-between; gap: 20px; animation: rg-in .6s ease-out both; }
 .rg-title { font-family: var(--font-sys); text-transform: uppercase; letter-spacing: .22em; font-weight: 700; font-size: 14px; color: var(--accent); }
