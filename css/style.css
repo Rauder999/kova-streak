@@ -740,7 +740,14 @@ select.inp option, select.inp optgroup { background: var(--win); color: var(--te
 
 /* opaque on purpose: a translucent ground let the Vault window behind it
    read as a pale rectangle through the middle of the shaft */
-.rg { position: fixed; inset: 0; z-index: 110; opacity: 0; transition: opacity .45s ease-out; background: radial-gradient(ellipse 70% 55% at 50% 45%, #120714, #05060A 100%), #05060A; }
+/* --rg-depth runs 0 to 1 down the ranks: the ground warms as the Hoard's
+   own light starts reaching up the shaft */
+.rg { --rg-depth: 0; position: fixed; inset: 0; z-index: 110; opacity: 0; transition: opacity .45s ease-out; background: radial-gradient(ellipse 70% 55% at 50% 45%, color-mix(in oklab, #14081A calc(100% - var(--rg-depth) * 100%), #1E1206), #05060A 100%), #05060A; }
+/* two columns of light at the far edges, drifting up, harder the deeper you are */
+.rg-side { position: absolute; top: -20%; bottom: -20%; width: 22vw; pointer-events: none; opacity: calc(.25 + var(--rg-depth) * .55); background: repeating-linear-gradient(to bottom, transparent 0 8%, color-mix(in oklab, var(--accent) calc(14% + var(--rg-depth) * 18%), transparent) 8.4% 9%, transparent 9.4% 18%); mask-image: linear-gradient(to right, #000, transparent); animation: rg-rise 7s linear infinite; }
+.rg-side.r { right: 0; mask-image: linear-gradient(to left, #000, transparent); animation-duration: 9s; }
+.rg-side.l { left: 0; }
+@keyframes rg-rise { to { transform: translateY(-18%); } }
 .rg.on { opacity: 1; }
 .rg.out { opacity: 0; transition: opacity .4s ease-in; }
 .rg-fx { position: absolute; inset: 0; }

@@ -34,7 +34,14 @@ const GROUND = '#07070D';
 const SPACING = 520;          // world units between seals
 const FLOORS = 6;
 const THRESHOLD = -SPACING;   // the mouth of the Gate, where a descent starts
-const FALL = { walk: 340, hang: 240, drop: 560, get total() { return this.walk + this.hang + this.drop; } };
+const FALL = { walk: 340, reveal: 760, drop: 620 };
+// the air warms as you go down: the Hoard's own light, bleeding up the shaft
+const AIR_NEAR = [96, 66, 190];
+const AIR_DEEP = [168, 104, 44];
+const POOL_NEAR = [139, 124, 255];
+const POOL_DEEP = [214, 168, 96];
+const mix = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
+const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
 
 const el = (tag, cls, text) => {
   const n = document.createElement(tag);
@@ -189,7 +196,12 @@ class Shaft {
     this.flashColor = '#FFFFFF';
     this.shake = 0;
     this.grip = 0;
-    this.fall = null;         // { from, to, t, dur, phase }
+    this.walk = null;
+    this.fall = null;
+    this.falling = 0;         // 0..1, eased, drives how hard the shaft streaks
+    this.depth = 0;           // 0..1 down the ranks; the air warms with it
+    this.scroll = 0;          // the walls running past, upward
+    this.streaks = [];
     this.dust = [];
     this.shards = [];
     this.coins = [];
@@ -201,6 +213,7 @@ class Shaft {
     window.addEventListener('resize', this.onResize);
     this.resize();
     for (let i = 0; i < 90; i++) this.dust.push(this.newMote(true));
+    for (let i = 0; i < 26; i++) this.streaks.push(this.newStreak(true));
     requestAnimationFrame((t) => this.frame(t));
   }
 
@@ -208,6 +221,16 @@ class Shaft {
   // window stops calling rAF, and the rift would stay shut with its passages
   // collapsed on one another and unclickable until it came back.
   get opening() { return clamp((performance.now() - this.born) / 1250, 0, 1); }
+
+  // the walls of the shaft, seen out of the corner of the eye: streaks that
+  // run upward past you, and run hard while you are falling
+  newStreak(spread) {
+    const side = Math.random() < 0.5 ? -1 : 1;
+    return {
+      side, x: rnd(0.06, 0.48), y: spread ? rnd(0, 1) : rnd(1.02, 1.3),
+      len: rnd(0.04, 0.22), v: rnd(0.05, 0.16), a: rnd(0.05, 0.22), w: rnd(0.6, 2.4),
+    };
+  }
 
   newMote(spread) {
     return {
@@ -272,18 +295,22 @@ class Shaft {
     return best;
   }
 
-  // Walk to the passage, hang over it, drop through, land on the next seal.
-  // The timeline is read off the clock, never accumulated per frame: a
+  // Walking out to the chosen passage. This runs while the Worker answers,
+  // so the rank's rim can be revealed with the hunter already standing over
+  // the mouth he picked, before anything drops.
+  startWalk(doorAngle) {
+    this.markerA = doorAngle;
+    this.walk = { start: performance.now() };
+  }
+
+  // The drop itself, read off the clock and never accumulated per frame: a
   // window that stops being painted stops calling rAF, and a fall driven by
   // frames would hang half way with the descent waiting on it.
-  startFall(fromIdx, toIdx, doorAngle, onLand) {
-    this.fall = {
-      from: this.worldOf(fromIdx), to: this.worldOf(toIdx),
-      start: performance.now(), onLand, landed: false,
-    };
-    this.markerA = doorAngle;
-    // the backstop: if no frame ever runs, the fall still ends on time
-    setTimeout(() => this.finishFall(), FALL.total + 40);
+  startDrop(fromIdx, toIdx, onLand) {
+    this.walk = null;
+    this.row = null; // the rim you chose from is behind you now
+    this.fall = { from: this.worldOf(fromIdx), to: this.worldOf(toIdx), start: performance.now(), onLand, landed: false };
+    setTimeout(() => this.finishFall(), FALL.drop + 40); // backstop, if no frame ever runs
   }
 
   finishFall() {
@@ -295,6 +322,12 @@ class Shaft {
     this.cam = this.camTarget = f.to;
     this.fall = null;
     if (f.onLand) f.onLand();
+  }
+
+  cancelMove() {
+    this.walk = null;
+    this.fall = null;
+    this.markerR = 0;
   }
 
   burst(worldY, color, n = 40, speed = 380, spread = 60) {
@@ -340,19 +373,19 @@ class Shaft {
     this.flash *= Math.exp(-dt * 4.4);
     this.shake *= Math.exp(-dt * 3.2);
 
-    // the fall, read off the clock
+    // walking out to the mouth, then standing over it
+    if (this.walk) {
+      const ms = performance.now() - this.walk.start;
+      this.markerR = ms < FALL.walk ? easeOut(ms / FALL.walk) : 1 + Math.sin(ms / 1000 * 9) * 0.025;
+    }
+    // the drop, read off the clock
     let dropping = false;
     if (this.fall) {
       const f = this.fall;
       const ms = performance.now() - f.start;
-      if (ms < FALL.walk) {
-        this.markerR = easeOut(ms / FALL.walk);
-      } else if (ms < FALL.walk + FALL.hang) {
-        this.markerR = 1 + Math.sin((ms - FALL.walk) / 1000 * 12) * 0.03;
-        if (!f.rang) { f.rang = true; snd.drop(); }
-      } else if (ms < FALL.total) {
+      if (ms < FALL.drop) {
         dropping = true;
-        const k = clamp((ms - FALL.walk - FALL.hang) / FALL.drop, 0, 1);
+        const k = clamp(ms / FALL.drop, 0, 1);
         const e = easeIn(k);
         this.markerY = f.from + (f.to - f.from) * e;
         this.markerR = 1 - e;
@@ -361,13 +394,20 @@ class Shaft {
         this.finishFall();
       }
     }
+    this.falling += ((dropping ? 1 : 0) - this.falling) * Math.min(1, dt * 6);
     const chase = dropping ? 9 : 4;
     this.cam += (this.camTarget - this.cam) * Math.min(1, dt * chase);
 
+    const rush = 1 + this.falling * 7;
+    this.scroll += dt * (0.1 + this.falling * 1.4);
     for (const m of this.dust) {
-      m.y -= m.v * dt;
+      m.y -= m.v * dt * rush;
       m.w += m.ws * dt;
       if (m.y < -0.06) Object.assign(m, this.newMote(false));
+    }
+    for (const st of this.streaks) {
+      st.y -= st.v * dt * rush;
+      if (st.y + st.len < -0.05) Object.assign(st, this.newStreak(false));
     }
     for (const w of this.waves) w.t += dt;
     this.waves = this.waves.filter((w) => w.t < w.dur);
@@ -408,6 +448,7 @@ class Shaft {
     if (this.shake > 0.2) x.translate(rnd(-this.shake, this.shake), rnd(-this.shake, this.shake));
 
     this.drawShaftLight(now, o);
+    this.drawWalls(o);
 
     // seals far to near, so the near ones sit on top
     const order = [];
@@ -437,24 +478,62 @@ class Shaft {
     }
   }
 
-  // a cone of mana coming up the shaft: this is what puts air in the scene
+  air() { return mix(AIR_NEAR, AIR_DEEP, this.depth); }
+  poolRgb() { return mix(POOL_NEAR, POOL_DEEP, this.depth); }
+
+  // What is below, glowing up at you. Anchored to the vanishing point, not
+  // to the seal under your feet: anchoring it to the seal made the whole
+  // thing slide upward as the camera dropped, which read as the floor
+  // rising rather than as you falling. Soft-edged for the same reason a
+  // hard trapezoid read as a floor.
   drawShaftLight(now, o) {
     const { x, W, H } = this;
-    const top = this.project(this.worldOf(this.standing)).y;
-    const g = x.createLinearGradient(0, H, 0, top - H * 0.2);
-    g.addColorStop(0, `rgba(88,62,180,${0.20 * o})`);
-    g.addColorStop(0.45, `rgba(72,50,150,${0.09 * o})`);
-    g.addColorStop(1, 'rgba(40,20,80,0)');
+    const air = this.air();
+    const vp = H * 0.70;
+    const g = x.createRadialGradient(W / 2, vp + H * 0.16, 0, W / 2, vp + H * 0.16, Math.max(W, H) * 0.72);
+    g.addColorStop(0, rgba(air, 0.30 * o));
+    g.addColorStop(0.32, rgba(air, 0.13 * o));
+    g.addColorStop(0.7, rgba(air, 0.035 * o));
+    g.addColorStop(1, rgba(air, 0));
     x.save();
-    x.beginPath();
-    x.moveTo(W / 2 - W * 0.06, top);
-    x.lineTo(W / 2 + W * 0.06, top);
-    x.lineTo(W / 2 + W * 0.62, H + 40);
-    x.lineTo(W / 2 - W * 0.62, H + 40);
-    x.closePath();
     x.fillStyle = g;
-    x.fill();
+    x.fillRect(0, 0, W, H);
     x.restore();
+  }
+
+  // the wall streaks, out at the edges where they belong
+  drawWalls(o) {
+    const { x, W, H } = this;
+    const air = this.air();
+    x.save();
+    x.lineCap = 'round';
+    for (const st of this.streaks) {
+      const px = W / 2 + st.side * (0.5 + st.x) * W * 0.62;
+      const y0 = st.y * H;
+      const y1 = (st.y + st.len) * H;
+      x.globalAlpha = st.a * o * (0.5 + this.falling * 0.9);
+      x.strokeStyle = rgba(air, 1);
+      x.lineWidth = st.w * (1 + this.falling * 1.6);
+      x.beginPath();
+      x.moveTo(px, y1);
+      x.lineTo(px, y0);
+      x.stroke();
+    }
+    // the rings of the wall passing upward, faint, to sell the direction
+    x.globalAlpha = (0.05 + this.falling * 0.14) * o;
+    x.strokeStyle = rgba(air, 1);
+    x.lineWidth = 1;
+    for (let i = 0; i < 7; i++) {
+      const f = ((this.scroll + i / 7) % 1);
+      const y = H * (1.05 - f * 1.2);
+      const spread = 0.2 + (y / H) * 0.85;
+      x.beginPath();
+      x.moveTo(W / 2 - W * spread, y);
+      x.quadraticCurveTo(W / 2, y - H * 0.05 * spread, W / 2 + W * spread, y);
+      x.stroke();
+    }
+    x.restore();
+    x.globalAlpha = 1;
   }
 
   drawDust(o) {
@@ -464,7 +543,7 @@ class Shaft {
       const spread = 0.10 + (y / H) * 0.5;
       const px = W / 2 + (m.x * 2) * spread * W + Math.sin(m.w) * 14;
       x.globalAlpha = m.a * o * (0.35 + (y / H) * 0.65);
-      x.fillStyle = m.s > 1.6 ? '#FFFFFF' : ACCENT_SOFT;
+      x.fillStyle = m.s > 1.6 ? '#FFFFFF' : rgba(this.poolRgb(), 1);
       x.beginPath();
       x.arc(px, y, m.s * 0.7, 0, Math.PI * 2);
       x.fill();
@@ -520,10 +599,10 @@ class Shaft {
     // the pool of light the seal lies in
     if (live) {
       const pool = x.createRadialGradient(0, 0, 0, 0, 0, rx * 1.5);
-      const rgb = isBroken ? '229,72,77' : '139,124,255';
-      pool.addColorStop(0, `rgba(${rgb},${(here ? 0.3 : 0.12) * (1 - brk)})`);
-      pool.addColorStop(0.55, `rgba(${rgb},${(here ? 0.10 : 0.04) * (1 - brk)})`);
-      pool.addColorStop(1, `rgba(${rgb},0)`);
+      const rgb = isBroken ? [229, 72, 77] : this.poolRgb();
+      pool.addColorStop(0, rgba(rgb, (here ? 0.3 : 0.12) * (1 - brk)));
+      pool.addColorStop(0.55, rgba(rgb, (here ? 0.10 : 0.04) * (1 - brk)));
+      pool.addColorStop(1, rgba(rgb, 0));
       x.save();
       x.scale(1, 0.32);
       x.fillStyle = pool;
@@ -704,7 +783,7 @@ class Shaft {
     const r = clamp(17 * p.s, 7, 26);
 
     // the trail, while falling
-    if (this.fall && performance.now() - this.fall.start > FALL.walk + FALL.hang) {
+    if (this.fall) {
       const t = x.createLinearGradient(px, py - r * 7, px, py);
       t.addColorStop(0, 'rgba(207,201,255,0)');
       t.addColorStop(1, 'rgba(226,222,255,0.6)');
@@ -828,7 +907,7 @@ export function openDescent(opts) {
   const bar = el('div', 'rg-bar');
   const slam = el('div', 'rg-slam', 'THE RED GATE');
   hud.append(top, ladder, mid, say, bar);
-  overlay.append(canvas, veil, hud, slam);
+  overlay.append(canvas, el('div', 'rg-side l'), el('div', 'rg-side r'), veil, hud, slam);
   document.body.append(overlay);
 
   const timers = [];
@@ -877,7 +956,14 @@ export function openDescent(opts) {
   };
 
   const promptDoors = () => {
-    if (shaft) { shaft.standing = floor - 1; shaft.row = null; shaft.chosen = -1; shaft.hover = -1; }
+    if (shaft) {
+      shaft.standing = floor - 1;
+      shaft.row = null;
+      shaft.chosen = -1;
+      shaft.hover = -1;
+      shaft.depth = clamp(floor / FLOORS, 0, 1);
+      overlay.style.setProperty('--rg-depth', String(shaft.depth));
+    }
     paintLadder();
     if (floor >= FLOORS) {
       rankLine.textContent = 'S RANK';
@@ -933,63 +1019,68 @@ export function openDescent(opts) {
     setSay('You step into it.');
     snd.step();
 
-    // the walk out to the rim runs while the Worker answers
+    // you walk out to the mouth you picked while the Worker answers
+    if (shaft) shaft.startWalk(angle);
     let res;
-    let landed = false;
-    const walk = new Promise((r) => {
-      if (!shaft) return r();
-      shaft.startFall(floor - 1, floor, angle, () => { landed = true; r(); });
-    });
     try {
       res = await opts.descend(door, target);
     } catch (e) {
       busy = false;
-      if (shaft) { shaft.chosen = -1; shaft.fall = null; shaft.markerR = 0; shaft.markerY = shaft.worldOf(floor - 1); }
+      if (shaft) { shaft.chosen = -1; shaft.cancelMove(); }
       setSay(e && e.message ? e.message : 'The System refused.', 'err');
       renderBar();
       return;
     }
     if (ended) return;
-    await walk;
-    if (ended) return;
     if (res && res.hoard !== undefined) setHoard(res.hoard);
 
+    // the rim answers while you are still standing over it: open in green,
+    // blocked in red, yours ringed. This is the beat, and it belongs here
+    // rather than after the drop, where it was being painted onto the next
+    // rank's seal and reading as nonsense.
+    if (shaft) { shaft.row = res.row; shaft.revealT = 0; }
+    rankLine.textContent = `${ranks[target]} RANK`;
+    setSay(res.dead ? 'Blocked.' : 'Open.', res.dead ? 'err' : null);
+    await new Promise((r) => later(r, reduced() ? 0 : FALL.reveal));
+    if (ended) return;
+
     if (res.dead) {
-      // you went through, and it did not go anywhere
       if (shaft) {
-        shaft.standing = target - 1;
-        shaft.markerY = shaft.worldOf(target - 1);
-        shaft.markerR = 0;
-        shaft.row = res.row;
-        shaft.revealT = 0;
+        shaft.cancelMove();
         shaft.broken = target;
         shaft.breakT = 0;
         shaft.flash = 0.85;
         shaft.flashColor = BAD;
-        shaft.shake = 20;
-        shaft.wave(shaft.worldOf(target), BAD, 1100, 1.1);
-        shaft.burst(shaft.worldOf(target), BAD, 80, 620, 90);
-        shaft.camTarget = shaft.worldOf(target - 1) - SPACING * 0.5;
+        shaft.shake = 22;
+        shaft.wave(shaft.worldOf(target - 1), BAD, 1200, 1.2);
+        shaft.burst(shaft.worldOf(target - 1), BAD, 80, 620, 110);
+        shaft.camTarget = shaft.worldOf(target - 1) - SPACING * 0.45;
       }
       snd.fail();
-      rankLine.textContent = `${ranks[target]} RANK`;
-      setSay(`Blocked. The ${ranks[target]} rank keeps what you were holding.`, 'err');
+      setSay(`The ${ranks[target]} rank keeps what you were holding.`, 'err');
       holdWrap.classList.add('lost');
       setHolding(0);
-      later(() => verdict(false, res), reduced() ? 400 : 2100);
+      later(() => verdict(false, res), reduced() ? 400 : 1900);
       return;
     }
 
+    // through it
+    snd.drop();
     floor = res.run ? res.run.floor : floor + 1;
     if (shaft) {
+      shaft.depth = clamp(floor / FLOORS, 0, 1);
+      overlay.style.setProperty('--rg-depth', String(shaft.depth));
+      await new Promise((r) => {
+        if (reduced()) return r();
+        shaft.startDrop(floor - 1 - 1, floor - 1, r);
+      });
+      if (ended) return;
       shaft.standing = floor - 1;
-      shaft.row = res.row;
-      shaft.revealT = 0;
-      shaft.flash = 0.2;
+      shaft.flash = 0.22;
       shaft.flashColor = ACCENT_SOFT;
-      shaft.shake = 9;
-      shaft.wave(shaft.worldOf(floor - 1), ACCENT_SOFT, 760, 0.9);
-      shaft.burst(shaft.worldOf(floor - 1), ACCENT_SOFT, 34, 300, 80);
+      shaft.shake = 11;
+      shaft.wave(shaft.worldOf(floor - 1), ACCENT_SOFT, 800, 0.9);
+      shaft.burst(shaft.worldOf(floor - 1), ACCENT_SOFT, 38, 320, 90);
     }
     snd.land(floor - 1);
     setHolding(res.run ? res.run.holding : holding);
@@ -1000,7 +1091,7 @@ export function openDescent(opts) {
     later(() => {
       if (grabbed) startGrasp();
       else { busy = false; promptDoors(); renderBar(); }
-    }, reduced() ? 40 : 1150);
+    }, reduced() ? 40 : 1050);
   }
 
   // ---- the grasp ----
