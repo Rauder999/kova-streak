@@ -745,7 +745,16 @@ select.inp option, select.inp optgroup { background: var(--win); color: var(--te
 .rg.out { opacity: 0; transition: opacity .4s ease-in; }
 .rg-fx { position: absolute; inset: 0; }
 /* the shaft mouth: a vignette that keeps the eye in the middle of the screen */
-.rg-veil { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse 60% 50% at 50% 42%, transparent 40%, rgba(5, 6, 10, 0.75) 100%); }
+.rg-veil { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse 62% 54% at 50% 46%, transparent 42%, rgba(5, 6, 10, 0.82) 100%); }
+/* the name lands like a stamp, once, as the rift finishes tearing */
+.rg-slam { position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%) scale(1.6); opacity: 0; pointer-events: none; font-family: var(--font-sys); text-transform: uppercase; letter-spacing: .4em; font-weight: 700; font-size: clamp(22px, 5vw, 60px); color: #FFFFFF; text-shadow: 0 0 40px color-mix(in oklab, var(--accent) 90%, transparent), 0 0 120px color-mix(in oklab, var(--accent) 60%, transparent); }
+.rg-slam.go { animation: rg-slam 2.2s cubic-bezier(.16, 1, .3, 1) forwards; }
+@keyframes rg-slam {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(1.6); filter: blur(14px); letter-spacing: .8em; }
+  18% { opacity: 1; transform: translate(-50%, -50%) scale(1); filter: blur(0); letter-spacing: .4em; }
+  72% { opacity: 1; transform: translate(-50%, -50%) scale(1); filter: blur(0); }
+  100% { opacity: 0; transform: translate(-50%, -52%) scale(.96); filter: blur(6px); }
+}
 .rg-hud { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; pointer-events: none; transition: opacity .35s; }
 .rg-hud.gone { opacity: 0; }
 .rg-hud.dim { opacity: .25; }
@@ -763,6 +772,24 @@ select.inp option, select.inp optgroup { background: var(--win); color: var(--te
 .rg-hoard { display: flex; align-items: baseline; gap: 10px; }
 .rg-hoard .l { font-family: var(--font-sys); text-transform: uppercase; letter-spacing: .2em; font-size: 11px; color: var(--text-2); }
 .rg-hoard .v { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 700; font-size: 22px; color: var(--gold); }
+/* the depth gauge: six rungs down the right margin, since the shaft itself
+   goes dark below the rank you can reach */
+.rg-ladder { position: absolute; right: max(28px, 4vw); top: 24%; display: flex; flex-direction: column; gap: 2px; animation: rg-in .6s ease-out .25s both; }
+.rg-rung { display: grid; grid-template-columns: 22px 34px 3px; align-items: center; gap: 10px; height: 30px; opacity: .3; transition: opacity .3s, transform .3s; }
+.rg-rung .r { font-family: var(--font-sys); text-transform: uppercase; letter-spacing: .1em; font-weight: 700; font-size: 15px; color: var(--text-1); text-align: right; }
+.rg-rung .c { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 12px; color: var(--text-2); text-align: right; }
+.rg-rung i { display: block; width: 3px; height: 16px; background: var(--line-1); }
+.rg-rung.done { opacity: .62; }
+.rg-rung.done .r { color: var(--accent-soft); }
+.rg-rung.done i { background: var(--accent); box-shadow: 0 0 10px color-mix(in oklab, var(--accent) 80%, transparent); }
+.rg-rung.now { opacity: 1; transform: translateX(-6px); }
+.rg-rung.now .r { color: #FFFFFF; text-shadow: 0 0 16px color-mix(in oklab, var(--accent) 90%, transparent); }
+.rg-rung.now .c { color: var(--gold); }
+.rg-rung.now i { height: 26px; background: #FFFFFF; box-shadow: 0 0 16px var(--accent); }
+.rg-rung.next { opacity: .8; }
+.rg-rung.next .r { color: var(--text-0); }
+.rg-rung.next i { background: color-mix(in oklab, var(--accent) 60%, transparent); }
+
 /* the readouts sit out of the shaft's way, in the left margin */
 .rg-mid { position: absolute; left: max(28px, 4vw); top: 22%; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; text-align: left; animation: rg-in .6s ease-out .15s both; }
 .rg-rank { font-family: var(--font-sys); text-transform: uppercase; letter-spacing: .26em; font-weight: 700; font-size: 14px; color: #FFFFFF; }

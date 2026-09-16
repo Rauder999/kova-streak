@@ -1,28 +1,40 @@
 // The Red Gate: the descent, as an event.
 //
-// The constitution allows at most two ambient motions per screen but says
-// event motion is free, so the Gate WINDOW in the Vault stays flat and
-// still and everything here happens in a full-screen overlay that exists
-// only while a hunter is inside.
+// The constitution allows at most two ambient motions per screen but leaves
+// event motion free, so the Gate WINDOW in the Vault stays flat and still
+// and all of this happens in a full-screen overlay that exists only while a
+// hunter is inside. A key costs a day of training, so the thing it buys has
+// to feel like it was worth the day.
 //
-// The scene is a vertical shaft. Six seals hang below you, one per rank,
-// drawn in perspective. Each seal's rim is ten passages and you pick the
-// one you go down; which of them are open was decided by the Worker at
-// entry and is never sent here, so the choice is real and cannot be
-// rerolled. Clearing a rank drops you onto its seal, which burns behind
-// you. Picking a blocked passage turns the seal red and throws you out.
+// What makes it read as expensive, after looking at how Solo Leveling draws
+// its gates and circles:
+//   value range   every light has a white-hot core, a violet body and a wide
+//                 dim bloom, instead of one flat mid-violet stroke
+//   air           a light shaft with dust drifting in it, and atmospheric
+//                 fade so the deep ranks sit behind real distance
+//   density       the seal you stand on is a full arcane circle, rune band
+//                 and spokes and all; the far ones are simplified, which
+//                 also happens to be what keeps the frame cheap
+//   weight        the fall has anticipation, travel and an impact that the
+//                 whole scene answers: shockwave, dust, shake
+//
+// You stand on your own seal and its rim is the passages. Which of them are
+// open was decided by the Worker at entry and is never sent here, so the
+// choice is real and cannot be rerolled.
 //
 // Self-contained: DOM, one canvas and WebAudio. It knows nothing about the
-// API. app.js hands it the callbacks and the state they return.
+// API; app.js hands it the callbacks and the state they return.
 
 const ACCENT = '#8B7CFF';
 const ACCENT_SOFT = '#CFC9FF';
 const GOLD = '#E8B64A';
 const BAD = '#E5484D';
 const OK = '#4CC38A';
-const SPACING = 300;   // world units between seals
+const GROUND = '#07070D';
+const SPACING = 520;          // world units between seals
 const FLOORS = 6;
-const START_Y = -SPACING * 0.36; // the mouth of the Gate, just above the E seal
+const THRESHOLD = -SPACING;   // the mouth of the Gate, where a descent starts
+const FALL = { walk: 340, hang: 240, drop: 560, get total() { return this.walk + this.hang + this.drop; } };
 
 const el = (tag, cls, text) => {
   const n = document.createElement(tag);
@@ -33,11 +45,11 @@ const el = (tag, cls, text) => {
 const rnd = (a, b) => a + Math.random() * (b - a);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const ease = (t) => 1 - (1 - t) ** 3;
+const easeIn = (t) => t * t * t;
+const easeOut = (t) => 1 - (1 - t) ** 4;
 const reduced = () => !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
 // ---------- sound ----------
-// All synthesized: anything loaded over the network would arrive after the
-// moment it is meant to land.
 
 let actx = null;
 const ctx = () => {
@@ -95,54 +107,60 @@ function noise({ dur = 0.3, gain = 0.15, from = 2000, to = 300, type = 'bandpass
   } catch { /* sound is optional */ }
 }
 
-const RANK_NOTES = [196.0, 233.08, 261.63, 311.13, 349.23, 415.30]; // a minor climb
+const RANK_NOTES = [196.0, 233.08, 261.63, 311.13, 349.23, 415.30];
 
 const snd = {
   open() {
-    noise({ dur: 1.1, gain: 0.2, from: 120, to: 2400, type: 'bandpass', q: 0.6, attack: 0.75 });
-    tone(46, { dur: 1.4, gain: 0.28, type: 'sine', to: 30 });
-    tone(69, { dur: 1.4, gain: 0.1, type: 'sine', to: 46 });
+    noise({ dur: 1.5, gain: 0.2, from: 90, to: 2600, type: 'bandpass', q: 0.55, attack: 0.72 });
+    tone(43, { dur: 2.0, gain: 0.3, type: 'sine', to: 28 });
+    tone(64.5, { dur: 2.0, gain: 0.1, type: 'sine', to: 43 });
+    noise({ dur: 0.7, gain: 0.16, from: 4200, to: 400, type: 'bandpass', q: 0.8, delay: 0.95 });
+    [261.63, 392.0, 523.25].forEach((f, i) => tone(f, { dur: 1.6, gain: 0.05, type: 'sine', delay: 1.0 + i * 0.09 }));
   },
-  hover() { tone(880, { dur: 0.05, gain: 0.025, type: 'sine' }); },
-  commit() {
-    noise({ dur: 0.5, gain: 0.1, from: 400, to: 2600, type: 'bandpass', q: 1.1, attack: 0.7 });
-    tone(110, { dur: 0.45, gain: 0.12, type: 'sine', to: 70 });
+  hover() { tone(1174.66, { dur: 0.06, gain: 0.02, type: 'sine' }); },
+  step() {
+    noise({ dur: 0.22, gain: 0.07, from: 700, to: 2200, type: 'bandpass', q: 1.2, attack: 0.6 });
+    tone(196, { dur: 0.2, gain: 0.05, type: 'sine' });
   },
-  pass(i) {
-    tone(RANK_NOTES[i], { dur: 0.9, gain: 0.13 });
-    tone(RANK_NOTES[i] * 1.5, { dur: 0.6, gain: 0.05, type: 'sine', delay: 0.02 });
-    tone(RANK_NOTES[i] * 2, { dur: 0.45, gain: 0.03, type: 'sine', delay: 0.04 });
-    noise({ dur: 0.3, gain: 0.07, from: 900, to: 180, type: 'lowpass', q: 0.8 });
-    tone(58, { dur: 0.35, gain: 0.18, type: 'sine', to: 34 });
+  drop() {
+    noise({ dur: 0.62, gain: 0.13, from: 380, to: 2800, type: 'bandpass', q: 0.7, attack: 0.75 });
+    tone(150, { dur: 0.6, gain: 0.1, type: 'sawtooth', to: 62 });
+  },
+  land(i) {
+    tone(RANK_NOTES[i], { dur: 1.1, gain: 0.13 });
+    tone(RANK_NOTES[i] * 1.5, { dur: 0.75, gain: 0.05, type: 'sine', delay: 0.02 });
+    tone(RANK_NOTES[i] * 2, { dur: 0.5, gain: 0.03, type: 'sine', delay: 0.04 });
+    tone(52, { dur: 0.55, gain: 0.26, type: 'sine', to: 30 });
+    noise({ dur: 0.4, gain: 0.1, from: 1100, to: 140, type: 'lowpass', q: 0.8 });
   },
   fail() {
-    noise({ dur: 0.22, gain: 0.32, from: 5200, to: 800, type: 'bandpass', q: 0.7 });
-    noise({ dur: 1.5, gain: 0.18, from: 1200, to: 45, type: 'lowpass', q: 0.7, attack: 0.25 });
-    tone(72, { dur: 1.3, gain: 0.28, type: 'sine', to: 24 });
-    tone(76, { dur: 1.3, gain: 0.14, type: 'sine', to: 27 });
+    noise({ dur: 0.24, gain: 0.34, from: 5600, to: 700, type: 'bandpass', q: 0.65 });
+    noise({ dur: 1.8, gain: 0.2, from: 1400, to: 40, type: 'lowpass', q: 0.7, attack: 0.22 });
+    tone(72, { dur: 1.5, gain: 0.3, type: 'sine', to: 22 });
+    tone(76.5, { dur: 1.5, gain: 0.15, type: 'sine', to: 25 });
   },
   grab() {
-    noise({ dur: 0.18, gain: 0.4, from: 1800, to: 180, type: 'lowpass', q: 1.4 });
-    tone(58, { dur: 0.8, gain: 0.32, type: 'sawtooth', to: 30 });
-    tone(41, { dur: 1.1, gain: 0.2, type: 'sine', to: 26 });
+    noise({ dur: 0.2, gain: 0.42, from: 2000, to: 160, type: 'lowpass', q: 1.4 });
+    tone(58, { dur: 0.9, gain: 0.32, type: 'sawtooth', to: 28 });
+    tone(41, { dur: 1.2, gain: 0.2, type: 'sine', to: 25 });
   },
   struggle(n) {
     noise({ dur: 0.07, gain: 0.12, from: 900 + n * 60, to: 300, type: 'bandpass', q: 1.6 });
     tone(150 + n * 14, { dur: 0.06, gain: 0.05, type: 'square' });
   },
   free() {
-    noise({ dur: 0.35, gain: 0.16, from: 300, to: 3200, type: 'bandpass', q: 0.6, attack: 0.5 });
-    tone(392, { dur: 0.5, gain: 0.1 });
-    tone(587.33, { dur: 0.45, gain: 0.07, delay: 0.06 });
+    noise({ dur: 0.4, gain: 0.17, from: 260, to: 3600, type: 'bandpass', q: 0.6, attack: 0.5 });
+    tone(392, { dur: 0.6, gain: 0.1 });
+    tone(587.33, { dur: 0.5, gain: 0.07, delay: 0.06 });
   },
   take(n) {
-    for (let i = 0; i < Math.min(8, Math.max(1, n)); i++) tone(523.25 * (1 + i * 0.12), { dur: 0.3, gain: 0.05, type: 'sine', delay: i * 0.055 });
-    tone(65, { dur: 0.5, gain: 0.15, type: 'sine', to: 42 });
+    for (let i = 0; i < Math.min(9, Math.max(1, n)); i++) tone(523.25 * (1 + i * 0.12), { dur: 0.32, gain: 0.05, type: 'sine', delay: i * 0.05 });
+    tone(62, { dur: 0.6, gain: 0.16, type: 'sine', to: 40 });
   },
   clear() {
-    [261.63, 329.63, 392.0, 523.25, 659.25].forEach((f, i) => tone(f, { dur: 1.3, gain: 0.1, delay: i * 0.08 }));
-    tone(43, { dur: 1.8, gain: 0.28, type: 'sine', to: 32 });
-    noise({ dur: 1.6, gain: 0.12, from: 260, to: 4000, type: 'bandpass', q: 0.5, attack: 0.6 });
+    [261.63, 329.63, 392.0, 523.25, 659.25, 783.99].forEach((f, i) => tone(f, { dur: 1.6, gain: 0.09, delay: i * 0.075 }));
+    tone(41, { dur: 2.2, gain: 0.3, type: 'sine', to: 30 });
+    noise({ dur: 1.9, gain: 0.13, from: 240, to: 4600, type: 'bandpass', q: 0.5, attack: 0.62 });
   },
 };
 
@@ -154,43 +172,48 @@ class Shaft {
     this.x = canvas.getContext('2d');
     this.ranks = ranks;
     this.doors = doors;
-    // the camera sits level with the rank you are standing on, so the near
-    // seal keeps a constant size; only the hunter starts above the mouth
-    this.cam = 0;
-    this.camTarget = 0;
-    this.marker = START_Y;
-    this.markerTarget = START_Y;
+    this.standing = -1;       // the seal under your feet; -1 is the threshold
+    this.cam = THRESHOLD;
+    this.camTarget = THRESHOLD;
+    this.markerY = THRESHOLD;
+    this.markerR = 0;         // 0 at the seal's heart, 1 out at its rim
+    this.markerA = -Math.PI / 2;
     this.spin = 0;
-    this.lit = -1;          // deepest seal cleared
-    this.doorFloor = 0;     // the seal whose passages can be picked
     this.hover = -1;
     this.chosen = -1;
-    this.row = null;        // revealed passages, after a rank resolves
+    this.row = null;          // the rim revealed, once a rank has answered
     this.revealT = 0;
     this.broken = -1;
     this.breakT = 0;
     this.flash = 0;
     this.flashColor = '#FFFFFF';
     this.shake = 0;
-    this.grip = 0;          // 0..1, something holding you
-    this.embers = [];
+    this.grip = 0;
+    this.fall = null;         // { from, to, t, dur, phase }
+    this.dust = [];
     this.shards = [];
     this.coins = [];
+    this.waves = [];
     this.running = true;
     this.born = performance.now();
     this.last = this.born;
     this.onResize = () => this.resize();
     window.addEventListener('resize', this.onResize);
     this.resize();
+    for (let i = 0; i < 90; i++) this.dust.push(this.newMote(true));
     requestAnimationFrame((t) => this.frame(t));
   }
 
-  // Read off the clock, not accumulated per frame. A browser that stops
-  // painting (the tab in the background, the window behind another) stops
-  // calling rAF, and the rift would stay shut with the passages collapsed
-  // on top of each other, unclickable, until it came back.
-  get opening() {
-    return clamp((performance.now() - this.born) / 870, 0, 1);
+  // Read off the clock, not accumulated per frame: a window behind another
+  // window stops calling rAF, and the rift would stay shut with its passages
+  // collapsed on one another and unclickable until it came back.
+  get opening() { return clamp((performance.now() - this.born) / 1250, 0, 1); }
+
+  newMote(spread) {
+    return {
+      x: rnd(-0.5, 0.5), y: spread ? rnd(0, 1) : 1.05,
+      v: rnd(0.02, 0.08), s: rnd(0.6, 2.2), a: rnd(0.08, 0.5), w: rnd(0, 6.3), ws: rnd(0.3, 1.1),
+    };
   }
 
   resize() {
@@ -209,66 +232,95 @@ class Shaft {
     window.removeEventListener('resize', this.onResize);
   }
 
-  // A real perspective divide, so the whole shaft is visible at once and the
-  // deeper ranks compress toward a vanishing point below the middle: you can
-  // see how far down the S rank is before deciding to go for it.
+  worldOf(i) { return i < 0 ? THRESHOLD : i * SPACING; }
+
   project(worldY) {
     const k = this.H / 800;
-    const d = worldY - this.cam + 340;
-    if (d < 120) return { y: -this.H, s: 0, d, off: true }; // passed, above the camera
-    return { y: this.H * 0.72 - (92480 * k) / d, s: (460 * k) / d, d, off: false };
+    const d = worldY - this.cam + 360;
+    if (d < 130) return { y: -this.H, s: 0, d, off: true };
+    return { y: this.H * 0.70 - (96000 * k) / d, s: (470 * k) / d, d, off: false };
   }
 
   sealGeom(i) {
-    const p = this.project(i * SPACING);
-    return { ...p, rx: 240 * p.s * ease(this.opening), ry: 240 * p.s * ease(this.opening) * 0.30 };
+    const p = this.project(this.worldOf(i));
+    const o = ease(this.opening);
+    return { ...p, rx: 250 * p.s * o, ry: 250 * p.s * o * 0.30 };
   }
 
-  // Where each passage of the door seal sits on screen. The door seal does
-  // not spin, or the thing you are trying to click would run away.
+  // Where each passage of your own seal sits on screen. Your seal holds
+  // still: a target that spins away is not a target.
   doorPositions() {
-    const i = this.doorFloor;
-    if (i < 0 || i >= FLOORS) return [];
+    const i = this.standing;
     const g = this.sealGeom(i);
-    if (g.off) return [];
+    if (g.off || !g.rx) return [];
     const out = [];
     for (let k = 0; k < this.doors; k++) {
       const a = (k / this.doors) * Math.PI * 2 - Math.PI / 2;
-      out.push({ i: k, x: this.W / 2 + Math.cos(a) * g.rx, y: g.y + Math.sin(a) * g.ry, r: clamp(20 * g.s, 9, 22), a });
+      out.push({ i: k, x: this.W / 2 + Math.cos(a) * g.rx, y: g.y + Math.sin(a) * g.ry, r: clamp(26 * g.s, 12, 30), a });
     }
     return out;
   }
 
   pick(px, py) {
+    if (this.fall || this.row) return -1;
     let best = -1;
     let bd = 1e9;
     for (const p of this.doorPositions()) {
       const d = Math.hypot(px - p.x, py - p.y);
-      if (d < Math.max(24, p.r * 1.9) && d < bd) { bd = d; best = p.i; }
+      if (d < Math.max(26, p.r * 1.8) && d < bd) { bd = d; best = p.i; }
     }
     return best;
   }
 
-  burst(worldY, color, n = 40, speed = 380) {
+  // Walk to the passage, hang over it, drop through, land on the next seal.
+  // The timeline is read off the clock, never accumulated per frame: a
+  // window that stops being painted stops calling rAF, and a fall driven by
+  // frames would hang half way with the descent waiting on it.
+  startFall(fromIdx, toIdx, doorAngle, onLand) {
+    this.fall = {
+      from: this.worldOf(fromIdx), to: this.worldOf(toIdx),
+      start: performance.now(), onLand, landed: false,
+    };
+    this.markerA = doorAngle;
+    // the backstop: if no frame ever runs, the fall still ends on time
+    setTimeout(() => this.finishFall(), FALL.total + 40);
+  }
+
+  finishFall() {
+    const f = this.fall;
+    if (!f || f.landed) return;
+    f.landed = true;
+    this.markerY = f.to;
+    this.markerR = 0;
+    this.cam = this.camTarget = f.to;
+    this.fall = null;
+    if (f.onLand) f.onLand();
+  }
+
+  burst(worldY, color, n = 40, speed = 380, spread = 60) {
     const { y } = this.project(worldY);
     for (let i = 0; i < n; i++) {
       const a = rnd(0, Math.PI * 2);
       const sp = rnd(speed * 0.3, speed);
       this.shards.push({
-        x: this.W / 2 + Math.cos(a) * rnd(0, 60), y: y + Math.sin(a) * rnd(0, 18),
-        vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.45 - rnd(40, 200),
-        rot: rnd(0, 6.3), vr: rnd(-8, 8), size: rnd(3, 10), life: rnd(0.6, 1.4), t: 0, c: color,
+        x: this.W / 2 + Math.cos(a) * rnd(0, spread), y: y + Math.sin(a) * rnd(0, spread * 0.3),
+        vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.45 - rnd(40, 220),
+        rot: rnd(0, 6.3), vr: rnd(-9, 9), size: rnd(3, 11), life: rnd(0.6, 1.5), t: 0, c: color,
       });
     }
   }
 
+  wave(worldY, color, max = 520, dur = 0.85) {
+    this.waves.push({ worldY, color, t: 0, dur, max });
+  }
+
   pour(worldY, n) {
     const { y } = this.project(worldY);
-    for (let i = 0; i < Math.min(160, 14 + n * 6); i++) {
+    for (let i = 0; i < Math.min(180, 16 + n * 6); i++) {
       this.coins.push({
-        x: this.W / 2 + rnd(-90, 90), y: y + rnd(-20, 20),
-        vx: rnd(-90, 90), vy: rnd(-520, -220), rot: rnd(0, 6.3), vr: rnd(-7, 7),
-        life: rnd(1.1, 2), t: 0, delay: rnd(0, 0.5),
+        x: this.W / 2 + rnd(-110, 110), y: y + rnd(-24, 24),
+        vx: rnd(-100, 100), vy: rnd(-560, -240), rot: rnd(0, 6.3), vr: rnd(-7, 7),
+        life: rnd(1.1, 2.1), t: 0, delay: rnd(0, 0.55),
       });
     }
   }
@@ -281,22 +333,45 @@ class Shaft {
     requestAnimationFrame((tt) => this.frame(tt));
   }
 
-  update(dt) {
-    this.cam += (this.camTarget - this.cam) * Math.min(1, dt * 4.2);
-    this.marker += (this.markerTarget - this.marker) * Math.min(1, dt * 5.5);
-    this.spin += dt * 0.35;
+  update(dt, now) {
+    this.spin += dt * 0.22;
     if (this.broken >= 0) this.breakT += dt;
     if (this.row) this.revealT += dt;
-    this.flash *= Math.exp(-dt * 5);
-    this.shake *= Math.exp(-dt * 3.4);
+    this.flash *= Math.exp(-dt * 4.4);
+    this.shake *= Math.exp(-dt * 3.2);
 
-    if (this.embers.length < 60 && Math.random() < dt * 80) {
-      this.embers.push({ x: rnd(0, this.W), y: this.H + 10, v: rnd(26, 90), s: rnd(0.7, 2.1), a: rnd(0.12, 0.5), w: rnd(0, 6.3) });
+    // the fall, read off the clock
+    let dropping = false;
+    if (this.fall) {
+      const f = this.fall;
+      const ms = performance.now() - f.start;
+      if (ms < FALL.walk) {
+        this.markerR = easeOut(ms / FALL.walk);
+      } else if (ms < FALL.walk + FALL.hang) {
+        this.markerR = 1 + Math.sin((ms - FALL.walk) / 1000 * 12) * 0.03;
+        if (!f.rang) { f.rang = true; snd.drop(); }
+      } else if (ms < FALL.total) {
+        dropping = true;
+        const k = clamp((ms - FALL.walk - FALL.hang) / FALL.drop, 0, 1);
+        const e = easeIn(k);
+        this.markerY = f.from + (f.to - f.from) * e;
+        this.markerR = 1 - e;
+        this.camTarget = f.from + (f.to - f.from) * clamp(k * 1.15, 0, 1);
+      } else {
+        this.finishFall();
+      }
     }
-    for (const e of this.embers) { e.y -= e.v * dt; e.w += dt * 1.6; }
-    this.embers = this.embers.filter((e) => e.y > -20);
+    const chase = dropping ? 9 : 4;
+    this.cam += (this.camTarget - this.cam) * Math.min(1, dt * chase);
 
-    for (const s of this.shards) { s.t += dt; s.vy += 620 * dt; s.x += s.vx * dt; s.y += s.vy * dt; s.rot += s.vr * dt; }
+    for (const m of this.dust) {
+      m.y -= m.v * dt;
+      m.w += m.ws * dt;
+      if (m.y < -0.06) Object.assign(m, this.newMote(false));
+    }
+    for (const w of this.waves) w.t += dt;
+    this.waves = this.waves.filter((w) => w.t < w.dur);
+    for (const s of this.shards) { s.t += dt; s.vy += 640 * dt; s.x += s.vx * dt; s.y += s.vy * dt; s.rot += s.vr * dt; }
     this.shards = this.shards.filter((s) => s.t < s.life);
     for (const c of this.coins) {
       if (c.delay > 0) { c.delay -= dt; continue; }
@@ -305,73 +380,55 @@ class Shaft {
     this.coins = this.coins.filter((c) => c.t < c.life);
   }
 
+  // How much of the ground sits between the camera and a thing. Heavy on
+  // purpose: six seals under a perspective divide always clump into a knot
+  // at the vanishing point, so the shaft shows the seal you are on, the one
+  // below it, a ghost of the next, and then darkness. How deep you actually
+  // are is the HUD's job, and the dark is worth more than the knot.
+  fogAt(d) { return clamp((d - 430) / 1150, 0, 1); }
+
+  glowStroke(path, color, width, blur, alpha) {
+    const x = this.x;
+    x.save();
+    x.strokeStyle = color;
+    x.shadowColor = color;
+    x.shadowBlur = blur;
+    x.lineWidth = width;
+    x.globalAlpha = alpha;
+    path();
+    x.stroke();
+    x.restore();
+  }
+
   draw(now) {
     const { x, W, H } = this;
+    const o = ease(this.opening);
     x.clearRect(0, 0, W, H);
     x.save();
     if (this.shake > 0.2) x.translate(rnd(-this.shake, this.shake), rnd(-this.shake, this.shake));
 
-    const o = ease(this.opening);
+    this.drawShaftLight(now, o);
 
-    // the seals, far to near, so the near ones sit on top
+    // seals far to near, so the near ones sit on top
     const order = [];
-    for (let i = 0; i < FLOORS; i++) order.push(i);
-    order.sort((a, b) => this.project(b * SPACING).d - this.project(a * SPACING).d);
+    for (let i = -1; i < FLOORS; i++) order.push(i);
+    order.sort((a, b) => this.project(this.worldOf(b)).d - this.project(this.worldOf(a)).d);
     for (const i of order) this.drawSeal(i, now, o);
 
-    this.drawMarker(now);
+    for (const w of this.waves) this.drawWave(w);
+    this.drawMarker(now, o);
+    this.drawDust(o);
+    this.drawDebris();
 
-    for (const e of this.embers) {
-      x.globalAlpha = e.a * o;
-      x.fillStyle = e.s > 1.6 ? ACCENT_SOFT : ACCENT;
-      x.beginPath();
-      x.arc(e.x + Math.sin(e.w) * 9, e.y, e.s, 0, Math.PI * 2);
-      x.fill();
-    }
-    x.globalAlpha = 1;
-
-    for (const s of this.shards) {
-      const k = 1 - s.t / s.life;
-      x.save();
-      x.translate(s.x, s.y);
-      x.rotate(s.rot);
-      x.globalAlpha = Math.min(1, k * 1.7);
-      x.fillStyle = s.c;
-      x.beginPath();
-      x.moveTo(-s.size * 0.6, -s.size * 0.35);
-      x.lineTo(s.size * 0.7, -s.size * 0.1);
-      x.lineTo(0, s.size * 0.55);
-      x.closePath();
-      x.fill();
-      x.restore();
-    }
-
-    for (const c of this.coins) {
-      if (c.delay > 0) continue;
-      const k = 1 - c.t / c.life;
-      x.save();
-      x.translate(c.x, c.y);
-      x.rotate(c.rot);
-      x.globalAlpha = Math.min(1, k * 1.6);
-      x.strokeStyle = GOLD;
-      x.lineWidth = 1.4;
-      x.beginPath();
-      x.moveTo(0, -5); x.lineTo(4, 0); x.lineTo(0, 5); x.lineTo(-4, 0); x.closePath();
-      x.stroke();
-      x.restore();
-    }
-    x.globalAlpha = 1;
     x.restore();
 
-    // something holding you: the shaft closes in from the edges
     if (this.grip > 0.01) {
-      const g = x.createRadialGradient(W / 2, H * 0.45, Math.min(W, H) * 0.12, W / 2, H * 0.45, Math.max(W, H) * 0.62);
+      const g = x.createRadialGradient(W / 2, H * 0.45, Math.min(W, H) * 0.1, W / 2, H * 0.45, Math.max(W, H) * 0.6);
       g.addColorStop(0, 'rgba(90,10,18,0)');
-      g.addColorStop(1, `rgba(120,12,22,${0.85 * this.grip})`);
+      g.addColorStop(1, `rgba(128,12,22,${0.88 * this.grip})`);
       x.fillStyle = g;
       x.fillRect(0, 0, W, H);
     }
-
     if (this.flash > 0.01) {
       x.fillStyle = this.flashColor;
       x.globalAlpha = Math.min(1, this.flash);
@@ -380,140 +437,347 @@ class Shaft {
     }
   }
 
+  // a cone of mana coming up the shaft: this is what puts air in the scene
+  drawShaftLight(now, o) {
+    const { x, W, H } = this;
+    const top = this.project(this.worldOf(this.standing)).y;
+    const g = x.createLinearGradient(0, H, 0, top - H * 0.2);
+    g.addColorStop(0, `rgba(88,62,180,${0.20 * o})`);
+    g.addColorStop(0.45, `rgba(72,50,150,${0.09 * o})`);
+    g.addColorStop(1, 'rgba(40,20,80,0)');
+    x.save();
+    x.beginPath();
+    x.moveTo(W / 2 - W * 0.06, top);
+    x.lineTo(W / 2 + W * 0.06, top);
+    x.lineTo(W / 2 + W * 0.62, H + 40);
+    x.lineTo(W / 2 - W * 0.62, H + 40);
+    x.closePath();
+    x.fillStyle = g;
+    x.fill();
+    x.restore();
+  }
+
+  drawDust(o) {
+    const { x, W, H } = this;
+    for (const m of this.dust) {
+      const y = m.y * H;
+      const spread = 0.10 + (y / H) * 0.5;
+      const px = W / 2 + (m.x * 2) * spread * W + Math.sin(m.w) * 14;
+      x.globalAlpha = m.a * o * (0.35 + (y / H) * 0.65);
+      x.fillStyle = m.s > 1.6 ? '#FFFFFF' : ACCENT_SOFT;
+      x.beginPath();
+      x.arc(px, y, m.s * 0.7, 0, Math.PI * 2);
+      x.fill();
+    }
+    x.globalAlpha = 1;
+  }
+
+  drawWave(w) {
+    const { x, W } = this;
+    const p = this.project(w.worldY);
+    if (p.off) return;
+    const k = w.t / w.dur;
+    const r = w.max * p.s * easeOut(k);
+    x.save();
+    x.translate(W / 2, p.y);
+    x.scale(1, 0.30);
+    x.globalAlpha = (1 - k) * 0.9;
+    x.strokeStyle = w.color;
+    x.shadowColor = w.color;
+    x.shadowBlur = 24;
+    x.lineWidth = 2.5 * (1 - k * 0.6);
+    x.beginPath();
+    x.arc(0, 0, r, 0, Math.PI * 2);
+    x.stroke();
+    x.restore();
+    x.globalAlpha = 1;
+  }
+
+  // One rank's seal. The one under your feet gets the whole arcane circle;
+  // the ones below get less of it the further they are, which is both how
+  // distance reads and how the frame stays cheap.
   drawSeal(i, now, o) {
     const { x, W } = this;
     const g = this.sealGeom(i);
-    if (g.off || g.y < -300 || g.y > this.H + 400) return;
-    const { y, s, rx, ry } = g;
-    const passed = i <= this.lit;
+    if (g.off || g.y < -340 || g.y > this.H + 420 || g.rx < 2) return;
+    const { y, s, rx, ry, d } = g;
+    const here = i === this.standing;
+    const passed = i >= 0 && i < this.standing;
     const isBroken = i === this.broken;
-    const isDoor = i === this.doorFloor && this.row === null;
-    const showRow = i === this.doorFloor && this.row !== null;
-    const base = isBroken ? BAD : passed ? ACCENT : 'rgba(150,160,180,0.55)';
-    const brk = isBroken ? clamp(this.breakT / 0.5, 0, 1) : 0;
-    // the seal you are choosing on holds still; the rest turn slowly
-    const spin = (isDoor || showRow) ? 0 : this.spin * (passed ? 0.5 : 0.22) + i * 0.8;
+    const fog = this.fogAt(d);
+    const alpha = (1 - fog) * o;
+    if (alpha < 0.02) return;
+    const brk = isBroken ? clamp(this.breakT / 0.6, 0, 1) : 0;
+    const live = here || passed || isBroken;
+    const color = isBroken ? BAD : live ? ACCENT : '#6E7A93';
+    const bright = isBroken ? '#FF9E9E' : live ? ACCENT_SOFT : '#9AA6BC';
+    const spin = here ? 0 : this.spin * (passed ? 0.5 : 0.28) + i * 0.9;
 
     x.save();
     x.translate(W / 2, y);
+    x.globalAlpha = alpha * (1 - brk * 0.7);
 
-    if (passed || isDoor || isBroken) {
-      const gl = x.createRadialGradient(0, 0, 0, 0, 0, rx * 1.3);
-      const c = isBroken ? '229,72,77' : '139,124,255';
-      gl.addColorStop(0, `rgba(${c},${(isDoor ? 0.2 : 0.14) * (1 - brk)})`);
-      gl.addColorStop(1, `rgba(${c},0)`);
+    // the pool of light the seal lies in
+    if (live) {
+      const pool = x.createRadialGradient(0, 0, 0, 0, 0, rx * 1.5);
+      const rgb = isBroken ? '229,72,77' : '139,124,255';
+      pool.addColorStop(0, `rgba(${rgb},${(here ? 0.3 : 0.12) * (1 - brk)})`);
+      pool.addColorStop(0.55, `rgba(${rgb},${(here ? 0.10 : 0.04) * (1 - brk)})`);
+      pool.addColorStop(1, `rgba(${rgb},0)`);
       x.save();
       x.scale(1, 0.32);
-      x.fillStyle = gl;
+      x.fillStyle = pool;
       x.beginPath();
-      x.arc(0, 0, rx * 1.3, 0, Math.PI * 2);
+      x.arc(0, 0, rx * 1.5, 0, Math.PI * 2);
       x.fill();
       x.restore();
     }
 
-    x.globalAlpha = (isBroken ? 1 - brk * 0.75 : 1) * o;
     x.save();
     x.scale(1, 0.30);
     x.rotate(spin);
-    x.strokeStyle = base;
-    x.lineWidth = passed ? 2 : 1.2;
-    x.beginPath();
-    x.arc(0, 0, rx * (1 + brk * 0.25), 0, Math.PI * 2);
-    x.stroke();
-    x.globalAlpha = ((passed || isDoor ? 0.7 : 0.3) * (1 - brk)) * o;
-    x.beginPath();
-    x.arc(0, 0, rx * 0.62, 0, Math.PI * 2);
-    x.stroke();
-    x.rotate(-spin * 2.2);
-    x.beginPath();
-    const d = rx * 0.3;
-    x.moveTo(0, -d); x.lineTo(d, 0); x.lineTo(0, d); x.lineTo(-d, 0); x.closePath();
-    x.stroke();
-    x.restore();
-    x.restore();
+    const R = rx * (1 + brk * 0.3);
+    const ring = (r) => () => { x.beginPath(); x.arc(0, 0, r, 0, Math.PI * 2); };
 
-    // the passages: ten gaps in the rim, the thing you actually choose
-    if (isDoor || showRow) this.drawDoors(i, now, o, showRow);
+    // outer rim: bloom, body, hot core
+    this.glowStroke(ring(R), color, 9 * s, 30 * s, 0.16 * alpha);
+    this.glowStroke(ring(R), color, 2.4 * s, 14 * s, 0.85 * alpha);
+    if (live) this.glowStroke(ring(R), bright, 0.9 * s, 6 * s, 0.9 * alpha);
 
+    // the rune band: short ticks, every fifth one long
+    if (s > 0.28) {
+      const ticks = 60;
+      x.save();
+      x.strokeStyle = color;
+      x.shadowColor = color;
+      x.shadowBlur = 8 * s;
+      x.globalAlpha = alpha * (live ? 0.75 : 0.35) * (1 - brk);
+      for (let k = 0; k < ticks; k++) {
+        const a = (k / ticks) * Math.PI * 2;
+        const long = k % 5 === 0;
+        const len = (long ? 26 : 12) * s;
+        x.lineWidth = (long ? 1.8 : 0.9) * s;
+        x.beginPath();
+        x.moveTo(Math.cos(a) * (R - len), Math.sin(a) * (R - len));
+        x.lineTo(Math.cos(a) * R, Math.sin(a) * R);
+        x.stroke();
+      }
+      x.restore();
+    }
+
+    // inner rings, counter-turning
     x.save();
-    x.globalAlpha = (passed ? 0.95 : isDoor ? 0.9 : 0.45) * (1 - brk) * o;
-    x.fillStyle = isBroken ? BAD : passed ? ACCENT_SOFT : 'rgba(151,163,180,0.95)';
-    x.font = `700 ${Math.round(clamp(30 * s, 11, 34))}px Rajdhani, sans-serif`;
+    x.rotate(-spin * 2.3);
+    this.glowStroke(ring(R * 0.70), color, 1.4 * s, 10 * s, 0.5 * alpha);
+    if (s > 0.35) {
+      x.setLineDash([R * 0.16, R * 0.1]);
+      this.glowStroke(ring(R * 0.55), color, 1.2 * s, 8 * s, 0.45 * alpha);
+      x.setLineDash([]);
+    }
+    x.restore();
+
+    // spokes out to every passage, so the rim reads as a mechanism
+    if (here && s > 0.3) {
+      x.save();
+      x.strokeStyle = color;
+      x.shadowColor = color;
+      x.shadowBlur = 10 * s;
+      x.globalAlpha = alpha * 0.4;
+      x.lineWidth = 1 * s;
+      for (let k = 0; k < this.doors; k++) {
+        const a = (k / this.doors) * Math.PI * 2 - Math.PI / 2;
+        x.beginPath();
+        x.moveTo(Math.cos(a) * R * 0.70, Math.sin(a) * R * 0.70);
+        x.lineTo(Math.cos(a) * R, Math.sin(a) * R);
+        x.stroke();
+      }
+      x.restore();
+    }
+
+    // the heart: the site's diamond, breathing
+    const puls = here ? 1 + Math.sin(now / 520) * 0.04 : 1;
+    const dm = R * 0.26 * puls;
+    const diamond = () => { x.beginPath(); x.moveTo(0, -dm); x.lineTo(dm, 0); x.lineTo(0, dm); x.lineTo(-dm, 0); x.closePath(); };
+    this.glowStroke(diamond, color, 6 * s, 22 * s, 0.2 * alpha);
+    this.glowStroke(diamond, bright, 1.3 * s, 10 * s, (live ? 0.85 : 0.4) * alpha);
+    x.restore();
+    x.restore();
+
+    if (here || this.row) this.drawDoors(i, now, o, alpha);
+
+    // the rank's letter, upright beside its seal
+    x.save();
+    x.globalAlpha = (live ? 0.95 : 0.5) * (1 - brk) * alpha;
+    x.fillStyle = isBroken ? BAD : live ? ACCENT_SOFT : '#8592A8';
+    x.shadowColor = isBroken ? BAD : ACCENT;
+    x.shadowBlur = here ? 18 : 8;
+    x.font = `700 ${Math.round(clamp(34 * s, 11, 40))}px Rajdhani, sans-serif`;
     x.textAlign = 'left';
     x.textBaseline = 'middle';
-    x.fillText(this.ranks[i], W / 2 + rx + 14 * clamp(s, 0.4, 1), y);
+    x.fillText(i < 0 ? '' : this.ranks[i], W / 2 + rx + 18 * clamp(s, 0.4, 1), y);
     x.restore();
   }
 
-  drawDoors(i, now, o, revealed) {
+  drawDoors(i, now, o, alpha) {
+    if (i !== this.standing) return;
     const { x } = this;
-    const reveal = revealed ? clamp(this.revealT / 0.45, 0, 1) : 0;
+    const revealed = this.row !== null;
+    const reveal = revealed ? clamp(this.revealT / 0.5, 0, 1) : 0;
     for (const p of this.doorPositions()) {
       const open = revealed ? !!this.row[p.i] : null;
-      const isChosen = revealed && p.i === this.chosen;
+      const isChosen = p.i === this.chosen;
       const hot = !revealed && p.i === this.hover;
-      let color = ACCENT_SOFT;
-      if (revealed) color = open ? OK : BAD;
-      const a = revealed ? 0.25 + reveal * 0.75 : hot ? 1 : 0.62;
+      const color = revealed ? (open ? OK : BAD) : hot ? '#FFFFFF' : ACCENT_SOFT;
+      const a = (revealed ? 0.3 + reveal * 0.7 : hot ? 1 : 0.7) * alpha;
+      const r = p.r * (hot ? 1.22 : 1) * (isChosen ? 1.3 : 1);
       x.save();
       x.translate(p.x, p.y);
-      x.globalAlpha = a * o;
-      // a gap in the rim, drawn as a small arch standing on the ring
-      const r = p.r * (hot ? 1.3 : 1) * (isChosen ? 1.35 : 1);
-      x.strokeStyle = color;
-      x.fillStyle = revealed && open ? 'rgba(76,195,138,0.22)' : revealed ? 'rgba(229,72,77,0.22)' : hot ? 'rgba(207,201,255,0.28)' : 'rgba(139,124,255,0.12)';
-      x.lineWidth = isChosen ? 2.4 : hot ? 2 : 1.2;
-      x.beginPath();
-      x.moveTo(-r * 0.42, r * 0.34);
-      x.lineTo(-r * 0.42, -r * 0.1);
-      x.quadraticCurveTo(0, -r * 0.62, r * 0.42, -r * 0.1);
-      x.lineTo(r * 0.42, r * 0.34);
-      x.closePath();
+      x.globalAlpha = a;
+
+      // the mouth: a dark arch with light spilling out of its threshold
+      const arch = () => {
+        x.beginPath();
+        x.moveTo(-r * 0.46, r * 0.36);
+        x.lineTo(-r * 0.46, -r * 0.12);
+        x.quadraticCurveTo(0, -r * 0.74, r * 0.46, -r * 0.12);
+        x.lineTo(r * 0.46, r * 0.36);
+        x.closePath();
+      };
+      const fill = x.createLinearGradient(0, -r * 0.7, 0, r * 0.36);
+      if (revealed && open) { fill.addColorStop(0, 'rgba(76,195,138,0.45)'); fill.addColorStop(1, 'rgba(76,195,138,0.06)'); }
+      else if (revealed) { fill.addColorStop(0, 'rgba(229,72,77,0.42)'); fill.addColorStop(1, 'rgba(229,72,77,0.05)'); }
+      else if (hot) { fill.addColorStop(0, 'rgba(226,222,255,0.62)'); fill.addColorStop(1, 'rgba(139,124,255,0.1)'); }
+      else { fill.addColorStop(0, 'rgba(139,124,255,0.3)'); fill.addColorStop(1, 'rgba(139,124,255,0.03)'); }
+      arch();
+      x.fillStyle = fill;
       x.fill();
+      this.glowStroke(arch, color, hot ? 2.2 : 1.3, hot ? 22 : 10, a);
+
+      // the sill: a bright line the light pours over
+      x.save();
+      x.strokeStyle = color;
+      x.shadowColor = color;
+      x.shadowBlur = hot ? 20 : 9;
+      x.lineWidth = hot ? 2.4 : 1.4;
+      x.beginPath();
+      x.moveTo(-r * 0.5, r * 0.36);
+      x.lineTo(r * 0.5, r * 0.36);
       x.stroke();
+      x.restore();
+
       if (revealed && !open) {
+        x.save();
         x.strokeStyle = BAD;
-        x.lineWidth = 2;
+        x.shadowColor = BAD;
+        x.shadowBlur = 14;
+        x.lineWidth = 2.2;
         x.beginPath();
         x.moveTo(-r * 0.3, -r * 0.2); x.lineTo(r * 0.3, r * 0.26);
         x.moveTo(r * 0.3, -r * 0.2); x.lineTo(-r * 0.3, r * 0.26);
         x.stroke();
+        x.restore();
       }
       if (isChosen) {
-        x.globalAlpha = a * o;
+        x.save();
         x.strokeStyle = '#FFFFFF';
-        x.lineWidth = 1.4;
+        x.shadowColor = '#FFFFFF';
+        x.shadowBlur = 16;
+        x.lineWidth = 1.5;
         x.beginPath();
-        x.arc(0, 0, r * 1.15, 0, Math.PI * 2);
+        x.arc(0, 0, r * 1.2, 0, Math.PI * 2);
         x.stroke();
+        x.restore();
       }
       x.restore();
     }
   }
 
-  drawMarker(now) {
+  drawMarker(now, o) {
     const { x, W } = this;
-    const { y, s, off } = this.project(this.marker);
-    if (off) return;
-    const r = 15 * clamp(s, 0.5, 1.3);
+    const p = this.project(this.markerY);
+    if (p.off) return;
+    const g = this.sealGeom(this.standing);
+    const a = this.markerA;
+    // out along the rim when walking to a passage, back to the heart on landing
+    const px = W / 2 + Math.cos(a) * (g.rx || 0) * this.markerR;
+    const py = p.y + Math.sin(a) * (g.ry || 0) * this.markerR;
+    const r = clamp(17 * p.s, 7, 26);
+
+    // the trail, while falling
+    if (this.fall && performance.now() - this.fall.start > FALL.walk + FALL.hang) {
+      const t = x.createLinearGradient(px, py - r * 7, px, py);
+      t.addColorStop(0, 'rgba(207,201,255,0)');
+      t.addColorStop(1, 'rgba(226,222,255,0.6)');
+      x.save();
+      x.globalAlpha = o;
+      x.fillStyle = t;
+      x.beginPath();
+      x.moveTo(px - r * 0.5, py);
+      x.lineTo(px + r * 0.5, py);
+      x.lineTo(px + r * 0.12, py - r * 7);
+      x.lineTo(px - r * 0.12, py - r * 7);
+      x.closePath();
+      x.fill();
+      x.restore();
+    }
+
     x.save();
-    x.translate(W / 2, y);
-    const gl = x.createRadialGradient(0, 0, 0, 0, 0, r * 4);
-    gl.addColorStop(0, 'rgba(207,201,255,0.5)');
-    gl.addColorStop(1, 'rgba(139,124,255,0)');
-    x.fillStyle = gl;
+    x.translate(px, py);
+    x.globalAlpha = o;
+    const halo = x.createRadialGradient(0, 0, 0, 0, 0, r * 5);
+    halo.addColorStop(0, 'rgba(226,222,255,0.55)');
+    halo.addColorStop(0.35, 'rgba(139,124,255,0.22)');
+    halo.addColorStop(1, 'rgba(139,124,255,0)');
+    x.fillStyle = halo;
     x.beginPath();
-    x.arc(0, 0, r * 4, 0, Math.PI * 2);
+    x.arc(0, 0, r * 5, 0, Math.PI * 2);
     x.fill();
-    x.rotate(now / 900);
+    x.rotate(now / 1100);
+    x.shadowColor = ACCENT_SOFT;
+    x.shadowBlur = 26;
     x.fillStyle = '#FFFFFF';
-    x.strokeStyle = ACCENT_SOFT;
-    x.lineWidth = 1.5;
     x.beginPath();
-    x.moveTo(0, -r); x.lineTo(r * 0.72, 0); x.lineTo(0, r); x.lineTo(-r * 0.72, 0); x.closePath();
+    x.moveTo(0, -r); x.lineTo(r * 0.7, 0); x.lineTo(0, r); x.lineTo(-r * 0.7, 0); x.closePath();
     x.fill();
-    x.stroke();
     x.restore();
+  }
+
+  drawDebris() {
+    const { x } = this;
+    for (const s of this.shards) {
+      const k = 1 - s.t / s.life;
+      x.save();
+      x.translate(s.x, s.y);
+      x.rotate(s.rot);
+      x.globalAlpha = Math.min(1, k * 1.7);
+      x.fillStyle = s.c;
+      x.shadowColor = s.c;
+      x.shadowBlur = 10;
+      x.beginPath();
+      x.moveTo(-s.size * 0.6, -s.size * 0.35);
+      x.lineTo(s.size * 0.7, -s.size * 0.1);
+      x.lineTo(0, s.size * 0.55);
+      x.closePath();
+      x.fill();
+      x.restore();
+    }
+    for (const c of this.coins) {
+      if (c.delay > 0) continue;
+      const k = 1 - c.t / c.life;
+      x.save();
+      x.translate(c.x, c.y);
+      x.rotate(c.rot);
+      x.globalAlpha = Math.min(1, k * 1.6);
+      x.strokeStyle = GOLD;
+      x.shadowColor = GOLD;
+      x.shadowBlur = 12;
+      x.lineWidth = 1.5;
+      x.beginPath();
+      x.moveTo(0, -6); x.lineTo(4.5, 0); x.lineTo(0, 6); x.lineTo(-4.5, 0); x.closePath();
+      x.stroke();
+      x.restore();
+    }
+    x.globalAlpha = 1;
   }
 }
 
@@ -536,8 +800,24 @@ export function openDescent(opts) {
   hoard.append(el('span', 'l', 'HOARD'), el('span', 'v', String(gate.hoard)));
   top.append(el('div', 'rg-title', '[ THE RED GATE ]'), hoard);
 
+  // the depth gauge: the shaft goes dark below the next rank, so how far
+  // down you are is read here instead
+  const ladder = el('div', 'rg-ladder');
+  const rungs = ranks.map((r, i) => {
+    const row = el('div', 'rg-rung');
+    row.append(el('span', 'r', r), el('span', 'c', String(gate.claim[i])), el('i'));
+    ladder.append(row);
+    return row;
+  });
+  const paintLadder = () => rungs.forEach((row, i) => {
+    row.classList.toggle('done', i < floor);
+    row.classList.toggle('now', i === floor - 1);
+    row.classList.toggle('next', i === floor);
+    row.querySelector('.c').textContent = i === ranks.length - 1 ? String(hoardNow) : String(Math.min(gate.claim[i], hoardNow));
+  });
+
   const mid = el('div', 'rg-mid');
-  const rankLine = el('div', 'rg-rank', 'THE GATE OPENS');
+  const rankLine = el('div', 'rg-rank', 'THE THRESHOLD');
   const holdWrap = el('div', 'rg-hold');
   holdWrap.append(el('span', 'l', 'HOLDING'));
   const holdVal = el('span', 'v', '0');
@@ -546,22 +826,19 @@ export function openDescent(opts) {
 
   const say = el('div', 'rg-say');
   const bar = el('div', 'rg-bar');
-  hud.append(top, mid, say, bar);
-  overlay.append(canvas, veil, hud);
+  const slam = el('div', 'rg-slam', 'THE RED GATE');
+  hud.append(top, ladder, mid, say, bar);
+  overlay.append(canvas, veil, hud, slam);
   document.body.append(overlay);
 
   const timers = [];
   let ended = false;
-  let busy = false;
-  // a descent left open in another tab, or before a reload, is resumed where
-  // the Worker says it is, not from the top
+  let busy = true;
   let floor = gate.run ? gate.run.floor : 0;
   let holding = gate.run ? gate.run.holding : 0;
   let hoardNow = gate.hoard;
   const later = (fn, ms) => { const t = setTimeout(() => { if (!ended) fn(); }, ms); timers.push(t); return t; };
   const shaft = reduced() ? null : new Shaft(canvas, ranks, DOORS);
-  // the scene hangs off its own node, so the passages can be located from
-  // outside for a test without a global
   overlay.__scene = shaft;
 
   const finish = (result) => {
@@ -571,16 +848,10 @@ export function openDescent(opts) {
     if (shaft) shaft.stop();
     document.removeEventListener('keydown', onKey);
     overlay.classList.add('out');
-    setTimeout(() => {
-      overlay.remove();
-      if (opts.onEnd) opts.onEnd(result);
-    }, 420);
+    setTimeout(() => { overlay.remove(); if (opts.onEnd) opts.onEnd(result); }, 460);
   };
 
-  const setSay = (text, kind) => {
-    say.textContent = text;
-    say.className = 'rg-say' + (kind ? ' ' + kind : '');
-  };
+  const setSay = (text, kind) => { say.textContent = text; say.className = 'rg-say' + (kind ? ' ' + kind : ''); };
   const setHolding = (n) => {
     holding = n;
     holdVal.textContent = String(n);
@@ -588,7 +859,7 @@ export function openDescent(opts) {
     void holdVal.offsetWidth;
     holdVal.classList.add('tick');
   };
-  const setHoard = (n) => { hoardNow = n; hoard.querySelector('.v').textContent = String(n); };
+  const setHoard = (n) => { hoardNow = n; hoard.querySelector('.v').textContent = String(n); paintLadder(); };
 
   const button = (cls, label, fn) => {
     const b = el('button', 'rg-btn' + (cls ? ' ' + cls : ''));
@@ -606,36 +877,37 @@ export function openDescent(opts) {
   };
 
   const promptDoors = () => {
+    if (shaft) { shaft.standing = floor - 1; shaft.row = null; shaft.chosen = -1; shaft.hover = -1; }
+    paintLadder();
     if (floor >= FLOORS) {
-      setSay('The S rank is cleared. Nothing is below you but the Hoard.', 'gold');
+      rankLine.textContent = 'S RANK';
+      setSay('Nothing is below you but the Hoard.', 'gold');
       return;
     }
     const chance = Math.round(gate.survive[floor] * 100);
     const open = Math.round(gate.survive[floor] * DOORS);
     const claim = Math.min(gate.claim[floor], hoardNow);
-    rankLine.textContent = floor === 0 ? 'THE GATE OPENS' : `${ranks[floor - 1]} RANK CLEARED`;
-    setSay(`${ranks[floor]} rank: ${DOORS} passages, ${open} of them open. Pick one. ${floor + 1 === FLOORS ? 'It leads to the Hoard.' : `It pays ${claim}.`}`);
-    if (shaft) { shaft.doorFloor = floor; shaft.row = null; shaft.chosen = -1; shaft.hover = -1; }
+    rankLine.textContent = floor === 0 ? 'THE THRESHOLD' : `${ranks[floor - 1]} RANK`;
+    setSay(`${DOORS} passages lead down to the ${ranks[floor]} rank. ${open} of them are open. ${floor + 1 === FLOORS ? 'Beyond is the Hoard.' : `Beyond is ${claim}.`}`);
   };
 
   // ---- the opening ----
   const resumed = floor > 0;
-  setSay(resumed
-    ? `You are still inside, ${ranks[floor - 1]} rank, holding ${holding}.`
-    : 'The seal gives. Six ranks lie below.');
-  if (resumed) setHolding(holding);
   if (shaft) {
-    if (resumed) {
-      shaft.lit = floor - 1;
-      shaft.cam = shaft.camTarget = (floor - 1) * SPACING;
-      shaft.marker = shaft.markerTarget = (floor - 1) * SPACING;
-    }
-    shaft.flash = 0.4;
-    shaft.flashColor = '#2A1030';
+    shaft.standing = floor - 1;
+    shaft.cam = shaft.camTarget = shaft.worldOf(floor - 1);
+    shaft.markerY = shaft.worldOf(floor - 1);
+    shaft.flash = 0.55;
+    shaft.flashColor = '#3A1440';
+    shaft.wave(shaft.worldOf(floor - 1), ACCENT_SOFT, 900, 1.5);
     snd.open();
   }
+  if (resumed) setHolding(holding);
+  setSay(resumed ? `You are still inside, ${ranks[floor - 1]} rank, holding ${holding}.` : 'The seal gives. The shaft opens under you.');
   overlay.classList.add('on');
-  later(() => { renderBar(); promptDoors(); }, reduced() ? 60 : 1150);
+  later(() => slam.classList.add('go'), 220);
+  later(() => slam.remove(), 2400);
+  later(() => { busy = false; renderBar(); promptDoors(); }, reduced() ? 60 : 1500);
 
   // ---- picking a passage ----
   canvas.addEventListener('mousemove', (e) => {
@@ -656,86 +928,95 @@ export function openDescent(opts) {
     busy = true;
     renderBar();
     const target = floor;
+    const angle = (door / DOORS) * Math.PI * 2 - Math.PI / 2;
     if (shaft) { shaft.chosen = door; shaft.hover = -1; }
     setSay('You step into it.');
-    snd.commit();
+    snd.step();
 
+    // the walk out to the rim runs while the Worker answers
     let res;
-    const beat = new Promise((r) => later(() => r(), reduced() ? 0 : 700));
+    let landed = false;
+    const walk = new Promise((r) => {
+      if (!shaft) return r();
+      shaft.startFall(floor - 1, floor, angle, () => { landed = true; r(); });
+    });
     try {
-      [res] = await Promise.all([opts.descend(door, target), beat]);
+      res = await opts.descend(door, target);
     } catch (e) {
       busy = false;
-      if (shaft) { shaft.chosen = -1; }
+      if (shaft) { shaft.chosen = -1; shaft.fall = null; shaft.markerR = 0; shaft.markerY = shaft.worldOf(floor - 1); }
       setSay(e && e.message ? e.message : 'The System refused.', 'err');
       renderBar();
       return;
     }
     if (ended) return;
+    await walk;
+    if (ended) return;
     if (res && res.hoard !== undefined) setHoard(res.hoard);
 
-    // the rank is resolved: show every passage it had
-    if (shaft && res.row) { shaft.row = res.row; shaft.revealT = 0; }
-    rankLine.textContent = `${ranks[target]} RANK`;
-    await new Promise((r) => later(r, reduced() ? 0 : 620));
-    if (ended) return;
-
     if (res.dead) {
+      // you went through, and it did not go anywhere
       if (shaft) {
+        shaft.standing = target - 1;
+        shaft.markerY = shaft.worldOf(target - 1);
+        shaft.markerR = 0;
+        shaft.row = res.row;
+        shaft.revealT = 0;
         shaft.broken = target;
         shaft.breakT = 0;
-        shaft.flash = 0.75;
+        shaft.flash = 0.85;
         shaft.flashColor = BAD;
-        shaft.shake = 16;
-        shaft.burst(target * SPACING, BAD, 70, 560);
-        shaft.markerTarget = (target - 2.4) * SPACING;
-        shaft.camTarget = (target - 1.8) * SPACING;
+        shaft.shake = 20;
+        shaft.wave(shaft.worldOf(target), BAD, 1100, 1.1);
+        shaft.burst(shaft.worldOf(target), BAD, 80, 620, 90);
+        shaft.camTarget = shaft.worldOf(target - 1) - SPACING * 0.5;
       }
       snd.fail();
+      rankLine.textContent = `${ranks[target]} RANK`;
       setSay(`Blocked. The ${ranks[target]} rank keeps what you were holding.`, 'err');
       holdWrap.classList.add('lost');
       setHolding(0);
-      later(() => verdict(false, res), reduced() ? 400 : 1750);
+      later(() => verdict(false, res), reduced() ? 400 : 2100);
       return;
     }
 
     floor = res.run ? res.run.floor : floor + 1;
     if (shaft) {
-      shaft.lit = floor - 1;
-      shaft.markerTarget = (floor - 1) * SPACING;
-      shaft.camTarget = (floor - 1) * SPACING;
-      shaft.flash = 0.14;
+      shaft.standing = floor - 1;
+      shaft.row = res.row;
+      shaft.revealT = 0;
+      shaft.flash = 0.2;
       shaft.flashColor = ACCENT_SOFT;
-      shaft.shake = 5;
-      shaft.burst((floor - 1) * SPACING, ACCENT_SOFT, 26, 260);
+      shaft.shake = 9;
+      shaft.wave(shaft.worldOf(floor - 1), ACCENT_SOFT, 760, 0.9);
+      shaft.burst(shaft.worldOf(floor - 1), ACCENT_SOFT, 34, 300, 80);
     }
-    snd.pass(floor - 1);
+    snd.land(floor - 1);
     setHolding(res.run ? res.run.holding : holding);
+    rankLine.textContent = `${ranks[floor - 1]} RANK CLEARED`;
+    setSay(`Holding ${holding}.`);
 
-    // one in five arrivals, something down there takes hold of you
     const grabbed = !reduced() && floor < FLOORS && Math.random() < 0.2;
     later(() => {
       if (grabbed) startGrasp();
       else { busy = false; promptDoors(); renderBar(); }
-    }, reduced() ? 40 : 700);
+    }, reduced() ? 40 : 1150);
   }
 
-  // ---- the grasp: spam to break loose ----
+  // ---- the grasp ----
   function startGrasp() {
     const NEED = 14;
     const MS = 4200;
     let hits = 0;
     const panel = el('div', 'rg-grasp');
-    const ttl = el('div', 'g-ttl', 'SOMETHING HAS YOU');
-    const sub = el('div', 'g-sub', 'CLICK TO BREAK LOOSE');
     const track = el('div', 'g-track');
     const fill = el('i');
     track.append(fill);
-    panel.append(ttl, sub, track);
+    panel.append(el('div', 'g-ttl', 'SOMETHING HAS YOU'), el('div', 'g-sub', 'CLICK TO BREAK LOOSE'), track);
     overlay.append(panel);
     hud.classList.add('dim');
     snd.grab();
-    if (shaft) { shaft.shake = 14; shaft.flash = 0.3; shaft.flashColor = BAD; }
+    if (shaft) { shaft.shake = 18; shaft.flash = 0.35; shaft.flashColor = BAD; }
 
     let done = false;
     const t0 = performance.now();
@@ -751,7 +1032,7 @@ export function openDescent(opts) {
       hits++;
       fill.style.width = Math.min(100, (hits / NEED) * 100) + '%';
       snd.struggle(hits);
-      if (shaft) { shaft.shake = 6 + hits * 0.4; shaft.markerTarget += 3; }
+      if (shaft) { shaft.shake = 7 + hits * 0.4; }
       if (hits >= NEED) end(true);
     };
     const end = (freed) => {
@@ -763,13 +1044,12 @@ export function openDescent(opts) {
       if (shaft) shaft.grip = 0;
       if (freed) {
         snd.free();
-        if (shaft) { shaft.flash = 0.25; shaft.flashColor = ACCENT_SOFT; shaft.shake = 8; }
+        if (shaft) { shaft.flash = 0.3; shaft.flashColor = ACCENT_SOFT; shaft.shake = 10; }
         setSay('Loose. It did not get to keep you.');
         busy = false;
         promptDoors();
         renderBar();
       } else {
-        // never costs links: it drags you out with what you were holding
         setSay('It drags you up the shaft. You are out, and you keep what you had.', 'err');
         doExtract(true);
       }
@@ -797,18 +1077,19 @@ export function openDescent(opts) {
     if (ended) return;
     if (res.hoard !== undefined) setHoard(res.hoard);
     if (shaft) {
-      shaft.pour((floor - 1) * SPACING, res.taken);
-      shaft.flash = res.cleared ? 0.5 : 0.18;
+      shaft.pour(shaft.worldOf(floor - 1), res.taken);
+      shaft.wave(shaft.worldOf(floor - 1), GOLD, res.cleared ? 1400 : 820, 1.2);
+      shaft.flash = res.cleared ? 0.6 : 0.22;
       shaft.flashColor = GOLD;
-      shaft.shake = res.cleared ? 12 : 4;
-      shaft.markerTarget = shaft.cam + START_Y * 2.4;
+      shaft.shake = res.cleared ? 16 : 6;
+      shaft.camTarget = THRESHOLD - SPACING * 1.4;
     }
     if (res.cleared) snd.clear(); else snd.take(res.taken);
     setHolding(res.taken);
-    later(() => verdict(true, res), reduced() ? 300 : 1500);
+    later(() => verdict(true, res), reduced() ? 300 : 1700);
   }
 
-  // ---- the verdict card ----
+  // ---- the verdict ----
   function verdict(won, res) {
     if (ended) return;
     hud.classList.add('gone');
