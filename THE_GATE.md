@@ -109,14 +109,30 @@ collapse, no double payout, and the Hoard balancing on every path.
 
 ## The look
 
-The window in the Vault obeys the design constitution: flat, still, one
-accent, the ladder as rows. The descent is an **event**, and the
-constitution leaves event motion free, so it takes the whole screen: a
-shaft with six rune seals receding to a vanishing point, the hunter falling
-through them one at a time, the cleared seal burning violet behind you and
-the one that kills you turning red and throwing you back up the shaft.
-Sound is synthesized, nothing is loaded over the network, and reduced
-motion skips straight to the verdict.
+The Gate has its own tab, not a window in the Vault: a key costs a whole
+day of training, so the screen that takes it is the hall, one canvas of a
+standing arch with the Hoard's light pooling in its mouth and exactly one
+control in front of it. The ladder and the terms under it are flat and
+still, one accent, rows, the way the constitution asks.
+
+The descent is an **event**, and the constitution leaves event motion
+free, so it takes the whole screen: a shaft with six rune seals receding
+to a vanishing point, the rim of your own seal answering while you stand
+over the mouth you picked, and then the fall. The cleared seal burns
+violet behind you; the one that turns you away goes red and throws you
+back up the shaft. Sound is synthesized, nothing is loaded over the
+network, and reduced motion skips straight to the verdict.
+
+Below the D rank something can take hold of you: five clicks break it, a
+lost grip drags you out with what you were holding. It fires once per
+descent at most and about one descent in five, because a jumpscare that
+happens every floor is a chore.
+
+A descent left open survives a reload, because the whole map was rolled at
+entry and lives in the Worker. Reloading is not an escape hatch either: a
+rank that turns you away is settled the moment you pick the passage, so
+the key is spent and the run is deleted before any of the animation runs.
+On the next load an open descent pulls you straight to this tab.
 
 ## Not built yet
 

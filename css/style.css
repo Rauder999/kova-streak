@@ -750,17 +750,22 @@ select.inp option, select.inp optgroup { background: var(--win); color: var(--te
 @keyframes rg-rise { to { transform: translateY(-18%); } }
 .rg.on { opacity: 1; }
 .rg.out { opacity: 0; transition: opacity .4s ease-in; }
-.rg-fx { position: absolute; inset: 0; }
+/* a canvas is a replaced element: inset alone leaves it at its intrinsic
+   300x150, so the box has to be stated. The scene then reads it back. */
+.rg-fx { position: absolute; inset: 0; width: 100%; height: 100%; }
 /* the shaft mouth: a vignette that keeps the eye in the middle of the screen */
 .rg-veil { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse 62% 54% at 50% 46%, transparent 42%, rgba(5, 6, 10, 0.82) 100%); }
 /* the name lands like a stamp, once, as the rift finishes tearing */
-.rg-slam { position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%) scale(1.6); opacity: 0; pointer-events: none; font-family: var(--font-sys); text-transform: uppercase; letter-spacing: .4em; font-weight: 700; font-size: clamp(22px, 5vw, 60px); color: #FFFFFF; text-shadow: 0 0 40px color-mix(in oklab, var(--accent) 90%, transparent), 0 0 120px color-mix(in oklab, var(--accent) 60%, transparent); }
-.rg-slam.go { animation: rg-slam 2.2s cubic-bezier(.16, 1, .3, 1) forwards; }
+/* opacity and transform only: animating filter and letter-spacing here made
+   Chrome re-rasterise a layer the size of the glow on every frame, which is
+   where the ghost rectangle across the shaft was coming from */
+.rg-slam { position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%) scale(1.6); opacity: 0; pointer-events: none; white-space: nowrap; font-family: var(--font-sys); text-transform: uppercase; letter-spacing: .4em; font-weight: 700; font-size: clamp(22px, 5vw, 60px); color: #FFFFFF; text-shadow: 0 0 40px color-mix(in oklab, var(--accent) 90%, transparent), 0 0 120px color-mix(in oklab, var(--accent) 60%, transparent); }
+.rg-slam.go { animation: rg-slam 2.2s cubic-bezier(.16, 1, .3, 1) forwards; will-change: transform, opacity; }
 @keyframes rg-slam {
-  0% { opacity: 0; transform: translate(-50%, -50%) scale(1.6); filter: blur(14px); letter-spacing: .8em; }
-  18% { opacity: 1; transform: translate(-50%, -50%) scale(1); filter: blur(0); letter-spacing: .4em; }
-  72% { opacity: 1; transform: translate(-50%, -50%) scale(1); filter: blur(0); }
-  100% { opacity: 0; transform: translate(-50%, -52%) scale(.96); filter: blur(6px); }
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(1.6); }
+  18% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  72% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -52%) scale(.96); }
 }
 .rg-hud { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; pointer-events: none; transition: opacity .35s; }
 .rg-hud.gone { opacity: 0; }
@@ -824,23 +829,93 @@ select.inp option, select.inp optgroup { background: var(--win); color: var(--te
 .rg-card.loss::before { border-top-color: var(--bad); border-left-color: var(--bad); }
 .rg-card.loss::after { border-bottom-color: var(--bad); border-right-color: var(--bad); }
 .rg-card .k { font-family: var(--font-sys); text-transform: uppercase; letter-spacing: .22em; font-weight: 700; font-size: 12px; color: var(--text-1); }
-.rg-card .n { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 700; font-size: 72px; line-height: 1.05; margin-top: 6px; color: var(--gold); }
-.rg-card.loss .n { color: var(--bad); }
-.rg-card .u { font-family: var(--font-mono); font-size: 11px; letter-spacing: .22em; color: var(--text-2); }
+/* the struck plate: milled rules either side, a metal face, one pass of light
+   across it. This figure is the whole card, and it is what a day of training
+   bought, so it is the one thing here allowed to look expensive. */
+.rg-prize { position: relative; display: flex; align-items: center; justify-content: center; gap: 20px; margin-top: 12px; }
+.rg-prize::before { content: ''; position: absolute; left: -8%; right: -8%; top: -60%; bottom: -60%; pointer-events: none; background: radial-gradient(ellipse 46% 60% at 50% 50%, color-mix(in oklab, var(--gold) 20%, transparent), transparent 72%); }
+.rg-prize .rule { position: relative; flex: 1; height: 1px; background: linear-gradient(90deg, transparent, color-mix(in oklab, var(--gold) 60%, transparent)); }
+.rg-prize .rule.r { background: linear-gradient(270deg, transparent, color-mix(in oklab, var(--gold) 60%, transparent)); }
+.rg-n { position: relative; display: flex; align-items: baseline; justify-content: center; font-family: var(--font-sys); font-weight: 700; font-variant-numeric: tabular-nums; line-height: .9; filter: drop-shadow(0 0 26px color-mix(in oklab, var(--gold) 42%, transparent)); }
+.rg-n .sign { font-size: 34px; margin-right: 4px; color: color-mix(in oklab, var(--gold) 62%, transparent); }
+.rg-n .d {
+  font-size: clamp(72px, 12vw, 104px); letter-spacing: -.015em;
+  background-image:
+    linear-gradient(112deg, transparent 36%, rgba(255, 255, 255, 0.9) 47%, transparent 58%),
+    linear-gradient(180deg, #FFF3D2 0%, #F2C868 30%, #E8B64A 56%, #A87B2B 82%, #6E4F19 100%);
+  background-size: 300% 100%, 100% 100%; background-position: 130% 0, 0 0;
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: rg-sheen 1.5s cubic-bezier(.25, .9, .3, 1) .45s both;
+}
+@keyframes rg-sheen { from { background-position: 130% 0, 0 0; } to { background-position: -50% 0, 0 0; } }
+.rg-card.loss .rg-prize::before { background: radial-gradient(ellipse 46% 60% at 50% 50%, color-mix(in oklab, var(--bad) 16%, transparent), transparent 72%); }
+.rg-card.loss .rg-prize .rule { background: linear-gradient(90deg, transparent, color-mix(in oklab, var(--bad) 55%, transparent)); }
+.rg-card.loss .rg-prize .rule.r { background: linear-gradient(270deg, transparent, color-mix(in oklab, var(--bad) 55%, transparent)); }
+.rg-card.loss .rg-n { filter: drop-shadow(0 0 26px color-mix(in oklab, var(--bad) 36%, transparent)); }
+.rg-card.loss .rg-n .d { background-image: linear-gradient(112deg, transparent 36%, rgba(255, 255, 255, 0.5) 47%, transparent 58%), linear-gradient(180deg, #FFC2C2 0%, #E5484D 44%, #8E1E22 100%); }
+.rg-card .u { display: block; margin-top: 10px; font-family: var(--font-mono); font-size: 11px; letter-spacing: .3em; color: var(--text-2); }
 .rg-card .ls { margin-top: 16px; display: flex; flex-direction: column; gap: 8px; }
 .rg-card .ls p { font-size: 13px; line-height: 1.6; color: var(--text-1); }
 .rg-card .rg-btn { margin: 22px auto 0; }
+/* gold on the card that just took everything off you read as a reward */
+.rg-card.loss .rg-btn.out { border-color: color-mix(in oklab, var(--bad) 52%, transparent); background: linear-gradient(180deg, color-mix(in oklab, var(--bad) 18%, transparent), color-mix(in oklab, var(--bad) 7%, transparent)); color: #FFD9D9; }
+.rg-card.loss .rg-btn.out .s { color: color-mix(in oklab, var(--bad) 45%, #FFFFFF); }
 @keyframes rg-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 @keyframes rg-tick { 0% { transform: scale(1); } 40% { transform: scale(1.22); } 100% { transform: scale(1); } }
-@keyframes rg-card { from { opacity: 0; transform: translate(-50%, -50%) scale(1.25); filter: blur(6px); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); filter: blur(0); } }
+@keyframes rg-card { from { opacity: 0; transform: translate(-50%, -50%) scale(1.25); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
 @media (max-width: 720px) {
   .rg-hold .v { font-size: 42px; }
   .rg-card { padding: 22px 20px 20px; }
-  .rg-card .n { font-size: 54px; }
+  .rg-prize { gap: 12px; }
+  .rg-n .sign { font-size: 24px; }
   .rg-bar { bottom: 5%; }
 }
 
-/* The Red Gate window in the Vault: flat and still, like every other window */
+/* ---------- The Gate hall: its own tab, and the one control on it ---------- */
+/* the chip tells you from any tab that a descent is still open down there */
+.tab-btn.tab-gate { position: relative; }
+.tab-btn.tab-gate.ready::after, .tab-btn.tab-gate.inside::after { content: ''; position: absolute; top: 3px; right: 0; width: 6px; height: 6px; transform: rotate(45deg); background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+.tab-btn.tab-gate.inside::after { background: var(--bad); box-shadow: 0 0 10px var(--bad); animation: gh-pip 1.6s ease-in-out infinite; }
+@keyframes gh-pip { 0%, 100% { opacity: 1; } 50% { opacity: .2; } }
+
+.thegate.hall { padding: 0; overflow: hidden; }
+.gh { position: relative; height: clamp(380px, 52vh, 560px); }
+.gh-fx { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+.gh-top { position: absolute; left: 26px; right: 26px; top: 22px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.gh-name { font-family: var(--font-sys); text-transform: uppercase; letter-spacing: .24em; font-weight: 700; font-size: 13px; color: var(--accent); }
+.gh-k { display: flex; align-items: center; gap: 10px; }
+.gh-k .n { font-family: var(--font-mono); font-size: 11px; letter-spacing: .18em; color: var(--text-2); }
+
+/* everything a hunter reads stands in the mouth of the arch */
+.gh-front { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 56px 20px 30px; pointer-events: none; }
+.gh-front > * { pointer-events: auto; }
+.gh-kick { font-family: var(--font-sys); text-transform: uppercase; letter-spacing: .34em; font-weight: 700; font-size: 11px; color: var(--text-1); text-shadow: 0 2px 12px rgba(0, 0, 0, 0.9); }
+.gh-kick.alarm { color: var(--bad); }
+.gh-fig {
+  margin-top: 4px; font-family: var(--font-sys); font-weight: 700; font-variant-numeric: tabular-nums;
+  line-height: .92; font-size: clamp(60px, 8.5vw, 104px); letter-spacing: -.02em;
+  background-image: linear-gradient(180deg, #FFF3D2 0%, #F2C868 32%, #E8B64A 58%, #A87B2B 84%, #6E4F19 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: drop-shadow(0 0 30px rgba(232, 182, 74, 0.36));
+}
+.gh-fig.alarm { background-image: linear-gradient(180deg, #FFD9D9 0%, #F2777B 34%, #E5484D 62%, #8E1E22 100%); filter: drop-shadow(0 0 30px rgba(229, 72, 77, 0.38)); }
+.gh-unit { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .3em; color: var(--text-1); text-shadow: 0 2px 12px rgba(0, 0, 0, 0.9); }
+.gh-note { margin-top: 16px; max-width: 68ch; font-family: var(--font-mono); font-size: 11.5px; line-height: 1.65; letter-spacing: .03em; color: var(--text-1); text-shadow: 0 2px 14px rgba(0, 0, 0, 0.95); }
+.gh-note.dim { margin-top: 4px; color: var(--text-2); }
+.gh-shut { margin-top: 26px; max-width: 44ch; font-family: var(--font-mono); font-size: 12px; line-height: 1.6; color: var(--text-1); text-shadow: 0 2px 14px rgba(0, 0, 0, 0.95); }
+
+/* the key turns here, so this control is allowed to be the loudest thing on the page */
+.gh-enter { position: relative; margin-top: 24px; display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 264px; padding: 15px 34px 13px; cursor: pointer; clip-path: var(--chamfer-8); color: #FFFFFF; border: 1px solid color-mix(in oklab, var(--accent) 75%, transparent); background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 34%, transparent), color-mix(in oklab, var(--accent) 12%, transparent)); box-shadow: 0 18px 46px rgba(0, 0, 0, 0.5), 0 0 40px color-mix(in oklab, var(--accent) 20%, transparent); transition: background .25s, box-shadow .25s, transform .25s; }
+.gh-enter .t { font-family: var(--font-sys); text-transform: uppercase; letter-spacing: .24em; font-weight: 700; font-size: 15px; }
+.gh-enter .s { font-family: var(--font-mono); font-size: 10px; letter-spacing: .2em; color: var(--accent-soft); }
+.gh-enter:hover, .gh-enter:focus-visible { transform: translateY(-1px); background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 52%, transparent), color-mix(in oklab, var(--accent) 20%, transparent)); box-shadow: 0 18px 46px rgba(0, 0, 0, 0.5), 0 0 76px color-mix(in oklab, var(--accent) 42%, transparent); }
+@media (max-width: 720px) {
+  .gh { height: clamp(320px, 56vh, 440px); }
+  .gh-top { left: 16px; right: 16px; top: 16px; }
+  .gh-enter { min-width: 0; width: 100%; }
+}
+
+/* The Red Gate ladder: flat and still, like every other window */
 .thegate { overflow: hidden; }
 .thegate.shake { animation: gate-shake .45s cubic-bezier(.36, .07, .19, .97); }
 @keyframes gate-shake { 10%, 90% { transform: translateX(-2px); } 20%, 80% { transform: translateX(4px); } 30%, 50%, 70% { transform: translateX(-7px); } 40%, 60% { transform: translateX(7px); } }

@@ -211,6 +211,13 @@ class Shaft {
     this.last = this.born;
     this.onResize = () => this.resize();
     window.addEventListener('resize', this.onResize);
+    // A resize event is not the only way this canvas changes size: the pane
+    // can be dragged, devtools can open, the DPR can change with the monitor.
+    // Missing one left a stale box behind and drew the whole shaft off centre.
+    if (window.ResizeObserver) {
+      this.ro = new ResizeObserver(this.onResize);
+      this.ro.observe(this.c);
+    }
     this.resize();
     for (let i = 0; i < 90; i++) this.dust.push(this.newMote(true));
     for (let i = 0; i < 26; i++) this.streaks.push(this.newStreak(true));
@@ -239,20 +246,25 @@ class Shaft {
     };
   }
 
+  // The canvas is laid out by CSS (inset: 0 on the overlay), so its own box is
+  // the truth. Writing style.width/height from window.innerWidth pinned it to
+  // whatever the window was at the last resize event: one missed event and the
+  // canvas stayed narrower than the viewport, anchored left, which drew the
+  // shaft off centre with a bright seam where the stale box ended.
   resize() {
     const dpr = Math.min(2, window.devicePixelRatio || 1);
-    this.W = window.innerWidth;
-    this.H = window.innerHeight;
+    const r = this.c.getBoundingClientRect();
+    this.W = Math.max(1, Math.round(r.width || window.innerWidth));
+    this.H = Math.max(1, Math.round(r.height || window.innerHeight));
     this.c.width = Math.round(this.W * dpr);
     this.c.height = Math.round(this.H * dpr);
-    this.c.style.width = this.W + 'px';
-    this.c.style.height = this.H + 'px';
     this.x.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
   stop() {
     this.running = false;
     window.removeEventListener('resize', this.onResize);
+    if (this.ro) this.ro.disconnect();
   }
 
   worldOf(i) { return i < 0 ? THRESHOLD : i * SPACING; }
@@ -308,7 +320,10 @@ class Shaft {
   // frames would hang half way with the descent waiting on it.
   startDrop(fromIdx, toIdx, onLand) {
     this.walk = null;
-    this.row = null; // the rim you chose from is behind you now
+    // the rim you chose from is behind you now, and so is the choice: leaving
+    // either of them set painted your old passage onto the new rank's rim
+    this.row = null;
+    this.chosen = -1;
     this.fall = { from: this.worldOf(fromIdx), to: this.worldOf(toIdx), start: performance.now(), onLand, landed: false };
     setTimeout(() => this.finishFall(), FALL.drop + 40); // backstop, if no frame ever runs
   }
@@ -582,7 +597,10 @@ class Shaft {
     const { y, s, rx, ry, d } = g;
     const here = i === this.standing;
     const passed = i >= 0 && i < this.standing;
-    const isBroken = i === this.broken;
+    // -1 is the threshold, and `broken` starts at -1 for "nothing is broken":
+    // without the guard the threshold was drawn as a failed rank, which is why
+    // the shaft opened red instead of violet every single time
+    const isBroken = i >= 0 && i === this.broken;
     const fog = this.fogAt(d);
     const alpha = (1 - fog) * o;
     if (alpha < 0.02) return;
@@ -913,6 +931,7 @@ export function openDescent(opts) {
   const timers = [];
   let ended = false;
   let busy = true;
+  let grabbedOnce = false; // the grasp is a jumpscare, so it happens once at most
   let floor = gate.run ? gate.run.floor : 0;
   let holding = gate.run ? gate.run.holding : 0;
   let hoardNow = gate.hoard;
@@ -1087,7 +1106,11 @@ export function openDescent(opts) {
     rankLine.textContent = `${ranks[floor - 1]} RANK CLEARED`;
     setSay(`Holding ${holding}.`);
 
-    const grabbed = !reduced() && floor < FLOORS && Math.random() < 0.2;
+    // The grasp only works while it is still a shock. Once per descent at
+    // most, and only past the D rank, so it lands about one descent in five
+    // instead of most landings, where it turned from a fright into a chore.
+    const grabbed = !reduced() && !grabbedOnce && floor >= 3 && floor < FLOORS && Math.random() < 0.22;
+    if (grabbed) grabbedOnce = true;
     later(() => {
       if (grabbed) startGrasp();
       else { busy = false; promptDoors(); renderBar(); }
@@ -1096,8 +1119,10 @@ export function openDescent(opts) {
 
   // ---- the grasp ----
   function startGrasp() {
-    const NEED = 14;
-    const MS = 4200;
+    // five clicks, not fourteen: the point is the half second of panic, and a
+    // long bar turns that into typing
+    const NEED = 5;
+    const MS = 2800;
     let hits = 0;
     const panel = el('div', 'rg-grasp');
     const track = el('div', 'g-track');
@@ -1186,8 +1211,21 @@ export function openDescent(opts) {
     hud.classList.add('gone');
     const card = el('div', 'rg-card' + (won ? ' win' : ' loss'));
     card.append(el('span', 'k', won ? '[ THE GATE RELEASES YOU ]' : '[ THE GATE CLOSES ]'));
-    card.append(el('div', 'n', won ? `+${res.taken}` : '0'));
-    card.append(el('span', 'u', won && res.taken === 1 ? 'LINK' : 'LINKS'));
+
+    // The number is the only thing on this card anybody reads, and it is what
+    // a whole day of training bought, so it gets a struck plate of its own:
+    // milled rules either side, a metal face, one pass of light across it,
+    // and digits that climb to the figure instead of simply appearing.
+    const took = won ? res.taken : 0;
+    const prize = el('div', 'rg-prize');
+    const num = el('div', 'rg-n');
+    const digits = el('span', 'd', '0');
+    num.append(el('span', 'sign', won && took > 0 ? '+' : ''), digits);
+    prize.append(el('i', 'rule l'), num, el('i', 'rule r'));
+    card.append(prize);
+    card.append(el('span', 'u', took === 1 ? 'LINK' : 'LINKS'));
+    countTo(digits, took);
+
     const lines = el('div', 'ls');
     if (won && res.cleared) {
       lines.append(el('p', null, `All six ranks. ${res.taken} ${res.taken === 1 ? 'link' : 'links'} of Hoard left with you, and it is empty now.`));
@@ -1200,13 +1238,36 @@ export function openDescent(opts) {
       lines.append(el('p', null, `The Hoard holds ${res.hoard}, and keys are cut for closed days. Close tomorrow and come back.`));
     }
     card.append(lines);
+    // This closes the shaft and puts you back in front of the Gate; it does
+    // not spend anything, so it must not read like a second descent.
     const done = el('button', 'rg-btn out');
     done.type = 'button';
-    done.append(el('span', 't', res.keys ? `AGAIN · ${res.keys} ${res.keys === 1 ? 'KEY' : 'KEYS'} LEFT` : 'CLOSE'));
+    done.append(el('span', 't', 'CONTINUE'));
+    if (res.keys !== undefined) {
+      done.append(el('span', 's', res.keys
+        ? `${res.keys} ${res.keys === 1 ? 'KEY' : 'KEYS'} STILL IN HAND`
+        : 'NO KEYS IN HAND'));
+    }
     done.addEventListener('click', () => finish(res));
     card.append(done);
     overlay.append(card);
     later(() => finish(res), 22000);
+  }
+
+  // The digits roll up to the figure. A number that appears reads like a
+  // receipt; a number that climbs reads like a payout being counted out.
+  function countTo(node, n) {
+    if (reduced() || n <= 0) { node.textContent = String(n); return; }
+    const dur = clamp(380 + n * 24, 480, 1200);
+    const t0 = performance.now();
+    const step = () => {
+      if (ended || !node.isConnected) return;
+      const k = clamp((performance.now() - t0) / dur, 0, 1);
+      node.textContent = String(Math.round(n * easeOut(k)));
+      if (k < 1) requestAnimationFrame(step);
+    };
+    node.textContent = '0';
+    requestAnimationFrame(step);
   }
 
   const onKey = (e) => { if (e.key === 'Escape') finish(null); };

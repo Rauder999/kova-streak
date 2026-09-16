@@ -11,6 +11,7 @@ import {
 import { getAllParsedRuns, kvGet, kvSet } from './db.js';
 import { startCelebration as runCeremony } from './celebrate.js';
 import { openDescent } from './gate.js';
+import { mountGateHall } from './gatehall.js';
 import { buildDailyReport, coachPayload, buildTrackingLine } from './stats.js';
 import { annotateTerms, initGlossary } from './glossary.js';
 
@@ -167,6 +168,13 @@ async function boot() {
   loadRest().then(() => { if (state.tab === 'today') renderToday(); });
   loadVault(); // the rest calendar reads the shield and the voucher from it
   loadTrial();
+  // A descent left open outranks whatever tab you would have landed on: the
+  // key is already spent and links are sitting down there waiting to be
+  // walked out. Reloading used to drop you on Today as if nothing were open.
+  const landed = state.tab;
+  loadGate(false).then(() => {
+    if (state.tab === landed && state.gate && state.gate.run) switchTab('gate');
+  });
   if (state.granted) startPolling();
 }
 
@@ -191,10 +199,13 @@ function switchTab(tab) {
   state.tab = tab;
   document.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
   showView(tab);
+  // a hidden view still gets frames, so the hall is shut down on the way out
+  if (tab !== 'gate' && gateHall) { gateHall.stop(); gateHall = null; }
   if (tab === 'today') renderToday();
   if (tab === 'stats') renderStats();
   if (tab === 'group') { renderGroup(); refreshGroup(); }
-  if (tab === 'vault') { renderVault(); loadVault(); loadGate(); }
+  if (tab === 'vault') { renderVault(); loadVault(); }
+  if (tab === 'gate') { renderGate(); loadGate(); }
   if (tab === 'admin') renderAdmin();
 }
 
@@ -1389,8 +1400,6 @@ function renderVault() {
 
   if (!v) return;
 
-  root.append(renderGateWindow());
-
   // ---- the exchange ----
   const shop = mkWin();
   shop.append(winHead('[ Exchange ]', 'FOUR ARTIFACTS · THE SAME RARITY LADDER AS THE PODIUM'));
@@ -1462,18 +1471,36 @@ async function loadVault() {
 }
 
 // ---------- The Red Gate ----------
-// The window here is flat and still, like every other window on the site.
-// The descent itself is an event and lives in gate.js, full screen, where
-// the constitution lets motion off the leash.
+// Its own tab, out of the Vault: turning a key is the largest thing a day of
+// training buys, and it was sitting underneath a shop. The hall is one canvas
+// and one control, because a person who ground all day for that key should
+// arrive somewhere that knows it. Everything under it, the ladder and the
+// rules, is flat and still like every other window on the site. The descent
+// itself is an event and lives in gate.js, full screen, where the
+// constitution lets motion off the leash.
 
 let gateBusy = false;
 let gateFlash = null; // the outcome of the last descent, shown until the next one
+let gateHall = null;  // the live scene, stopped whenever the tab is left
 
 async function loadGate(render = true) {
   try {
     state.gate = await api.getGate();
-    if (render && state.tab === 'vault') renderVault();
+    paintGateTab();
+    if (render && state.tab === 'gate') renderGate();
   } catch { /* the Gate is optional */ }
+}
+
+// The tab chip carries the one thing a fresh page must not swallow: a descent
+// you walked away from is still open, and it is still holding your links.
+function paintGateTab() {
+  const b = document.querySelector('.tab-btn[data-tab="gate"]');
+  if (!b) return;
+  const g = state.gate;
+  const inside = !!(g && g.run);
+  b.classList.toggle('inside', inside);
+  b.classList.toggle('ready', !inside && !!(g && g.open));
+  b.title = inside ? 'A descent is still open' : '';
 }
 
 // the key marks: one diamond per key the System will hold for you
@@ -1487,22 +1514,89 @@ function keyMarks(held, max) {
   return wrap;
 }
 
-function renderGateWindow() {
+// The tab: the hall on top, then the ladder, then the terms.
+function renderGate() {
+  const root = $('view-gate');
+  if (!root) return;
+  if (gateHall) { gateHall.stop(); gateHall = null; }
+  root.replaceChildren();
   const g = state.gate;
-  const win = mkWin('thegate');
-  if (!g) {
-    win.append(winHead('[ The Red Gate ]', 'OPENING...'));
-    win.append(el('div', 'quest-line', '[ Reading the Gate... ]'));
-    return win;
-  }
-  const inside = g.run && !g.run.dead;
-  win.append(winHead('[ The Red Gate ]', `HOARD ${g.hoard} ${g.hoard === 1 ? 'LINK' : 'LINKS'} · ${g.keys} OF ${g.keysMax} KEYS`));
+  const inside = !!(g && g.run && !g.run.dead);
+  const sealed = !g || (!g.open && !inside);
 
-  const lede = el('span', 'lede', 'Six ranks, each less likely to let you through than the last. Walk out whenever you like with the share your depth allows. Fail a rank and the Hoard keeps it. The S rank takes the Hoard entire.');
-  lede.style.cssText = 'display:block;margin-top:10px;max-width:62ch';
-  win.append(lede);
+  // ---- the hall: the arch, and the one thing you do here ----
+  const hallWin = mkWin('thegate hall');
+  const gh = el('div', 'gh');
+  const canvas = el('canvas', 'gh-fx');
+  gh.append(canvas);
+
+  const top = el('div', 'gh-top');
+  top.append(el('span', 'gh-name', '[ THE RED GATE ]'));
+  if (g) {
+    const kw = el('span', 'gh-k');
+    kw.append(keyMarks(g.keys, g.keysMax), el('span', 'n', `${g.keys} ${g.keys === 1 ? 'KEY' : 'KEYS'}`));
+    top.append(kw);
+  }
+  gh.append(top);
+
+  const front = el('div', 'gh-front');
+  const fig = (kick, value, unit, alarm) => {
+    front.append(el('span', 'gh-kick' + (alarm ? ' alarm' : ''), kick));
+    front.append(el('div', 'gh-fig' + (alarm ? ' alarm' : ''), value));
+    front.append(el('span', 'gh-unit', unit));
+  };
+  const enterBtn = (label, sub, fn) => {
+    const b = el('button', 'gh-enter');
+    b.type = 'button';
+    b.append(el('span', 't', label));
+    if (sub) b.append(el('span', 's', sub));
+    b.addEventListener('mouseenter', () => gateHall && gateHall.heat(true));
+    b.addEventListener('mouseleave', () => gateHall && gateHall.heat(false));
+    b.addEventListener('focus', () => gateHall && gateHall.heat(true));
+    b.addEventListener('blur', () => gateHall && gateHall.heat(false));
+    b.addEventListener('click', () => { if (gateHall) gateHall.flare(); fn(); });
+    return b;
+  };
+
+  if (!g) {
+    fig('THE HOARD', '--', 'LINKS');
+    front.append(el('span', 'gh-note', '[ Reading the Gate... ]'));
+  } else if (inside) {
+    // a descent left open is the loudest thing this screen can say
+    fig('YOU ARE STILL INSIDE', String(g.run.holding), `HELD AT THE ${g.run.floor > 0 ? g.ranks[g.run.floor - 1] + ' RANK' : 'THRESHOLD'}`, true);
+    front.append(enterBtn('BACK INTO THE SHAFT', 'THE KEY IS ALREADY TURNED', () => enterDescent()));
+    front.append(el('span', 'gh-note', '[ Walk out from down there and the links are yours. ]'));
+    front.append(el('span', 'gh-note dim', '[ Leave the descent open and the shaft keeps them. ]'));
+  } else {
+    fig('THE HOARD', String(g.hoard), g.hoard === 1 ? 'LINK' : 'LINKS');
+    if (g.open) {
+      front.append(enterBtn('TURN A KEY', `${g.keys} IN HAND`, () => enterDescent(true)));
+      front.append(el('span', 'gh-note', '[ Six ranks down. Everything you hold rides on each one. ]'));
+      if (!g.keyToday) front.append(el('span', 'gh-note dim', '[ Close today and the System cuts you another. ]'));
+    } else {
+      front.append(el('span', 'gh-shut', `[ ${g.why || 'The Gate is shut.'} ]`));
+    }
+  }
+  gh.append(front);
+  hallWin.append(gh);
+
+  if (gateFlash) {
+    const s = el('div', 'status ' + (gateFlash.kind === 'err' ? 'err' : 'ok'), gateFlash.text);
+    s.style.cssText = 'margin:0 26px 22px';
+    hallWin.append(s);
+  }
+  root.append(hallWin);
+  gateHall = mountGateHall(canvas, { sealed: sealed && !inside });
+
+  if (!g) return;
 
   // ---- the ladder: what each rank would hand over right now ----
+  const two = el('div', 'row2');
+  const lad = mkWin('grow');
+  lad.append(winHead('[ Six ranks down ]', 'WALK OUT WHENEVER YOU LIKE WITH THE SHARE YOUR DEPTH ALLOWS'));
+  const lede = el('span', 'lede', 'Each rank is less likely to let you through than the last. Fail one and the Hoard keeps everything you were holding. The S rank takes the Hoard entire.');
+  lede.style.cssText = 'display:block;margin-top:10px;max-width:62ch';
+  lad.append(lede);
   const ladder = el('div', 'gl');
   g.ranks.forEach((rank, i) => {
     const row = el('div', 'gl-step');
@@ -1521,35 +1615,28 @@ function renderGateWindow() {
     if (whole) row.append(el('span', 'gl-v', 'THE HOARD'));
     ladder.append(row);
   });
-  win.append(ladder);
+  lad.append(ladder);
+  two.append(lad);
 
-  // ---- the one control ----
-  const bar = el('div', 'gate-bar');
-  bar.append(keyMarks(g.keys, g.keysMax));
-  if (inside) {
-    const back = el('button', 'btn', `Back into the Gate · ${g.ranks[g.run.floor - 1] || 'E'} rank`);
-    back.addEventListener('click', () => enterDescent());
-    bar.append(back);
-    bar.append(el('span', 'quest-line', `[ A descent is still open, holding ${g.run.holding}. ]`));
-  } else if (g.open) {
-    const enter = el('button', 'btn', 'Turn a key');
-    enter.addEventListener('click', () => enterDescent(true));
-    bar.append(enter);
-    bar.append(el('span', 'quest-line', `[ ${g.keys} ${g.keys === 1 ? 'key' : 'keys'} in hand${g.keyToday ? '' : ' · today closes one more'} ]`));
-  } else {
-    bar.append(el('span', 'quest-line', `[ ${g.why || 'The Gate is shut.'} ]`));
+  // ---- the terms, in the group's own words ----
+  const terms = mkWin('side wide');
+  terms.append(winHead('[ The terms ]'));
+  for (const [what, amt] of [
+    ['A DAY CLOSED · ONE KEY CUT', '+1 KEY'],
+    ['KEYS THE SYSTEM WILL HOLD FOR YOU', String(g.keysMax)],
+    ['THE HOARD, EVERY NIGHT', '+1 LINK'],
+    ['EVERY DAY SOMEBODY LET GO', '+1 LINK'],
+    ['A RANK THAT TURNS YOU AWAY', 'THE HOARD KEEPS IT'],
+  ]) {
+    const r = el('div', 'rule');
+    r.append(el('span', 'dia'), el('span', null, what), el('span', 'lead'), el('span', 'amt', amt));
+    terms.append(r);
   }
-  win.append(bar);
-
-  if (gateFlash) {
-    const s = el('div', 'status ' + (gateFlash.kind === 'err' ? 'err' : 'ok'), gateFlash.text);
-    s.style.marginTop = '14px';
-    win.append(s);
-  }
-  const fine = el('span', 'fine', `A key is cut for every day you close and the System holds ${g.keysMax} at most, so the Gate costs training and never touches what you have saved. Everything it pays comes out of the Hoard, and the Hoard is fed by the group: one link a day, and one for every day somebody let go. Train well as a group and the Gate stays poor.`);
+  const fine = el('span', 'fine', 'The Gate costs training and never touches what you have saved: a key cannot be bought and cannot be traded. Everything it pays comes out of the Hoard, and the Hoard is fed by the group. Train well as a group and the Gate stays poor.');
   fine.style.cssText = 'display:block;margin-top:16px';
-  win.append(fine);
-  return win;
+  terms.append(fine);
+  two.append(terms);
+  root.append(two);
 }
 
 // opens the full-screen descent; `fresh` spends a key first
@@ -1562,7 +1649,7 @@ async function enterDescent(fresh = false) {
       state.gate = res;
     }
     const g = state.gate;
-    if (!g || !g.run) { gateFlash = { kind: 'err', text: '[ The Gate did not open. ]' }; renderVault(); return; }
+    if (!g || !g.run) { gateFlash = { kind: 'err', text: '[ The Gate did not open. ]' }; renderGate(); return; }
     openDescent({
       gate: g,
       descend: (door, floor) => api.gateDescend(door, floor),
@@ -1584,7 +1671,7 @@ async function enterDescent(fresh = false) {
     if (handleApiError(e)) return;
     gateFlash = { kind: 'err', text: '[ ' + e.message + ' ]' };
     await loadGate(false);
-    renderVault();
+    renderGate();
   } finally {
     gateBusy = false;
   }
