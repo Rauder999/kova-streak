@@ -1572,8 +1572,6 @@ function renderGate() {
     if (g.open) {
       front.append(enterBtn('TURN A KEY', `${g.keys} IN HAND`, () => enterDescent(true)));
       front.append(el('span', 'gh-note', '[ Six ranks down. Everything you hold rides on each one. ]'));
-      // the rare gate is advertised, never hidden: the anticipation is the point
-      if (g.red) front.append(el('span', 'gh-note red', `1 KEY IN ${Math.round(1 / g.red.chance)} TEARS OPEN RED · THE ${g.ranks[4]} RANK ALONE PAYS ${g.red.claim[4]}`));
       if (!g.keyToday) front.append(el('span', 'gh-note dim', '[ Close today and the System cuts you another. ]'));
     } else {
       front.append(el('span', 'gh-shut', `[ ${g.why || 'The Gate is shut.'} ]`));

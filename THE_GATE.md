@@ -146,15 +146,32 @@ collapse, no double payout, and the Hoard balancing on every path.
 
 The Gate has its own tab, not a window in the Vault: a key costs a whole
 day of training, so the screen that takes it is the hall, one canvas and
-exactly one control in front of it. A flat outline on a dark rectangle
-reads as a wireframe, which is what the first pass of that screen was, so
-the hall is built instead: the mouth is a corridor of nested arches
-receding to a vanishing point with the Hoard burning at the far end, the
-stone has an outer frame and an inner reveal with a rune frieze in the
-band between them, the legs stand on plinths, and the floor carries the
-arch's reflection, the light it spills and lines running back to the same
-vanishing point. The ladder and the terms under it are flat and still, one
-accent, rows, the way the constitution asks.
+exactly one control in front of it.
+
+The hall is the System's own summoning circle, seen face on, the way Solo
+Leveling draws one. Six rings turn against each other at six speeds: a
+dashed outer orbit carrying diamond nodes, a collar of a hundred and
+twenty ticks running the other way, the rim with a rune band of notches
+and glyph blocks written on it, four arc segments faster still, a hexagram
+of two counter-turning triangles, and an inner collar. A head of light
+runs the rim dragging a tail. Inside is a dark well with sixteen arms
+winding down into it and the Hoard burning at the bottom. Sparks spiral in
+from off screen, bolts jump between rings, a pulse leaves the rim every
+few seconds, and around all of it reality is FRACTURED: cracks run out of
+the rim into the dark and bleed light, because something is holding open a
+hole that should not be there.
+
+What keeps that from reading cheap, which the flat outline before it did:
+every light is three strokes (a wide dim bloom, a body, a white hot core)
+rather than one flat mid violet line; there is something to find at every
+radius; and the middle is genuinely black, which is what makes the glow
+read as light instead of paint. Hovering the key speeds the whole machine
+up and sends a ring out; turning it flares the screen and throws six bolts
+at once. A sealed Gate goes ash and rust and takes two struck bars across
+the face.
+
+The ladder and the terms under the hall are flat and still, one accent,
+rows, the way the constitution asks.
 
 The descent is an **event**, and the constitution leaves event motion
 free, so it takes the whole screen: a shaft with six rune seals receding
