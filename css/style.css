@@ -902,28 +902,35 @@ select.inp option, select.inp optgroup { background: var(--win); color: var(--te
 .gh-top { position: absolute; left: 26px; right: 26px; top: 22px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .gh-name { font-family: var(--font-sys); text-transform: uppercase; letter-spacing: .24em; font-weight: 700; font-size: 13px; color: var(--accent); }
 .gh-name.red { color: #FF6A5E; text-shadow: 0 0 22px rgba(255, 90, 78, 0.55); }
-.gh-k { display: flex; align-items: center; gap: 10px; }
-.gh-k .n { font-family: var(--font-mono); font-size: 11px; letter-spacing: .18em; color: var(--text-2); }
 
-/* everything a hunter reads stands in the mouth of the arch */
-.gh-front { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 40px 20px; pointer-events: none; }
-.gh-front > * { pointer-events: auto; }
-.gh-kick { font-family: var(--font-sys); text-transform: uppercase; letter-spacing: .34em; font-weight: 700; font-size: 11px; color: var(--text-1); text-shadow: 0 2px 12px rgba(0, 0, 0, 0.9); }
-.gh-kick.alarm { color: var(--bad); }
+/* The circle carries nothing but the control. Every readout stands in the
+   margin beside it, the way the descent puts its HUD out of the shaft's way. */
+.gh-reads { position: absolute; inset: 0; display: flex; align-items: center; justify-content: space-between; padding: 0 clamp(18px, 3vw, 44px); pointer-events: none; }
+.gh-read { display: flex; flex-direction: column; gap: 2px; }
+.gh-read.r { align-items: flex-end; text-align: right; }
+.gh-kick { font-family: var(--font-sys); text-transform: uppercase; letter-spacing: .3em; font-weight: 700; font-size: 10.5px; color: var(--text-2); text-shadow: 0 2px 12px rgba(0, 0, 0, 0.9); }
+.gh-read.alarm .gh-kick { color: var(--bad); }
 .gh-fig {
-  margin-top: 4px; font-family: var(--font-sys); font-weight: 700; font-variant-numeric: tabular-nums;
-  line-height: .92; font-size: clamp(54px, 7vw, 88px); letter-spacing: -.02em;
+  margin-top: 2px; font-family: var(--font-sys); font-weight: 700; font-variant-numeric: tabular-nums;
+  line-height: .92; font-size: clamp(46px, 5.4vw, 76px); letter-spacing: -.02em;
   background-image: linear-gradient(180deg, #FFF3D2 0%, #F2C868 32%, #E8B64A 58%, #A87B2B 84%, #6E4F19 100%);
   -webkit-background-clip: text; background-clip: text; color: transparent;
-  filter: drop-shadow(0 0 30px rgba(232, 182, 74, 0.36));
+  filter: drop-shadow(0 0 26px rgba(232, 182, 74, 0.34));
 }
-.gh-fig.alarm { background-image: linear-gradient(180deg, #FFD9D9 0%, #F2777B 34%, #E5484D 62%, #8E1E22 100%); filter: drop-shadow(0 0 30px rgba(229, 72, 77, 0.38)); }
-.gh-unit { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .3em; color: var(--text-1); text-shadow: 0 2px 12px rgba(0, 0, 0, 0.9); }
-.gh-note { margin-top: 16px; max-width: 68ch; font-family: var(--font-mono); font-size: 11.5px; line-height: 1.65; letter-spacing: .03em; color: var(--text-1); text-shadow: 0 2px 14px rgba(0, 0, 0, 0.95); }
+.gh-read.r .gh-fig { background-image: linear-gradient(180deg, #F0EDFF 0%, #CFC9FF 34%, #8B7CFF 70%, #4B3E9E 100%); filter: drop-shadow(0 0 26px rgba(139, 124, 255, 0.34)); }
+.gh-read.alarm .gh-fig { background-image: linear-gradient(180deg, #FFD9D9 0%, #F2777B 34%, #E5484D 62%, #8E1E22 100%); filter: drop-shadow(0 0 26px rgba(229, 72, 77, 0.38)); }
+.gh-unit { font-family: var(--font-mono); font-size: 10px; letter-spacing: .26em; color: var(--text-2); text-shadow: 0 2px 12px rgba(0, 0, 0, 0.9); }
+.gh-read .rg-keys { margin-top: 4px; }
+
+/* the one control, alone in the middle of the ring */
+.gh-core { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+.gh-core > * { pointer-events: auto; }
+
+/* and the words, under the circle where they belong */
+.gh-foot { position: absolute; left: 50%; bottom: clamp(16px, 3vh, 30px); transform: translateX(-50%); width: min(70ch, calc(100% - 48px)); display: flex; flex-direction: column; align-items: center; text-align: center; }
+.gh-note { font-family: var(--font-mono); font-size: 11.5px; line-height: 1.65; letter-spacing: .03em; color: var(--text-1); text-shadow: 0 2px 14px rgba(0, 0, 0, 0.95); }
 .gh-note.dim { margin-top: 4px; color: var(--text-2); }
-/* the 5% is a promise, not a warning: it gets the one hot colour on the screen */
-.gh-note.red { margin-top: 12px; max-width: 42ch; padding: 8px 16px 7px; color: #FFC7BC; border: 1px solid rgba(255, 90, 78, 0.4); background: linear-gradient(180deg, rgba(255, 90, 78, 0.13), rgba(255, 90, 78, 0.04)); clip-path: var(--chamfer-4); }
-.gh-shut { margin-top: 26px; max-width: 44ch; font-family: var(--font-mono); font-size: 12px; line-height: 1.6; color: var(--text-1); text-shadow: 0 2px 14px rgba(0, 0, 0, 0.95); }
+.gh-shut { max-width: 44ch; font-family: var(--font-mono); font-size: 12px; line-height: 1.6; color: var(--text-1); text-shadow: 0 2px 14px rgba(0, 0, 0, 0.95); }
 
 /* the key turns here, so this control is allowed to be the loudest thing on the page */
 .gh-enter { position: relative; margin-top: 22px; display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 236px; padding: 14px 30px 12px; cursor: pointer; clip-path: var(--chamfer-8); color: #FFFFFF; border: 1px solid color-mix(in oklab, var(--accent) 75%, transparent); background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 34%, transparent), color-mix(in oklab, var(--accent) 12%, transparent)); box-shadow: 0 18px 46px rgba(0, 0, 0, 0.5), 0 0 40px color-mix(in oklab, var(--accent) 20%, transparent); transition: background .25s, box-shadow .25s, transform .25s; }
@@ -931,9 +938,13 @@ select.inp option, select.inp optgroup { background: var(--win); color: var(--te
 .gh-enter .s { font-family: var(--font-mono); font-size: 10px; letter-spacing: .2em; color: var(--accent-soft); }
 .gh-enter:hover, .gh-enter:focus-visible { transform: translateY(-1px); background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 52%, transparent), color-mix(in oklab, var(--accent) 20%, transparent)); box-shadow: 0 18px 46px rgba(0, 0, 0, 0.5), 0 0 76px color-mix(in oklab, var(--accent) 42%, transparent); }
 @media (max-width: 720px) {
-  .gh { height: clamp(320px, 56vh, 440px); }
+  .gh { height: clamp(440px, 66vh, 580px); }
   .gh-top { left: 16px; right: 16px; top: 16px; }
-  .gh-enter { min-width: 0; width: 100%; }
+  /* no margins to stand in on a phone, so the readouts sit above the circle */
+  .gh-reads { inset: 46px 0 auto 0; align-items: flex-start; padding: 0 18px; }
+  .gh-reads .gh-fig { font-size: 40px; }
+  .gh-enter { min-width: 0; padding: 12px 22px 10px; }
+  .gh-enter .t { font-size: 13px; letter-spacing: .18em; }
 }
 
 /* The Red Gate ladder: flat and still, like every other window */

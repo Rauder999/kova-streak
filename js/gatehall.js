@@ -82,10 +82,12 @@ class Hall {
     this.c.height = Math.round(this.H * dpr);
     this.x.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.cx = this.W / 2;
-    this.cy = this.H * 0.5;
+    // on a phone the readouts cannot stand beside the circle, so they sit
+    // above it and the circle drops to make room
+    this.cy = this.H * (this.W < 720 ? 0.57 : 0.5);
     // large enough that the figure and the control sit inside the well, small
     // enough that the outermost orbit still lands inside the frame
-    this.R = clamp(Math.min(this.W * 0.34, this.H * 0.44), 150, 330);
+    this.R = clamp(Math.min(this.W * (this.W < 720 ? 0.42 : 0.34), this.H * 0.4), 120, 330);
     if (reduced()) this.draw();
   }
 

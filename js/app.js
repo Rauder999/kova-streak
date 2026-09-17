@@ -1532,19 +1532,22 @@ function renderGate() {
 
   const top = el('div', 'gh-top');
   top.append(el('span', 'gh-name' + (inside && g.run.red ? ' red' : ''), inside && g.run.red ? '[ A RED GATE IS OPEN ]' : '[ THE GATE ]'));
-  if (g) {
-    const kw = el('span', 'gh-k');
-    kw.append(keyMarks(g.keys, g.keysMax), el('span', 'n', `${g.keys} ${g.keys === 1 ? 'KEY' : 'KEYS'}`));
-    top.append(kw);
-  }
   gh.append(top);
 
-  const front = el('div', 'gh-front');
-  const fig = (kick, value, unit, alarm) => {
-    front.append(el('span', 'gh-kick' + (alarm ? ' alarm' : ''), kick));
-    front.append(el('div', 'gh-fig' + (alarm ? ' alarm' : ''), value));
-    front.append(el('span', 'gh-unit', unit));
+  // Nothing is written on the circle itself: the readouts stand in the
+  // margins either side of it and the only thing inside the ring is the one
+  // control. A summoning circle with a paragraph across it is a poster.
+  const reads = el('div', 'gh-reads');
+  const read = (side, kick, value, unit, cls) => {
+    const box = el('div', 'gh-read ' + side + (cls ? ' ' + cls : ''));
+    box.append(el('span', 'gh-kick', kick));
+    box.append(el('div', 'gh-fig', value));
+    if (unit instanceof Node) box.append(unit); else box.append(el('span', 'gh-unit', unit));
+    reads.append(box);
+    return box;
   };
+  const core = el('div', 'gh-core');
+  const foot = el('div', 'gh-foot');
   const enterBtn = (label, sub, fn) => {
     const b = el('button', 'gh-enter');
     b.type = 'button';
@@ -1559,25 +1562,29 @@ function renderGate() {
   };
 
   if (!g) {
-    fig('THE HOARD', '--', 'LINKS');
-    front.append(el('span', 'gh-note', '[ Reading the Gate... ]'));
-  } else if (inside) {
-    // a descent left open is the loudest thing this screen can say
-    fig('YOU ARE STILL INSIDE', String(g.run.holding), `HELD AT THE ${g.run.floor > 0 ? g.ranks[g.run.floor - 1] + ' RANK' : 'THRESHOLD'}`, true);
-    front.append(enterBtn('BACK INTO THE SHAFT', 'THE KEY IS ALREADY TURNED', () => enterDescent()));
-    front.append(el('span', 'gh-note', '[ Walk out from down there and the links are yours. ]'));
-    front.append(el('span', 'gh-note dim', '[ Leave the descent open and the shaft keeps them. ]'));
+    read('l', 'THE HOARD', '--', 'LINKS');
+    foot.append(el('span', 'gh-note', '[ Reading the Gate... ]'));
   } else {
-    fig('THE HOARD', String(g.hoard), g.hoard === 1 ? 'LINK' : 'LINKS');
-    if (g.open) {
-      front.append(enterBtn('TURN A KEY', `${g.keys} IN HAND`, () => enterDescent(true)));
-      front.append(el('span', 'gh-note', '[ Six ranks down. Everything you hold rides on each one. ]'));
-      if (!g.keyToday) front.append(el('span', 'gh-note dim', '[ Close today and the System cuts you another. ]'));
+    if (inside) {
+      read('l', 'YOU ARE STILL INSIDE', String(g.run.holding), `HELD AT THE ${g.run.floor > 0 ? g.ranks[g.run.floor - 1] + ' RANK' : 'THRESHOLD'}`, 'alarm');
     } else {
-      front.append(el('span', 'gh-shut', `[ ${g.why || 'The Gate is shut.'} ]`));
+      read('l', 'THE HOARD', String(g.hoard), g.hoard === 1 ? 'LINK' : 'LINKS');
+    }
+    read('r', 'KEYS IN HAND', String(g.keys), keyMarks(g.keys, g.keysMax));
+
+    if (inside) {
+      core.append(enterBtn('BACK INTO THE SHAFT', 'THE KEY IS ALREADY TURNED', () => enterDescent()));
+      foot.append(el('span', 'gh-note', '[ Walk out from down there and the links are yours. ]'));
+      foot.append(el('span', 'gh-note dim', '[ Leave the descent open and the shaft keeps them. ]'));
+    } else if (g.open) {
+      core.append(enterBtn('TURN A KEY', `${g.keys} IN HAND`, () => enterDescent(true)));
+      foot.append(el('span', 'gh-note', '[ Six ranks down. Everything you hold rides on each one. ]'));
+      if (!g.keyToday) foot.append(el('span', 'gh-note dim', '[ Close today and the System cuts you another. ]'));
+    } else {
+      foot.append(el('span', 'gh-shut', `[ ${g.why || 'The Gate is shut.'} ]`));
     }
   }
-  gh.append(front);
+  gh.append(reads, core, foot);
   hallWin.append(gh);
 
   if (gateFlash) {
