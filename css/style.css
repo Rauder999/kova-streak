@@ -742,9 +742,18 @@ select.inp option, select.inp optgroup { background: var(--win); color: var(--te
    read as a pale rectangle through the middle of the shaft */
 /* --rg-depth runs 0 to 1 down the ranks: the ground warms as the Hoard's
    own light starts reaching up the shaft */
-.rg { --rg-depth: 0; position: fixed; inset: 0; z-index: 110; opacity: 0; transition: opacity .45s ease-out; background: radial-gradient(ellipse 70% 55% at 50% 45%, color-mix(in oklab, #14081A calc(100% - var(--rg-depth) * 100%), #1E1206), #05060A 100%), #05060A; }
+/* one palette for the whole overlay, so a red gate repaints the HUD, the
+   ladder, the buttons and the ground by swapping four values */
+.rg {
+  --rg-depth: 0;
+  --rg-accent: var(--accent); --rg-accent-soft: var(--accent-soft);
+  --rg-near: #14081A; --rg-far: #1E1206;
+  position: fixed; inset: 0; z-index: 110; opacity: 0; transition: opacity .45s ease-out;
+  background: radial-gradient(ellipse 70% 55% at 50% 45%, color-mix(in oklab, var(--rg-near) calc(100% - var(--rg-depth) * 100%), var(--rg-far)), #05060A 100%), #05060A;
+}
+.rg.red { --rg-accent: #FF5A4E; --rg-accent-soft: #FFC7BC; --rg-near: #1D0509; --rg-far: #2C0F08; }
 /* two columns of light at the far edges, drifting up, harder the deeper you are */
-.rg-side { position: absolute; top: -20%; bottom: -20%; width: 22vw; pointer-events: none; opacity: calc(.25 + var(--rg-depth) * .55); background: repeating-linear-gradient(to bottom, transparent 0 8%, color-mix(in oklab, var(--accent) calc(14% + var(--rg-depth) * 18%), transparent) 8.4% 9%, transparent 9.4% 18%); mask-image: linear-gradient(to right, #000, transparent); animation: rg-rise 7s linear infinite; }
+.rg-side { position: absolute; top: -20%; bottom: -20%; width: 22vw; pointer-events: none; opacity: calc(.25 + var(--rg-depth) * .55); background: repeating-linear-gradient(to bottom, transparent 0 8%, color-mix(in oklab, var(--rg-accent) calc(14% + var(--rg-depth) * 18%), transparent) 8.4% 9%, transparent 9.4% 18%); mask-image: linear-gradient(to right, #000, transparent); animation: rg-rise 7s linear infinite; }
 .rg-side.r { right: 0; mask-image: linear-gradient(to left, #000, transparent); animation-duration: 9s; }
 .rg-side.l { left: 0; }
 @keyframes rg-rise { to { transform: translateY(-18%); } }
@@ -759,12 +768,21 @@ select.inp option, select.inp optgroup { background: var(--win); color: var(--te
 /* opacity and transform only: animating filter and letter-spacing here made
    Chrome re-rasterise a layer the size of the glow on every frame, which is
    where the ghost rectangle across the shaft was coming from */
-.rg-slam { position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%) scale(1.6); opacity: 0; pointer-events: none; white-space: nowrap; font-family: var(--font-sys); text-transform: uppercase; letter-spacing: .4em; font-weight: 700; font-size: clamp(22px, 5vw, 60px); color: #FFFFFF; text-shadow: 0 0 40px color-mix(in oklab, var(--accent) 90%, transparent), 0 0 120px color-mix(in oklab, var(--accent) 60%, transparent); }
-.rg-slam.go { animation: rg-slam 2.2s cubic-bezier(.16, 1, .3, 1) forwards; will-change: transform, opacity; }
+.rg-slam { position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%) scale(1.6); opacity: 0; pointer-events: none; display: flex; flex-direction: column; align-items: center; gap: 10px; width: min(760px, calc(100% - 48px)); text-align: center; }
+/* the seal turns behind this, so the stamp brings its own dark ground */
+.rg-slam::before { content: ''; position: absolute; left: -14%; right: -14%; top: -55%; bottom: -55%; z-index: -1; pointer-events: none; background: radial-gradient(ellipse 58% 60% at 50% 50%, rgba(4, 4, 8, 0.88), rgba(4, 4, 8, 0.55) 55%, rgba(4, 4, 8, 0) 78%); }
+.rg-slam .k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .3em; color: var(--rg-accent); }
+.rg-slam .n { white-space: nowrap; font-family: var(--font-sys); text-transform: uppercase; letter-spacing: .4em; font-weight: 700; font-size: clamp(22px, 5vw, 60px); line-height: 1; color: #FFFFFF; text-shadow: 0 0 40px color-mix(in oklab, var(--rg-accent) 90%, transparent), 0 0 120px color-mix(in oklab, var(--rg-accent) 60%, transparent); }
+/* the terms, because a key cost a day and the person is owed the answer to
+   "what did I get" before the first passage is offered */
+.rg-slam .s { max-width: 62ch; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.7; letter-spacing: .03em; color: var(--text-1); text-shadow: 0 2px 16px rgba(0, 0, 0, 0.95); }
+.rg-slam.go { animation: rg-slam 2.8s cubic-bezier(.16, 1, .3, 1) forwards; will-change: transform, opacity; }
+.rg-slam.red.go { animation-duration: 4.4s; }
+.rg-slam.red .n { letter-spacing: .34em; }
 @keyframes rg-slam {
   0% { opacity: 0; transform: translate(-50%, -50%) scale(1.6); }
-  18% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-  72% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  14% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  82% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
   100% { opacity: 0; transform: translate(-50%, -52%) scale(.96); }
 }
 .rg-hud { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; pointer-events: none; transition: opacity .35s; }
@@ -780,7 +798,7 @@ select.inp option, select.inp optgroup { background: var(--win); color: var(--te
 @keyframes rg-throb { from { transform: scale(1); } to { transform: scale(1.06); } }
 .rg-hud > * { pointer-events: auto; }
 .rg-top { width: min(1120px, calc(100% - 48px)); margin-top: 30px; display: flex; align-items: baseline; justify-content: space-between; gap: 20px; animation: rg-in .6s ease-out both; }
-.rg-title { font-family: var(--font-sys); text-transform: uppercase; letter-spacing: .22em; font-weight: 700; font-size: 14px; color: var(--accent); }
+.rg-title { font-family: var(--font-sys); text-transform: uppercase; letter-spacing: .22em; font-weight: 700; font-size: 14px; color: var(--rg-accent); }
 .rg-hoard { display: flex; align-items: baseline; gap: 10px; }
 .rg-hoard .l { font-family: var(--font-sys); text-transform: uppercase; letter-spacing: .2em; font-size: 11px; color: var(--text-2); }
 .rg-hoard .v { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 700; font-size: 22px; color: var(--gold); }
@@ -792,15 +810,15 @@ select.inp option, select.inp optgroup { background: var(--win); color: var(--te
 .rg-rung .c { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 12px; color: var(--text-2); text-align: right; }
 .rg-rung i { display: block; width: 3px; height: 16px; background: var(--line-1); }
 .rg-rung.done { opacity: .62; }
-.rg-rung.done .r { color: var(--accent-soft); }
-.rg-rung.done i { background: var(--accent); box-shadow: 0 0 10px color-mix(in oklab, var(--accent) 80%, transparent); }
+.rg-rung.done .r { color: var(--rg-accent-soft); }
+.rg-rung.done i { background: var(--rg-accent); box-shadow: 0 0 10px color-mix(in oklab, var(--rg-accent) 80%, transparent); }
 .rg-rung.now { opacity: 1; transform: translateX(-6px); }
-.rg-rung.now .r { color: #FFFFFF; text-shadow: 0 0 16px color-mix(in oklab, var(--accent) 90%, transparent); }
+.rg-rung.now .r { color: #FFFFFF; text-shadow: 0 0 16px color-mix(in oklab, var(--rg-accent) 90%, transparent); }
 .rg-rung.now .c { color: var(--gold); }
-.rg-rung.now i { height: 26px; background: #FFFFFF; box-shadow: 0 0 16px var(--accent); }
+.rg-rung.now i { height: 26px; background: #FFFFFF; box-shadow: 0 0 16px var(--rg-accent); }
 .rg-rung.next { opacity: .8; }
 .rg-rung.next .r { color: var(--text-0); }
-.rg-rung.next i { background: color-mix(in oklab, var(--accent) 60%, transparent); }
+.rg-rung.next i { background: color-mix(in oklab, var(--rg-accent) 60%, transparent); }
 
 /* the readouts sit out of the shaft's way, in the left margin */
 .rg-mid { position: absolute; left: max(28px, 4vw); top: 22%; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; text-align: left; animation: rg-in .6s ease-out .15s both; }
@@ -814,17 +832,17 @@ select.inp option, select.inp optgroup { background: var(--win); color: var(--te
 .rg-say.err { color: var(--bad); }
 .rg-say.gold { color: var(--gold-2); }
 .rg-bar { position: absolute; left: 50%; bottom: 8%; transform: translateX(-50%); display: flex; align-items: stretch; gap: 12px; flex-wrap: wrap; justify-content: center; width: min(720px, calc(100% - 40px)); }
-.rg-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-height: 52px; padding: 8px 24px; cursor: pointer; clip-path: var(--chamfer-8); border: 1px solid color-mix(in oklab, var(--accent) 70%, transparent); background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 30%, transparent), color-mix(in oklab, var(--accent) 14%, transparent)); color: #FFFFFF; animation: rg-in .35s ease-out both; }
+.rg-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-height: 52px; padding: 8px 24px; cursor: pointer; clip-path: var(--chamfer-8); border: 1px solid color-mix(in oklab, var(--rg-accent) 70%, transparent); background: linear-gradient(180deg, color-mix(in oklab, var(--rg-accent) 30%, transparent), color-mix(in oklab, var(--rg-accent) 14%, transparent)); color: #FFFFFF; animation: rg-in .35s ease-out both; }
 .rg-btn .t { font-family: var(--font-sys); text-transform: uppercase; letter-spacing: .16em; font-weight: 700; font-size: 14px; }
-.rg-btn .s { font-family: var(--font-mono); font-size: 10px; letter-spacing: .1em; color: var(--accent-soft); }
+.rg-btn .s { font-family: var(--font-mono); font-size: 10px; letter-spacing: .1em; color: var(--rg-accent-soft); }
 .rg-btn:hover { filter: brightness(1.25); }
 .rg-btn.out { border-color: color-mix(in oklab, var(--gold) 70%, transparent); background: linear-gradient(180deg, color-mix(in oklab, var(--gold) 22%, transparent), color-mix(in oklab, var(--gold) 9%, transparent)); color: var(--gold-2); }
 .rg-btn.ghost { border-color: var(--line-1); background: rgba(255, 255, 255, 0.02); color: var(--text-1); min-height: 40px; }
 .rg-btn.ghost .t { font-size: 12px; }
-.rg-card { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100% - 40px)); padding: 30px 36px 28px; text-align: center; background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0) 46%), rgba(14, 18, 25, 0.97); border: 1px solid color-mix(in oklab, var(--accent) 45%, var(--line-1)); box-shadow: 0 30px 90px rgba(0, 0, 0, 0.7), 0 0 90px color-mix(in oklab, var(--accent) 16%, transparent); animation: rg-card .5s cubic-bezier(.2, 1.4, .4, 1) both; }
+.rg-card { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100% - 40px)); padding: 30px 36px 28px; text-align: center; background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0) 46%), rgba(14, 18, 25, 0.97); border: 1px solid color-mix(in oklab, var(--rg-accent) 45%, var(--line-1)); box-shadow: 0 30px 90px rgba(0, 0, 0, 0.7), 0 0 90px color-mix(in oklab, var(--rg-accent) 16%, transparent); animation: rg-card .5s cubic-bezier(.2, 1.4, .4, 1) both; }
 .rg-card::before, .rg-card::after { content: ''; position: absolute; width: 12px; height: 12px; }
-.rg-card::before { top: -1px; left: -1px; border-top: 2px solid var(--accent); border-left: 2px solid var(--accent); }
-.rg-card::after { bottom: -1px; right: -1px; border-bottom: 2px solid var(--accent); border-right: 2px solid var(--accent); }
+.rg-card::before { top: -1px; left: -1px; border-top: 2px solid var(--rg-accent); border-left: 2px solid var(--rg-accent); }
+.rg-card::after { bottom: -1px; right: -1px; border-bottom: 2px solid var(--rg-accent); border-right: 2px solid var(--rg-accent); }
 .rg-card.loss { border-color: color-mix(in oklab, var(--bad) 45%, var(--line-1)); box-shadow: 0 30px 90px rgba(0, 0, 0, 0.7), 0 0 90px color-mix(in oklab, var(--bad) 14%, transparent); }
 .rg-card.loss::before { border-top-color: var(--bad); border-left-color: var(--bad); }
 .rg-card.loss::after { border-bottom-color: var(--bad); border-right-color: var(--bad); }
@@ -879,10 +897,11 @@ select.inp option, select.inp optgroup { background: var(--win); color: var(--te
 @keyframes gh-pip { 0%, 100% { opacity: 1; } 50% { opacity: .2; } }
 
 .thegate.hall { padding: 0; overflow: hidden; }
-.gh { position: relative; height: clamp(380px, 52vh, 560px); }
+.gh { position: relative; height: clamp(460px, 62vh, 640px); }
 .gh-fx { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
 .gh-top { position: absolute; left: 26px; right: 26px; top: 22px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .gh-name { font-family: var(--font-sys); text-transform: uppercase; letter-spacing: .24em; font-weight: 700; font-size: 13px; color: var(--accent); }
+.gh-name.red { color: #FF6A5E; text-shadow: 0 0 22px rgba(255, 90, 78, 0.55); }
 .gh-k { display: flex; align-items: center; gap: 10px; }
 .gh-k .n { font-family: var(--font-mono); font-size: 11px; letter-spacing: .18em; color: var(--text-2); }
 
@@ -902,6 +921,8 @@ select.inp option, select.inp optgroup { background: var(--win); color: var(--te
 .gh-unit { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .3em; color: var(--text-1); text-shadow: 0 2px 12px rgba(0, 0, 0, 0.9); }
 .gh-note { margin-top: 16px; max-width: 68ch; font-family: var(--font-mono); font-size: 11.5px; line-height: 1.65; letter-spacing: .03em; color: var(--text-1); text-shadow: 0 2px 14px rgba(0, 0, 0, 0.95); }
 .gh-note.dim { margin-top: 4px; color: var(--text-2); }
+/* the 5% is a promise, not a warning: it gets the one hot colour on the screen */
+.gh-note.red { margin-top: 12px; max-width: 42ch; padding: 8px 16px 7px; color: #FFC7BC; border: 1px solid rgba(255, 90, 78, 0.4); background: linear-gradient(180deg, rgba(255, 90, 78, 0.13), rgba(255, 90, 78, 0.04)); clip-path: var(--chamfer-4); }
 .gh-shut { margin-top: 26px; max-width: 44ch; font-family: var(--font-mono); font-size: 12px; line-height: 1.6; color: var(--text-1); text-shadow: 0 2px 14px rgba(0, 0, 0, 0.95); }
 
 /* the key turns here, so this control is allowed to be the loudest thing on the page */
@@ -933,6 +954,13 @@ select.inp option, select.inp optgroup { background: var(--win); color: var(--te
 .gl-v { font-family: var(--font-mono); font-size: 9px; letter-spacing: .16em; color: var(--gold-2); border: 1px solid color-mix(in oklab, var(--gold) 60%, transparent); padding: 2px 6px 1px; clip-path: var(--chamfer-4); flex: none; }
 .gl-step.dry { opacity: .32; }
 .gl-step.dry .gl-p { color: var(--text-2); }
+/* what a red gate would pay at the same rank, riding beside the house price */
+.gl-red { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 700; font-size: 12px; color: #FF7A6E; min-width: 34px; text-align: right; flex: none; }
+.gl-red::before { content: ''; display: inline-block; width: 5px; height: 5px; margin-right: 7px; transform: translateY(-2px) rotate(45deg); background: #FF5A4E; box-shadow: 0 0 7px rgba(255, 90, 78, 0.8); }
+.gl.red .gl-p { color: #FF9A8E; }
+.gl.red .gl-step.next { background: linear-gradient(90deg, rgba(255, 90, 78, 0.16), transparent 70%); box-shadow: inset 2px 0 0 #FF5A4E; }
+.rule.red .amt { color: #FF7A6E; }
+.rule.red .dia { background: #FF5A4E; box-shadow: 0 0 8px rgba(255, 90, 78, 0.7); }
 .gate-bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line-0); }
 /* the keys the System holds for you, one diamond each */
 .rg-keys { display: flex; align-items: center; gap: 6px; }

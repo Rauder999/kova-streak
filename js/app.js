@@ -1531,7 +1531,7 @@ function renderGate() {
   gh.append(canvas);
 
   const top = el('div', 'gh-top');
-  top.append(el('span', 'gh-name', '[ THE RED GATE ]'));
+  top.append(el('span', 'gh-name' + (inside && g.run.red ? ' red' : ''), inside && g.run.red ? '[ A RED GATE IS OPEN ]' : '[ THE GATE ]'));
   if (g) {
     const kw = el('span', 'gh-k');
     kw.append(keyMarks(g.keys, g.keysMax), el('span', 'n', `${g.keys} ${g.keys === 1 ? 'KEY' : 'KEYS'}`));
@@ -1572,6 +1572,8 @@ function renderGate() {
     if (g.open) {
       front.append(enterBtn('TURN A KEY', `${g.keys} IN HAND`, () => enterDescent(true)));
       front.append(el('span', 'gh-note', '[ Six ranks down. Everything you hold rides on each one. ]'));
+      // the rare gate is advertised, never hidden: the anticipation is the point
+      if (g.red) front.append(el('span', 'gh-note red', `1 KEY IN ${Math.round(1 / g.red.chance)} TEARS OPEN RED · THE ${g.ranks[4]} RANK ALONE PAYS ${g.red.claim[4]}`));
       if (!g.keyToday) front.append(el('span', 'gh-note dim', '[ Close today and the System cuts you another. ]'));
     } else {
       front.append(el('span', 'gh-shut', `[ ${g.why || 'The Gate is shut.'} ]`));
@@ -1593,46 +1595,64 @@ function renderGate() {
   // ---- the ladder: what each rank would hand over right now ----
   const two = el('div', 'row2');
   const lad = mkWin('grow');
-  lad.append(winHead('[ Six ranks down ]', 'WALK OUT WHENEVER YOU LIKE WITH THE SHARE YOUR DEPTH ALLOWS'));
+  // inside a red gate the ladder IS the red one; outside, the red prices ride
+  // alongside the ordinary ones so everybody knows what the 5% is worth
+  const inRed = inside && g.run.red;
+  const L = inside ? g.run : g;
+  lad.append(winHead('[ Six ranks down ]', inRed
+    ? 'YOU ARE IN A RED GATE · THESE ARE ITS ODDS AND ITS PRICES'
+    : 'WALK OUT WHENEVER YOU LIKE WITH THE SHARE YOUR DEPTH ALLOWS'));
   const lede = el('span', 'lede', 'Each rank is less likely to let you through than the last. Fail one and the Hoard keeps everything you were holding. The S rank takes the Hoard entire.');
   lede.style.cssText = 'display:block;margin-top:10px;max-width:62ch';
   lad.append(lede);
-  const ladder = el('div', 'gl');
+  const ladder = el('div', 'gl' + (inRed ? ' red' : ''));
   g.ranks.forEach((rank, i) => {
     const row = el('div', 'gl-step');
-    const claim = g.claim[i];
-    const whole = g.share[i] === null;
+    const claim = L.claim[i];
+    const whole = L.share[i] === null;
     if (inside && i < g.run.floor) row.classList.add('cleared');
     else if (inside && i === g.run.floor) row.classList.add('next');
     if (!claim) row.classList.add('dry');
     row.append(svgPlate(rank, i >= 4 ? METALS[0] : i >= 2 ? METALS[1] : 'plain'));
     const t = el('div', 'gl-t');
     t.append(el('span', 'gl-r', `${rank} RANK`));
-    t.append(el('span', 'gl-o', `${Math.round(g.survive[i] * 100)}% through · ${Math.round(g.survive.slice(0, i + 1).reduce((a, b) => a * b, 1) * 1000) / 10}% from the door`));
+    t.append(el('span', 'gl-o', `${Math.round(L.survive[i] * 100)}% through · ${Math.round(L.survive.slice(0, i + 1).reduce((a, b) => a * b, 1) * 1000) / 10}% from the door`));
     row.append(t);
     row.append(el('span', 'lead'));
+    if (!inside && g.red) {
+      const alt = el('span', 'gl-red', whole ? 'ALL' : String(g.red.claim[i]));
+      alt.title = 'what a red gate pays at this rank';
+      row.append(alt);
+    }
     row.append(el('span', 'gl-p', claim ? String(claim) : '--'));
     if (whole) row.append(el('span', 'gl-v', 'THE HOARD'));
     ladder.append(row);
   });
   lad.append(ladder);
+  if (!inside && g.red) {
+    const key = el('span', 'fine', `The red column is what a red gate pays at that rank. One key in ${Math.round(1 / g.red.chance)} opens one, and in there every rank keeps one more passage of ${g.doors} shut.`);
+    key.style.cssText = 'display:block;margin-top:14px';
+    lad.append(key);
+  }
   two.append(lad);
 
   // ---- the terms, in the group's own words ----
   const terms = mkWin('side wide');
   terms.append(winHead('[ The terms ]'));
-  for (const [what, amt] of [
-    ['A DAY CLOSED · ONE KEY CUT', '+1 KEY'],
-    ['KEYS THE SYSTEM WILL HOLD FOR YOU', String(g.keysMax)],
-    ['THE HOARD, EVERY NIGHT', '+1 LINK'],
-    ['EVERY DAY SOMEBODY LET GO', '+1 LINK'],
-    ['A RANK THAT TURNS YOU AWAY', 'THE HOARD KEEPS IT'],
-  ]) {
-    const r = el('div', 'rule');
+  const rows = [
+    ['A DAY CLOSED · ONE KEY CUT', '+1 KEY', ''],
+    ['KEYS THE SYSTEM WILL HOLD FOR YOU', String(g.keysMax), ''],
+    ['THE HOARD, EVERY NIGHT', '+1 LINK', ''],
+    ['EVERY DAY SOMEBODY LET GO', '+1 LINK', ''],
+    ['A RANK THAT TURNS YOU AWAY', 'THE HOARD KEEPS IT', ''],
+  ];
+  if (g.red) rows.push([`A KEY THAT OPENS A RED GATE`, `1 IN ${Math.round(1 / g.red.chance)}`, 'red']);
+  for (const [what, amt, cls] of rows) {
+    const r = el('div', 'rule' + (cls ? ' ' + cls : ''));
     r.append(el('span', 'dia'), el('span', null, what), el('span', 'lead'), el('span', 'amt', amt));
     terms.append(r);
   }
-  const fine = el('span', 'fine', 'The Gate costs training and never touches what you have saved: a key cannot be bought and cannot be traded. Everything it pays comes out of the Hoard, and the Hoard is fed by the group. Train well as a group and the Gate stays poor.');
+  const fine = el('span', 'fine', 'The Gate costs training and never touches what you have saved: a key cannot be bought and cannot be traded. Everything it pays comes out of the Hoard, red gates included, and the Hoard is fed by the group. Train well as a group and the Gate stays poor.');
   fine.style.cssText = 'display:block;margin-top:16px';
   terms.append(fine);
   two.append(terms);
@@ -1657,11 +1677,12 @@ async function enterDescent(fresh = false) {
       onEnd: (res) => {
         if (res) {
           state.gate = res;
+          const which = res.red ? 'RED GATE' : 'GATE';
           gateFlash = res.taken !== undefined
             ? { kind: 'ok', text: res.cleared
-              ? `[ S RANK. The Hoard left with you: ${res.taken} ${res.taken === 1 ? 'link' : 'links'}. ]`
-              : `[ Out of the ${res.rank} rank with ${res.taken} ${res.taken === 1 ? 'link' : 'links'}. ]` }
-            : { kind: 'err', text: `[ The ${res.rank} rank did not let you through. ]` };
+              ? `[ ${which} // S RANK. The Hoard left with you: ${res.taken} ${res.taken === 1 ? 'link' : 'links'}. ]`
+              : `[ ${which} // Out of the ${res.rank} rank with ${res.taken} ${res.taken === 1 ? 'link' : 'links'}. ]` }
+            : { kind: 'err', text: `[ ${which} // The ${res.rank} rank did not let you through. ]` };
         }
         loadVault();
         loadGate();

@@ -1258,8 +1258,8 @@ async function trialTurnover(env) {
   if (cur && !cur.announcedAt && !cur.resolved) await announceTrial(env, cur);
 }
 
-// ---------- The Red Gate ----------
-// A Red Gate in the System's world locks its hunters inside until it is
+// ---------- The Gate ----------
+// A gate in the System's world locks its hunters inside until it is
 // cleared. This one runs on KEYS, not links: one key for every day you
 // close, three held at most, never traded. Training is the only fuel, so
 // the Gate can never eat the savings the exchange is priced against, and a
@@ -1282,14 +1282,31 @@ async function trialTurnover(env) {
 // exists, so refreshing, disconnecting and ten parallel requests have
 // nothing to race for. KV has no transactions; this is the only safe shape.
 const GATE = {
-  name: 'The Red Gate',
+  name: 'The Gate',
   ranks: ['E', 'D', 'C', 'B', 'A', 'S'],
   survive: [0.90, 0.80, 0.70, 0.60, 0.50, 0.40],
   claim: [1, 2, 4, 7, 14, null], // null = the S rank takes the whole Hoard
   doors: 10, // every chance here is a tenth, so a rank is ten passages
   keysPerDay: 1,
   keysMax: 3,
+  // One descent in twenty tears open RED instead. Same six ranks and the same
+  // ten passages, but every rank keeps one more of them shut and every rank
+  // pays several times over. The prices rise faster than the odds fall on
+  // purpose: in a red gate the deep ranks are the best deal on the board,
+  // which is what makes a rare one worth taking risks in. Nothing is minted
+  // here either, so a red gate only changes who empties the Hoard and how
+  // fast, never how much there is.
+  redChance: 0.05,
+  red: {
+    name: 'A Red Gate',
+    survive: [0.80, 0.70, 0.60, 0.50, 0.40, 0.30],
+    claim: [2, 5, 12, 28, 70, null],
+  },
 };
+
+// The ladder a descent is being played on. A run that rolled red carries its
+// own odds and its own prices; everything else reads the house ladder.
+const gateLadder = (run) => (run && run.red ? GATE.red : GATE);
 const gateRunKey = (uid) => `gate:run:${uid}`;
 const gateKeysKey = (uid) => `keys:${uid}`;
 const HOARD_KEY = 'gate:hoard';
@@ -1309,8 +1326,8 @@ function gateRandom() {
 // The odds are unchanged, a rank that lets 60% through simply has six open
 // passages out of ten, which is also what makes a card that marks one
 // blocked passage a thing that can exist later.
-function rollLayout() {
-  return GATE.survive.map((p) => {
+function rollLayout(ladder = GATE) {
+  return ladder.survive.map((p) => {
     const open = Math.round(p * GATE.doors);
     const row = Array.from({ length: GATE.doors }, (_, i) => i < open);
     for (let i = row.length - 1; i > 0; i--) {
@@ -1334,9 +1351,9 @@ async function setHoard(env, hoard) {
 // What a rank can actually hand over right now: the rank's share, or what
 // is left of the Hoard when the Hoard is thinner than that. The S rank
 // takes everything. A thin Hoard is not a fault, it is the group training.
-const gateClaim = (floor, hoard) => {
+const gateClaim = (floor, hoard, ladder = GATE) => {
   if (floor < 1) return 0;
-  const share = GATE.claim[floor - 1];
+  const share = ladder.claim[floor - 1];
   return share === null ? hoard : Math.min(share, hoard);
 };
 
@@ -1396,19 +1413,28 @@ async function hoardSweep(env) {
 // be cashed for right now. Never the map of open passages.
 function publicRun(run, hoard) {
   if (!run) return null;
+  const L = gateLadder(run);
   return {
     id: run.id,
+    // which gate tore open is the one thing about the roll the client is
+    // told, because it decides every price and every odd from here on
+    red: !!run.red,
+    name: run.red ? GATE.red.name : GATE.name,
+    survive: L.survive,
+    claim: GATE.ranks.map((r, i) => gateClaim(i + 1, hoard, L)),
+    share: L.claim,
+    doors: GATE.doors,
     floor: run.floor,
     dead: false, // a dead descent is deleted, never handed back
     cleared: run.floor >= GATE.ranks.length,
-    holding: gateClaim(run.floor, hoard),
+    holding: gateClaim(run.floor, hoard, L),
     next: run.floor >= GATE.ranks.length ? null : {
       rank: GATE.ranks[run.floor],
-      survive: GATE.survive[run.floor],
+      survive: L.survive[run.floor],
       doors: GATE.doors,
-      open: Math.round(GATE.survive[run.floor] * GATE.doors),
-      claim: gateClaim(run.floor + 1, hoard),
-      whole: GATE.claim[run.floor] === null,
+      open: Math.round(L.survive[run.floor] * GATE.doors),
+      claim: gateClaim(run.floor + 1, hoard, L),
+      whole: L.claim[run.floor] === null,
     },
   };
 }
@@ -1450,6 +1476,15 @@ async function gateState(env, user) {
     open: !closed && keys.n > 0,
     sealed: !!closed,
     why,
+    // the rare gate is advertised, never hidden: the point of a 5% roll is
+    // that everybody knows it is on the table before they turn the key
+    red: {
+      name: GATE.red.name,
+      chance: GATE.redChance,
+      survive: GATE.red.survive,
+      claim: GATE.ranks.map((r, i) => gateClaim(i + 1, hoard, GATE.red)),
+      share: GATE.red.claim,
+    },
     run: publicRun(runRaw, hoard),
   };
 }
@@ -1719,7 +1754,7 @@ async function handleApi(request, env, url, cors, ctx) {
     const anchor = all[upD] && all[upD].done ? upD : today;
     const streak = computeStreak(all, anchor, rest);
 
-    // The Red Gate's fuel: one key for the day, cut once however many times
+    // The Gate's fuel: one key for the day, cut once however many times
     // this day's completion is posted, and never for a day left open.
     if (done) await awardGateKey(env, user.uid, body.date);
 
@@ -2092,7 +2127,7 @@ async function handleApi(request, env, url, cors, ctx) {
     return json({ ok: true, userId: uid, displayName: profile.displayName || 'unknown', dates, granted: vault.grantedDays, changed }, 200, cors);
   }
 
-  // ---------- The Red Gate ----------
+  // ---------- The Gate ----------
 
   if (path === '/api/gate' && request.method === 'GET') {
     return json(await gateState(env, user), 200, cors);
@@ -2109,9 +2144,13 @@ async function handleApi(request, env, url, cors, ctx) {
     const date = groupDate(env);
     const left = await spendGateKey(env, user.uid);
     if (left === null) return json({ error: 'No keys.' }, 400, cors);
+    // which gate opens is rolled here, once, with the same coin as the
+    // passages: nothing the client sends can ask for a red one
+    const red = gateRandom() < GATE.redChance;
     const run = {
       id: `${user.uid}-${date}-${Date.now().toString(36)}`,
-      layout: rollLayout(), // every rank's passages, drawn now and never shown
+      red,
+      layout: rollLayout(red ? GATE.red : GATE), // every rank's passages, drawn now and never shown
       floor: 0,
       date,
       startedAt: Date.now(),
@@ -2142,18 +2181,20 @@ async function handleApi(request, env, url, cors, ctx) {
     const dead = !row[door];
     run.floor++;
     const rank = GATE.ranks[run.floor - 1];
+    const L = gateLadder(run);
     if (dead) {
       await env.KOVA.delete(gateRunKey(user.uid));
       // The Hoard keeps what they were holding, exactly as the System says.
       // This is not flavour: it is what keeps the Gate solvent. Entry costs a
       // key, so without it the Hoard would only ever be drained and the ladder
-      // would pay its full share about never.
-      const forfeit = run.floor >= 2 ? (GATE.claim[run.floor - 2] || 0) : 0;
+      // would pay its full share about never. A red gate forfeits its own
+      // prices, which is what pays for a red gate's bigger payouts.
+      const forfeit = run.floor >= 2 ? (L.claim[run.floor - 2] || 0) : 0;
       if (forfeit > 0) await setHoard(env, (await getHoard(env)) + forfeit);
-      // only a deep loss is worth the channel's attention
-      if (run.floor >= 5 && ctx) {
+      // only a deep loss is worth the channel's attention, and a red one always is
+      if ((run.floor >= 5 || (run.red && run.floor >= 3)) && ctx) {
         ctx.waitUntil(announceGate(env, [
-          `[GATE // ${user.name} reached the ${rank} rank and did not come back. The Hoard keeps the ${forfeit} they were holding.]`,
+          `[${run.red ? 'RED GATE' : 'GATE'} // ${user.name} reached the ${rank} rank and did not come back. The Hoard keeps the ${forfeit} they were holding.]`,
         ]));
       }
     } else {
@@ -2164,6 +2205,7 @@ async function handleApi(request, env, url, cors, ctx) {
       ok: true,
       dead,
       rank,
+      red: !!run.red,
       door,
       // the rank is resolved, so its passages can be shown: it tells the
       // story of the choice and gives away nothing about what is below
@@ -2181,26 +2223,28 @@ async function handleApi(request, env, url, cors, ctx) {
 
     const cleared = run.floor >= GATE.ranks.length;
     const hoard = await getHoard(env);
-    const taken = gateClaim(run.floor, hoard);
+    const taken = gateClaim(run.floor, hoard, gateLadder(run));
     const rank = GATE.ranks[run.floor - 1];
     await setHoard(env, hoard - taken);
     // the run id makes the credit idempotent: two tabs racing pay once
     const total = await addLinks(env, user.uid, taken, `gate ${rank} rank`, run.id);
     await env.KOVA.delete(gateRunKey(user.uid));
 
+    const tag = run.red ? 'RED GATE' : 'GATE';
     if (ctx && (cleared || taken >= 7)) {
       ctx.waitUntil(announceGate(env, cleared
         ? [
-          `[GATE // ${user.name} CLEARED THE S RANK.]`,
-          `[The Hoard is theirs: ${taken} ${taken === 1 ? 'link' : 'links'}. Six floors, ${(GATE.survive.reduce((a, b) => a * b, 1) * 100).toFixed(1)}% of descents end this way. It is empty now, and it starts filling tonight.]`,
+          `[${tag} // ${user.name} CLEARED THE S RANK.]`,
+          `[The Hoard is theirs: ${taken} ${taken === 1 ? 'link' : 'links'}. Six floors, ${(gateLadder(run).survive.reduce((a, b) => a * b, 1) * 100).toFixed(1)}% of descents end this way. It is empty now, and it starts filling tonight.]`,
         ]
-        : [`[GATE // ${user.name} walked out of the ${rank} rank with ${taken} ${taken === 1 ? 'link' : 'links'}. The Hoard holds ${hoard - taken}.]`]));
+        : [`[${tag} // ${user.name} walked out of the ${rank} rank with ${taken} ${taken === 1 ? 'link' : 'links'}. The Hoard holds ${hoard - taken}.]`]));
     }
     return json({
       ok: true,
       taken,
       cleared,
       rank,
+      red: !!run.red,
       links: total,
       ...(await gateState(env, user)),
     }, 200, cors);
@@ -2742,7 +2786,7 @@ async function postDigest(env) {
   // the Gate's Vault, so the pot is public pressure
   try {
     const hoard = await getHoard(env);
-    if (hoard >= 8) lines.push(`[THE RED GATE // the Hoard holds ${hoard} links. Reach the S rank and all of it leaves with you.]`);
+    if (hoard >= 8) lines.push(`[THE GATE // the Hoard holds ${hoard} links. Reach the S rank and all of it leaves with you.]`);
   } catch { /* the Gate never breaks the digest */ }
 
   const roleId = await env.KOVA.get('config:aimChadRoleId');

@@ -1,8 +1,9 @@
-# The Red Gate
+# The Gate
 
-A Red Gate in the System's world locks its hunters inside until it is
-cleared. This one is the group's gambling table, built 2026-09-15 and
-rebuilt on keys 2026-09-16 on Rauder's brief.
+A gate in the System's world locks its hunters inside until it is cleared.
+This one is the group's gambling table, built 2026-09-15, rebuilt on keys
+2026-09-16 and given its rare red variant the same day, all on Rauder's
+brief.
 
 ## The loop
 
@@ -22,6 +23,40 @@ Hoard keeps what you were holding.
 | B | 60% | 30.2% | 7 |
 | A | 50% | 15.1% | 14 |
 | S | 40% | 6.0% | the whole Hoard |
+
+## Red gates
+
+**One key in twenty tears open red instead.** Same six ranks, same ten
+passages, but every rank keeps one more of them shut and every rank pays
+several times over.
+
+| Rank | Through | From the door | You may claim |
+|------|---------|---------------|---------------|
+| E | 80% | 80.0% | 2 |
+| D | 70% | 56.0% | 5 |
+| C | 60% | 33.6% | 12 |
+| B | 50% | 16.8% | 28 |
+| A | 40% | 6.7% | 70 |
+| S | 30% | 2.0% | the whole Hoard |
+
+The prices rise faster than the odds fall, on purpose. Stopping at the E
+rank of a red gate is worth 1.6 links on average and pushing to the A rank
+is worth 4.7, where the ordinary ladder is flat at about 2.1 from the C
+rank down. So in a red gate the deep ranks are the best deal on the board,
+which is the only thing that makes a rare gate worth taking risks in, and
+the forfeit is on the same scale: a red B rank that turns you away hands
+the Hoard 28 links back.
+
+None of this mints anything. Red gates draw from the same Hoard under the
+same cap, so they change who empties it and how fast, never how much there
+is. Across a 400 day simulation they account for one to four percent of all
+payouts. Which gate you got is rolled by the Worker at entry with the same
+coin as the passages, and nothing the client sends can ask for a red one.
+
+The roll is advertised everywhere rather than hidden: the hall states the
+odds and the A rank's price, the ladder carries the red column beside the
+ordinary one, and the descent opens on a stamp naming the gate and its
+terms. The anticipation is the feature.
 
 ## Why keys and not links
 
@@ -110,17 +145,25 @@ collapse, no double payout, and the Hoard balancing on every path.
 ## The look
 
 The Gate has its own tab, not a window in the Vault: a key costs a whole
-day of training, so the screen that takes it is the hall, one canvas of a
-standing arch with the Hoard's light pooling in its mouth and exactly one
-control in front of it. The ladder and the terms under it are flat and
-still, one accent, rows, the way the constitution asks.
+day of training, so the screen that takes it is the hall, one canvas and
+exactly one control in front of it. A flat outline on a dark rectangle
+reads as a wireframe, which is what the first pass of that screen was, so
+the hall is built instead: the mouth is a corridor of nested arches
+receding to a vanishing point with the Hoard burning at the far end, the
+stone has an outer frame and an inner reveal with a rune frieze in the
+band between them, the legs stand on plinths, and the floor carries the
+arch's reflection, the light it spills and lines running back to the same
+vanishing point. The ladder and the terms under it are flat and still, one
+accent, rows, the way the constitution asks.
 
 The descent is an **event**, and the constitution leaves event motion
 free, so it takes the whole screen: a shaft with six rune seals receding
 to a vanishing point, the rim of your own seal answering while you stand
 over the mouth you picked, and then the fall. The cleared seal burns
 violet behind you; the one that turns you away goes red and throws you
-back up the shaft. Sound is synthesized, nothing is loaded over the
+back up the shaft. A red gate repaints all of it vermilion from one
+palette, and in there a rank that turns you away flashes white, because
+red on red says nothing. Sound is synthesized, nothing is loaded over the
 network, and reduced motion skips straight to the verdict.
 
 Below the D rank something can take hold of you: five clicks break it, a

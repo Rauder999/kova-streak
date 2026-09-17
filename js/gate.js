@@ -25,8 +25,6 @@
 // Self-contained: DOM, one canvas and WebAudio. It knows nothing about the
 // API; app.js hands it the callbacks and the state they return.
 
-const ACCENT = '#8B7CFF';
-const ACCENT_SOFT = '#CFC9FF';
 const GOLD = '#E8B64A';
 const BAD = '#E5484D';
 const OK = '#4CC38A';
@@ -35,13 +33,28 @@ const SPACING = 520;          // world units between seals
 const FLOORS = 6;
 const THRESHOLD = -SPACING;   // the mouth of the Gate, where a descent starts
 const FALL = { walk: 340, reveal: 760, drop: 620 };
-// the air warms as you go down: the Hoard's own light, bleeding up the shaft
-const AIR_NEAR = [96, 66, 190];
-const AIR_DEEP = [168, 104, 44];
-const POOL_NEAR = [139, 124, 255];
-const POOL_DEEP = [214, 168, 96];
 const mix = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
 const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+
+// Two gates, two worlds. The air warms as you go down in either, because
+// that is the Hoard's own light bleeding up the shaft, but a red gate is
+// lit by the gate itself: vermilion stone, a hot ember ground, and a hunter
+// who can tell at a glance that tonight is not an ordinary night. A rank
+// that turns you away flashes WHITE in there, since red on red says nothing.
+const PALETTES = {
+  normal: {
+    line: '#8B7CFF', soft: '#CFC9FF',
+    air: [96, 66, 190], airDeep: [168, 104, 44],
+    pool: [139, 124, 255], poolDeep: [214, 168, 96],
+    fail: BAD, failFlash: BAD, open: '#3A1440',
+  },
+  red: {
+    line: '#FF5A4E', soft: '#FFC7BC',
+    air: [150, 46, 40], airDeep: [204, 104, 40],
+    pool: [255, 110, 88], poolDeep: [240, 168, 96],
+    fail: '#8E1014', failFlash: '#FFFFFF', open: '#4A0A10',
+  },
+};
 
 const el = (tag, cls, text) => {
   const n = document.createElement(tag);
@@ -124,6 +137,16 @@ const snd = {
     noise({ dur: 0.7, gain: 0.16, from: 4200, to: 400, type: 'bandpass', q: 0.8, delay: 0.95 });
     [261.63, 392.0, 523.25].forEach((f, i) => tone(f, { dur: 1.6, gain: 0.05, type: 'sine', delay: 1.0 + i * 0.09 }));
   },
+  // a red gate does not open, it tears: the same swell, pitched lower, with
+  // a shear across it and a minor chord where the major one would have been
+  openRed() {
+    noise({ dur: 1.9, gain: 0.26, from: 60, to: 3400, type: 'bandpass', q: 0.5, attack: 0.66 });
+    tone(33, { dur: 2.6, gain: 0.34, type: 'sine', to: 20 });
+    tone(49.5, { dur: 2.6, gain: 0.13, type: 'sawtooth', to: 31 });
+    noise({ dur: 0.5, gain: 0.3, from: 6000, to: 260, type: 'bandpass', q: 0.9, delay: 1.05 });
+    tone(110, { dur: 1.1, gain: 0.12, type: 'sawtooth', to: 55, delay: 1.1 });
+    [233.08, 277.18, 349.23].forEach((f, i) => tone(f, { dur: 2.0, gain: 0.055, type: 'sine', delay: 1.2 + i * 0.11 }));
+  },
   hover() { tone(1174.66, { dur: 0.06, gain: 0.02, type: 'sine' }); },
   step() {
     noise({ dur: 0.22, gain: 0.07, from: 700, to: 2200, type: 'bandpass', q: 1.2, attack: 0.6 });
@@ -174,11 +197,12 @@ const snd = {
 // ---------- the shaft ----------
 
 class Shaft {
-  constructor(canvas, ranks, doors) {
+  constructor(canvas, ranks, doors, pal) {
     this.c = canvas;
     this.x = canvas.getContext('2d');
     this.ranks = ranks;
     this.doors = doors;
+    this.pal = pal || PALETTES.normal;
     this.standing = -1;       // the seal under your feet; -1 is the threshold
     this.cam = THRESHOLD;
     this.camTarget = THRESHOLD;
@@ -493,8 +517,8 @@ class Shaft {
     }
   }
 
-  air() { return mix(AIR_NEAR, AIR_DEEP, this.depth); }
-  poolRgb() { return mix(POOL_NEAR, POOL_DEEP, this.depth); }
+  air() { return mix(this.pal.air, this.pal.airDeep, this.depth); }
+  poolRgb() { return mix(this.pal.pool, this.pal.poolDeep, this.depth); }
 
   // What is below, glowing up at you. Anchored to the vanishing point, not
   // to the seal under your feet: anchoring it to the seal made the whole
@@ -606,8 +630,8 @@ class Shaft {
     if (alpha < 0.02) return;
     const brk = isBroken ? clamp(this.breakT / 0.6, 0, 1) : 0;
     const live = here || passed || isBroken;
-    const color = isBroken ? BAD : live ? ACCENT : '#6E7A93';
-    const bright = isBroken ? '#FF9E9E' : live ? ACCENT_SOFT : '#9AA6BC';
+    const color = isBroken ? BAD : live ? this.pal.line : '#6E7A93';
+    const bright = isBroken ? '#FF9E9E' : live ? this.pal.soft : '#9AA6BC';
     const spin = here ? 0 : this.spin * (passed ? 0.5 : 0.28) + i * 0.9;
 
     x.save();
@@ -705,8 +729,8 @@ class Shaft {
     // the rank's letter, upright beside its seal
     x.save();
     x.globalAlpha = (live ? 0.95 : 0.5) * (1 - brk) * alpha;
-    x.fillStyle = isBroken ? BAD : live ? ACCENT_SOFT : '#8592A8';
-    x.shadowColor = isBroken ? BAD : ACCENT;
+    x.fillStyle = isBroken ? BAD : live ? this.pal.soft : '#8592A8';
+    x.shadowColor = isBroken ? BAD : this.pal.line;
     x.shadowBlur = here ? 18 : 8;
     x.font = `700 ${Math.round(clamp(34 * s, 11, 40))}px Rajdhani, sans-serif`;
     x.textAlign = 'left';
@@ -720,11 +744,12 @@ class Shaft {
     const { x } = this;
     const revealed = this.row !== null;
     const reveal = revealed ? clamp(this.revealT / 0.5, 0, 1) : 0;
+    const rim = this.poolRgb();
     for (const p of this.doorPositions()) {
       const open = revealed ? !!this.row[p.i] : null;
       const isChosen = p.i === this.chosen;
       const hot = !revealed && p.i === this.hover;
-      const color = revealed ? (open ? OK : BAD) : hot ? '#FFFFFF' : ACCENT_SOFT;
+      const color = revealed ? (open ? OK : BAD) : hot ? '#FFFFFF' : this.pal.soft;
       const a = (revealed ? 0.3 + reveal * 0.7 : hot ? 1 : 0.7) * alpha;
       const r = p.r * (hot ? 1.22 : 1) * (isChosen ? 1.3 : 1);
       x.save();
@@ -743,8 +768,8 @@ class Shaft {
       const fill = x.createLinearGradient(0, -r * 0.7, 0, r * 0.36);
       if (revealed && open) { fill.addColorStop(0, 'rgba(76,195,138,0.45)'); fill.addColorStop(1, 'rgba(76,195,138,0.06)'); }
       else if (revealed) { fill.addColorStop(0, 'rgba(229,72,77,0.42)'); fill.addColorStop(1, 'rgba(229,72,77,0.05)'); }
-      else if (hot) { fill.addColorStop(0, 'rgba(226,222,255,0.62)'); fill.addColorStop(1, 'rgba(139,124,255,0.1)'); }
-      else { fill.addColorStop(0, 'rgba(139,124,255,0.3)'); fill.addColorStop(1, 'rgba(139,124,255,0.03)'); }
+      else if (hot) { fill.addColorStop(0, 'rgba(255,255,255,0.62)'); fill.addColorStop(1, rgba(rim, 0.1)); }
+      else { fill.addColorStop(0, rgba(rim, 0.3)); fill.addColorStop(1, rgba(rim, 0.03)); }
       arch();
       x.fillStyle = fill;
       x.fill();
@@ -802,9 +827,10 @@ class Shaft {
 
     // the trail, while falling
     if (this.fall) {
+      const trail = this.poolRgb();
       const t = x.createLinearGradient(px, py - r * 7, px, py);
-      t.addColorStop(0, 'rgba(207,201,255,0)');
-      t.addColorStop(1, 'rgba(226,222,255,0.6)');
+      t.addColorStop(0, rgba(trail, 0));
+      t.addColorStop(1, 'rgba(255,255,255,0.6)');
       x.save();
       x.globalAlpha = o;
       x.fillStyle = t;
@@ -821,16 +847,17 @@ class Shaft {
     x.save();
     x.translate(px, py);
     x.globalAlpha = o;
+    const hc = this.poolRgb();
     const halo = x.createRadialGradient(0, 0, 0, 0, 0, r * 5);
-    halo.addColorStop(0, 'rgba(226,222,255,0.55)');
-    halo.addColorStop(0.35, 'rgba(139,124,255,0.22)');
-    halo.addColorStop(1, 'rgba(139,124,255,0)');
+    halo.addColorStop(0, 'rgba(255,255,255,0.55)');
+    halo.addColorStop(0.35, rgba(hc, 0.22));
+    halo.addColorStop(1, rgba(hc, 0));
     x.fillStyle = halo;
     x.beginPath();
     x.arc(0, 0, r * 5, 0, Math.PI * 2);
     x.fill();
     x.rotate(now / 1100);
-    x.shadowColor = ACCENT_SOFT;
+    x.shadowColor = this.pal.soft;
     x.shadowBlur = 26;
     x.fillStyle = '#FFFFFF';
     x.beginPath();
@@ -884,10 +911,18 @@ class Shaft {
 export function openDescent(opts) {
   if (document.querySelector('.rg')) return;
   const gate = opts.gate;
+  const run0 = gate.run || {};
   const ranks = gate.ranks;
-  const DOORS = gate.doors || 10;
+  // Which gate tore open was decided at entry. A red one plays on its own
+  // ladder, so every odd, every price and every colour below comes off the
+  // run and not off the house table.
+  const RED = !!run0.red;
+  const pal = RED ? PALETTES.red : PALETTES.normal;
+  const survive = run0.survive || gate.survive;
+  const claims = run0.claim || gate.claim;
+  const DOORS = run0.doors || gate.doors || 10;
 
-  const overlay = el('div', 'rg');
+  const overlay = el('div', 'rg' + (RED ? ' red' : ''));
   const canvas = el('canvas', 'rg-fx');
   const veil = el('div', 'rg-veil');
   const hud = el('div', 'rg-hud');
@@ -895,14 +930,14 @@ export function openDescent(opts) {
   const top = el('div', 'rg-top');
   const hoard = el('div', 'rg-hoard');
   hoard.append(el('span', 'l', 'HOARD'), el('span', 'v', String(gate.hoard)));
-  top.append(el('div', 'rg-title', '[ THE RED GATE ]'), hoard);
+  top.append(el('div', 'rg-title', RED ? '[ A RED GATE ]' : '[ THE GATE ]'), hoard);
 
   // the depth gauge: the shaft goes dark below the next rank, so how far
   // down you are is read here instead
   const ladder = el('div', 'rg-ladder');
   const rungs = ranks.map((r, i) => {
     const row = el('div', 'rg-rung');
-    row.append(el('span', 'r', r), el('span', 'c', String(gate.claim[i])), el('i'));
+    row.append(el('span', 'r', r), el('span', 'c', String(claims[i])), el('i'));
     ladder.append(row);
     return row;
   });
@@ -910,7 +945,7 @@ export function openDescent(opts) {
     row.classList.toggle('done', i < floor);
     row.classList.toggle('now', i === floor - 1);
     row.classList.toggle('next', i === floor);
-    row.querySelector('.c').textContent = i === ranks.length - 1 ? String(hoardNow) : String(Math.min(gate.claim[i], hoardNow));
+    row.querySelector('.c').textContent = i === ranks.length - 1 ? String(hoardNow) : String(Math.min(claims[i], hoardNow));
   });
 
   const mid = el('div', 'rg-mid');
@@ -923,7 +958,18 @@ export function openDescent(opts) {
 
   const say = el('div', 'rg-say');
   const bar = el('div', 'rg-bar');
-  const slam = el('div', 'rg-slam', 'THE RED GATE');
+
+  // The stamp that lands as the rift finishes tearing. It names the gate and
+  // states its terms, because a hunter who spent a day on this key is owed
+  // the answer to "what did I get" before the first passage is offered.
+  const openFirst = Math.round(survive[0] * DOORS);
+  const openLast = Math.round(survive[FLOORS - 1] * DOORS);
+  const slam = el('div', 'rg-slam' + (RED ? ' red' : ''));
+  if (RED) slam.append(el('span', 'k', '[ THIS IS NOT AN ORDINARY GATE ]'));
+  slam.append(el('span', 'n', RED ? 'A RED GATE' : 'THE GATE'));
+  slam.append(el('span', 's', RED
+    ? `Every rank keeps one more passage shut, and every rank pays several times over. ${openFirst} of ${DOORS} open at the ${ranks[0]} rank, ${openLast} at the ${ranks[FLOORS - 1]}. The ${ranks[4]} rank alone is worth ${claims[4]}.`
+    : `Six ranks down. ${openFirst} passages of ${DOORS} open at the ${ranks[0]} rank, ${openLast} at the ${ranks[FLOORS - 1]}. Walk out whenever you like.`));
   hud.append(top, ladder, mid, say, bar);
   overlay.append(canvas, el('div', 'rg-side l'), el('div', 'rg-side r'), veil, hud, slam);
   document.body.append(overlay);
@@ -936,7 +982,7 @@ export function openDescent(opts) {
   let holding = gate.run ? gate.run.holding : 0;
   let hoardNow = gate.hoard;
   const later = (fn, ms) => { const t = setTimeout(() => { if (!ended) fn(); }, ms); timers.push(t); return t; };
-  const shaft = reduced() ? null : new Shaft(canvas, ranks, DOORS);
+  const shaft = reduced() ? null : new Shaft(canvas, ranks, DOORS, pal);
   overlay.__scene = shaft;
 
   const finish = (result) => {
@@ -989,9 +1035,8 @@ export function openDescent(opts) {
       setSay('Nothing is below you but the Hoard.', 'gold');
       return;
     }
-    const chance = Math.round(gate.survive[floor] * 100);
-    const open = Math.round(gate.survive[floor] * DOORS);
-    const claim = Math.min(gate.claim[floor], hoardNow);
+    const open = Math.round(survive[floor] * DOORS);
+    const claim = Math.min(claims[floor], hoardNow);
     rankLine.textContent = floor === 0 ? 'THE THRESHOLD' : `${ranks[floor - 1]} RANK`;
     setSay(`${DOORS} passages lead down to the ${ranks[floor]} rank. ${open} of them are open. ${floor + 1 === FLOORS ? 'Beyond is the Hoard.' : `Beyond is ${claim}.`}`);
   };
@@ -1002,17 +1047,22 @@ export function openDescent(opts) {
     shaft.standing = floor - 1;
     shaft.cam = shaft.camTarget = shaft.worldOf(floor - 1);
     shaft.markerY = shaft.worldOf(floor - 1);
-    shaft.flash = 0.55;
-    shaft.flashColor = '#3A1440';
-    shaft.wave(shaft.worldOf(floor - 1), ACCENT_SOFT, 900, 1.5);
-    snd.open();
+    shaft.flash = RED ? 0.8 : 0.55;
+    shaft.flashColor = pal.open;
+    shaft.shake = RED ? 20 : 0;
+    shaft.wave(shaft.worldOf(floor - 1), pal.soft, 900, 1.5);
+    if (RED) snd.openRed(); else snd.open();
   }
   if (resumed) setHolding(holding);
-  setSay(resumed ? `You are still inside, ${ranks[floor - 1]} rank, holding ${holding}.` : 'The seal gives. The shaft opens under you.');
+  setSay(resumed
+    ? `You are still inside, ${ranks[floor - 1]} rank, holding ${holding}.`
+    : RED ? 'The seal does not give. It burns through.' : 'The seal gives. The shaft opens under you.');
   overlay.classList.add('on');
   later(() => slam.classList.add('go'), 220);
-  later(() => slam.remove(), 2400);
-  later(() => { busy = false; renderBar(); promptDoors(); }, reduced() ? 60 : 1500);
+  // a red gate is told at length, so its stamp is held longer and the first
+  // passage is not offered until the terms have been read
+  later(() => slam.remove(), RED ? 4600 : 3000);
+  later(() => { busy = false; renderBar(); promptDoors(); }, reduced() ? 60 : (RED ? 3600 : 2100));
 
   // ---- picking a passage ----
   canvas.addEventListener('mousemove', (e) => {
@@ -1068,9 +1118,11 @@ export function openDescent(opts) {
         shaft.cancelMove();
         shaft.broken = target;
         shaft.breakT = 0;
-        shaft.flash = 0.85;
-        shaft.flashColor = BAD;
-        shaft.shake = 22;
+        // in a red gate the whole shaft is already red, so the rank that
+        // turns you away goes white-hot instead: it has to read instantly
+        shaft.flash = RED ? 1 : 0.85;
+        shaft.flashColor = pal.failFlash;
+        shaft.shake = RED ? 30 : 22;
         shaft.wave(shaft.worldOf(target - 1), BAD, 1200, 1.2);
         shaft.burst(shaft.worldOf(target - 1), BAD, 80, 620, 110);
         shaft.camTarget = shaft.worldOf(target - 1) - SPACING * 0.45;
@@ -1096,10 +1148,10 @@ export function openDescent(opts) {
       if (ended) return;
       shaft.standing = floor - 1;
       shaft.flash = 0.22;
-      shaft.flashColor = ACCENT_SOFT;
+      shaft.flashColor = pal.soft;
       shaft.shake = 11;
-      shaft.wave(shaft.worldOf(floor - 1), ACCENT_SOFT, 800, 0.9);
-      shaft.burst(shaft.worldOf(floor - 1), ACCENT_SOFT, 38, 320, 90);
+      shaft.wave(shaft.worldOf(floor - 1), pal.soft, 800, 0.9);
+      shaft.burst(shaft.worldOf(floor - 1), pal.soft, 38, 320, 90);
     }
     snd.land(floor - 1);
     setHolding(res.run ? res.run.holding : holding);
@@ -1160,7 +1212,7 @@ export function openDescent(opts) {
       if (shaft) shaft.grip = 0;
       if (freed) {
         snd.free();
-        if (shaft) { shaft.flash = 0.3; shaft.flashColor = ACCENT_SOFT; shaft.shake = 10; }
+        if (shaft) { shaft.flash = 0.3; shaft.flashColor = pal.soft; shaft.shake = 10; }
         setSay('Loose. It did not get to keep you.');
         busy = false;
         promptDoors();
@@ -1209,8 +1261,9 @@ export function openDescent(opts) {
   function verdict(won, res) {
     if (ended) return;
     hud.classList.add('gone');
-    const card = el('div', 'rg-card' + (won ? ' win' : ' loss'));
-    card.append(el('span', 'k', won ? '[ THE GATE RELEASES YOU ]' : '[ THE GATE CLOSES ]'));
+    const card = el('div', 'rg-card' + (won ? ' win' : ' loss') + (RED ? ' red' : ''));
+    const which = RED ? 'THE RED GATE' : 'THE GATE';
+    card.append(el('span', 'k', won ? `[ ${which} RELEASES YOU ]` : `[ ${which} CLOSES ]`));
 
     // The number is the only thing on this card anybody reads, and it is what
     // a whole day of training bought, so it gets a struck plate of its own:
@@ -1235,7 +1288,9 @@ export function openDescent(opts) {
       lines.append(el('p', null, `The Hoard holds ${res.hoard}. It was there for the taking, and some of it still is.`));
     } else {
       lines.append(el('p', null, `The passage you picked at the ${res.rank} rank was blocked. Nothing leaves with you.`));
-      lines.append(el('p', null, `The Hoard holds ${res.hoard}, and keys are cut for closed days. Close tomorrow and come back.`));
+      lines.append(el('p', null, RED
+        ? `A red gate opens about one descent in twenty, and that one is spent. The Hoard holds ${res.hoard}. Close tomorrow and come back.`
+        : `The Hoard holds ${res.hoard}, and keys are cut for closed days. Close tomorrow and come back.`));
     }
     card.append(lines);
     // This closes the shaft and puts you back in front of the Gate; it does
