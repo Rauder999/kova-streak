@@ -2189,8 +2189,15 @@ async function handleApi(request, env, url, cors, ctx) {
       // key, so without it the Hoard would only ever be drained and the ladder
       // would pay its full share about never. A red gate forfeits its own
       // prices, which is what pays for a red gate's bigger payouts.
-      const forfeit = run.floor >= 2 ? (L.claim[run.floor - 2] || 0) : 0;
-      if (forfeit > 0) await setHoard(env, (await getHoard(env)) + forfeit);
+      //
+      // Capped by the Hoard, because that is what they were holding: a rank's
+      // share is trimmed to the Hoard when the Hoard is thinner than it, and
+      // handing back the untrimmed share would put links in the pot that
+      // never existed. A red A rank is worth 70 against a Hoard that is often
+      // under that, so this is not a corner case.
+      const hoardNow = await getHoard(env);
+      const forfeit = run.floor >= 2 ? gateClaim(run.floor - 1, hoardNow, L) : 0;
+      if (forfeit > 0) await setHoard(env, hoardNow + forfeit);
       // only a deep loss is worth the channel's attention, and a red one always is
       if ((run.floor >= 5 || (run.red && run.floor >= 3)) && ctx) {
         ctx.waitUntil(announceGate(env, [
@@ -2205,12 +2212,14 @@ async function handleApi(request, env, url, cors, ctx) {
       ok: true,
       dead,
       rank,
-      red: !!run.red,
       door,
       // the rank is resolved, so its passages can be shown: it tells the
       // story of the choice and gives away nothing about what is below
       row,
       ...(await gateState(env, user)),
+      // after the spread on purpose: gateState carries `red`, the advertised
+      // red ladder, and an outcome flag called `red` was being clobbered by it
+      redGate: !!run.red,
       run: dead ? null : publicRun(run, hoard),
     }, 200, cors);
   }
@@ -2244,9 +2253,9 @@ async function handleApi(request, env, url, cors, ctx) {
       taken,
       cleared,
       rank,
-      red: !!run.red,
       links: total,
       ...(await gateState(env, user)),
+      redGate: !!run.red, // after the spread: gateState has its own `red`
     }, 200, cors);
   }
 

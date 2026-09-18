@@ -1682,7 +1682,7 @@ async function enterDescent(fresh = false) {
       onEnd: (res) => {
         if (res) {
           state.gate = res;
-          const which = res.red ? 'RED GATE' : 'GATE';
+          const which = res.redGate ? 'RED GATE' : 'GATE';
           gateFlash = res.taken !== undefined
             ? { kind: 'ok', text: res.cleared
               ? `[ ${which} // S RANK. The Hoard left with you: ${res.taken} ${res.taken === 1 ? 'link' : 'links'}. ]`
