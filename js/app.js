@@ -3039,9 +3039,15 @@ function renderGateAdminWindow() {
   act(seal, async () => { const r = await api.setGate({ closed: true }); return r.closed ? '[ Sealed. Nobody can enter. ]' : '[ Open. ]'; });
   const open = el('button', 'btn ghost', 'Open the Gate');
   act(open, async () => { const r = await api.setGate({ closed: false }); return r.closed ? '[ Sealed. ]' : '[ Open again. ]'; });
-  form.append(el('span', 'rest-dash', 'hoard'), potIn, setPot, feed, cutKey, seal, open);
+  // the reveal is yours to time: while this is on, the Gate plays but says
+  // nothing in the channel, not a deep run and not the digest line
+  const hush = el('button', 'btn ghost', 'Keep it quiet');
+  act(hush, async () => { const r = await api.setGate({ quiet: true }); return r.quiet ? '[ Quiet. The Gate says nothing in the channel. ]' : '[ Talking. ]'; });
+  const talk = el('button', 'btn ghost', 'Let it talk');
+  act(talk, async () => { const r = await api.setGate({ quiet: false }); return r.quiet ? '[ Still quiet. ]' : '[ The Gate talks again: deep runs and the digest line. ]'; });
+  form.append(el('span', 'rest-dash', 'hoard'), potIn, setPot, feed, cutKey, seal, open, hush, talk);
   win.append(form, msg);
-  const fine = el('span', 'fine', 'The Hoard eats at the 03:30 sweep: one link for the day plus one for every player who let it go. Everything the Gate pays comes out of it, so the link supply grows by exactly that and no more, and a group that trains well keeps the Gate poor. Seal it if it ever stops being fun. Setting the Hoard, feeding it early and cutting keys are for testing.');
+  const fine = el('span', 'fine', 'The Hoard eats at the 03:30 sweep: one link for the day plus one for every player who let it go. Everything the Gate pays comes out of it, so the link supply grows by exactly that and no more, and a group that trains well keeps the Gate poor. Seal it if it ever stops being fun. While it is kept quiet the Gate runs normally but never posts: no deep run, no Hoard line in the digest. Setting the Hoard, feeding it early and cutting keys are for testing.');
   fine.style.cssText = 'display:block;margin-top:14px';
   win.append(fine);
   return win;

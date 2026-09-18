@@ -1489,7 +1489,15 @@ async function gateState(env, user) {
   };
 }
 
+// Rauder holds the reveal until he is ready to tell the group himself
+// (2026-09-18): while gate:quiet is set, nothing the Gate does reaches the
+// channel, neither a deep run nor the Hoard's line in the digest. The Gate
+// itself runs normally, it just does not talk.
+const GATE_QUIET_KEY = 'gate:quiet';
+const gateQuiet = async (env) => !!(await env.KOVA.get(GATE_QUIET_KEY));
+
 async function announceGate(env, lines) {
+  if (await gateQuiet(env)) return;
   await postSystemLines(env, lines);
 }
 
@@ -2268,6 +2276,10 @@ async function handleApi(request, env, url, cors, ctx) {
       if (body.closed) await env.KOVA.put(GATE_CLOSED_KEY, '1');
       else await env.KOVA.delete(GATE_CLOSED_KEY);
     }
+    if (typeof body.quiet === 'boolean') {
+      if (body.quiet) await env.KOVA.put(GATE_QUIET_KEY, '1');
+      else await env.KOVA.delete(GATE_QUIET_KEY);
+    }
     if (body.hoard !== undefined) await setHoard(env, Math.min(100000, Number(body.hoard) || 0));
     if (body.keyFor && /^\d{1,25}$/.test(String(body.keyFor))) {
       // a key outside the daily cut, for testing the descent
@@ -2278,9 +2290,9 @@ async function handleApi(request, env, url, cors, ctx) {
     }
     if (body.feed) {
       const fed = await hoardSweep(env);
-      return json({ ok: true, closed: !!(await env.KOVA.get(GATE_CLOSED_KEY)), hoard: await getHoard(env), fed }, 200, cors);
+      return json({ ok: true, closed: !!(await env.KOVA.get(GATE_CLOSED_KEY)), quiet: await gateQuiet(env), hoard: await getHoard(env), fed }, 200, cors);
     }
-    return json({ ok: true, closed: !!(await env.KOVA.get(GATE_CLOSED_KEY)), hoard: await getHoard(env) }, 200, cors);
+    return json({ ok: true, closed: !!(await env.KOVA.get(GATE_CLOSED_KEY)), quiet: await gateQuiet(env), hoard: await getHoard(env) }, 200, cors);
   }
 
   // Roster Protocol: who is out, who is on final notice, and the way back
@@ -2792,10 +2804,10 @@ async function postDigest(env) {
     }
   } catch { /* the trial never breaks the digest */ }
 
-  // the Gate's Vault, so the pot is public pressure
+  // the Gate's Vault, so the pot is public pressure, once the Gate is public
   try {
     const hoard = await getHoard(env);
-    if (hoard >= 8) lines.push(`[THE GATE // the Hoard holds ${hoard} links. Reach the S rank and all of it leaves with you.]`);
+    if (hoard >= 8 && !(await gateQuiet(env))) lines.push(`[THE GATE // the Hoard holds ${hoard} links. Reach the S rank and all of it leaves with you.]`);
   } catch { /* the Gate never breaks the digest */ }
 
   const roleId = await env.KOVA.get('config:aimChadRoleId');
