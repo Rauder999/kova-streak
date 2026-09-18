@@ -10,8 +10,6 @@ import {
 } from './fs.js';
 import { getAllParsedRuns, kvGet, kvSet } from './db.js';
 import { startCelebration as runCeremony } from './celebrate.js';
-import { openDescent } from './gate.js';
-import { mountGateHall } from './gatehall.js';
 import { buildDailyReport, coachPayload, buildTrackingLine } from './stats.js';
 import { annotateTerms, initGlossary } from './glossary.js';
 
@@ -63,7 +61,6 @@ export const state = {
   restError: null,
   chains: null,         // current chain window (map data + my links)
   vault: null,          // Vault state for the Today tab card
-  gate: null,           // The Gate: ladder, pot, daily allowance, the open run
   vaultMsg: null,
   trial: null,          // the trial of the half-week (scenario, standings, my baseline)
 };
@@ -168,13 +165,6 @@ async function boot() {
   loadRest().then(() => { if (state.tab === 'today') renderToday(); });
   loadVault(); // the rest calendar reads the shield and the voucher from it
   loadTrial();
-  // A descent left open outranks whatever tab you would have landed on: the
-  // key is already spent and links are sitting down there waiting to be
-  // walked out. Reloading used to drop you on Today as if nothing were open.
-  const landed = state.tab;
-  loadGate(false).then(() => {
-    if (state.tab === landed && state.gate && state.gate.run) switchTab('gate');
-  });
   if (state.granted) startPolling();
 }
 
@@ -199,13 +189,10 @@ function switchTab(tab) {
   state.tab = tab;
   document.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
   showView(tab);
-  // a hidden view still gets frames, so the hall is shut down on the way out
-  if (tab !== 'gate' && gateHall) { gateHall.stop(); gateHall = null; }
   if (tab === 'today') renderToday();
   if (tab === 'stats') renderStats();
   if (tab === 'group') { renderGroup(); refreshGroup(); }
   if (tab === 'vault') { renderVault(); loadVault(); }
-  if (tab === 'gate') { renderGate(); loadGate(); }
   if (tab === 'admin') renderAdmin();
 }
 
@@ -1470,239 +1457,6 @@ async function loadVault() {
   } catch { /* the shop window is optional */ }
 }
 
-// ---------- The Red Gate ----------
-// Its own tab, out of the Vault: turning a key is the largest thing a day of
-// training buys, and it was sitting underneath a shop. The hall is one canvas
-// and one control, because a person who ground all day for that key should
-// arrive somewhere that knows it. Everything under it, the ladder and the
-// rules, is flat and still like every other window on the site. The descent
-// itself is an event and lives in gate.js, full screen, where the
-// constitution lets motion off the leash.
-
-let gateBusy = false;
-let gateFlash = null; // the outcome of the last descent, shown until the next one
-let gateHall = null;  // the live scene, stopped whenever the tab is left
-
-async function loadGate(render = true) {
-  try {
-    state.gate = await api.getGate();
-    paintGateTab();
-    if (render && state.tab === 'gate') renderGate();
-  } catch { /* the Gate is optional */ }
-}
-
-// The tab chip carries the one thing a fresh page must not swallow: a descent
-// you walked away from is still open, and it is still holding your links.
-function paintGateTab() {
-  const b = document.querySelector('.tab-btn[data-tab="gate"]');
-  if (!b) return;
-  const g = state.gate;
-  const inside = !!(g && g.run);
-  b.classList.toggle('inside', inside);
-  b.classList.toggle('ready', !inside && !!(g && g.open));
-  b.title = inside ? 'A descent is still open' : '';
-}
-
-// the key marks: one diamond per key the System will hold for you
-function keyMarks(held, max) {
-  const wrap = el('div', 'rg-keys');
-  for (let i = 0; i < max; i++) {
-    const k = el('span', 'rgk' + (i < held ? ' on' : ''));
-    k.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="12,2 22,12 12,22 2,12"/></svg>';
-    wrap.append(k);
-  }
-  return wrap;
-}
-
-// The tab: the hall on top, then the ladder, then the terms.
-function renderGate() {
-  const root = $('view-gate');
-  if (!root) return;
-  if (gateHall) { gateHall.stop(); gateHall = null; }
-  root.replaceChildren();
-  const g = state.gate;
-  const inside = !!(g && g.run && !g.run.dead);
-  const sealed = !g || (!g.open && !inside);
-
-  // ---- the hall: the arch, and the one thing you do here ----
-  const hallWin = mkWin('thegate hall');
-  const gh = el('div', 'gh');
-  const canvas = el('canvas', 'gh-fx');
-  gh.append(canvas);
-
-  const top = el('div', 'gh-top');
-  top.append(el('span', 'gh-name' + (inside && g.run.red ? ' red' : ''), inside && g.run.red ? '[ A RED GATE IS OPEN ]' : '[ THE GATE ]'));
-  gh.append(top);
-
-  // Nothing is written on the circle itself: the readouts stand in the
-  // margins either side of it and the only thing inside the ring is the one
-  // control. A summoning circle with a paragraph across it is a poster.
-  const reads = el('div', 'gh-reads');
-  const read = (side, kick, value, unit, cls) => {
-    const box = el('div', 'gh-read ' + side + (cls ? ' ' + cls : ''));
-    box.append(el('span', 'gh-kick', kick));
-    box.append(el('div', 'gh-fig', value));
-    if (unit instanceof Node) box.append(unit); else box.append(el('span', 'gh-unit', unit));
-    reads.append(box);
-    return box;
-  };
-  const core = el('div', 'gh-core');
-  const foot = el('div', 'gh-foot');
-  const enterBtn = (label, sub, fn) => {
-    const b = el('button', 'gh-enter');
-    b.type = 'button';
-    b.append(el('span', 't', label));
-    if (sub) b.append(el('span', 's', sub));
-    b.addEventListener('mouseenter', () => gateHall && gateHall.heat(true));
-    b.addEventListener('mouseleave', () => gateHall && gateHall.heat(false));
-    b.addEventListener('focus', () => gateHall && gateHall.heat(true));
-    b.addEventListener('blur', () => gateHall && gateHall.heat(false));
-    b.addEventListener('click', () => { if (gateHall) gateHall.flare(); fn(); });
-    return b;
-  };
-
-  if (!g) {
-    read('l', 'THE HOARD', '--', 'LINKS');
-    foot.append(el('span', 'gh-note', '[ Reading the Gate... ]'));
-  } else {
-    if (inside) {
-      read('l', 'YOU ARE STILL INSIDE', String(g.run.holding), `HELD AT THE ${g.run.floor > 0 ? g.ranks[g.run.floor - 1] + ' RANK' : 'THRESHOLD'}`, 'alarm');
-    } else {
-      read('l', 'THE HOARD', String(g.hoard), g.hoard === 1 ? 'LINK' : 'LINKS');
-    }
-    read('r', 'KEYS IN HAND', String(g.keys), keyMarks(g.keys, g.keysMax));
-
-    if (inside) {
-      core.append(enterBtn('BACK INTO THE SHAFT', 'THE KEY IS ALREADY TURNED', () => enterDescent()));
-      foot.append(el('span', 'gh-note', '[ Walk out from down there and the links are yours. ]'));
-      foot.append(el('span', 'gh-note dim', '[ Leave the descent open and the shaft keeps them. ]'));
-    } else if (g.open) {
-      core.append(enterBtn('TURN A KEY', `${g.keys} IN HAND`, () => enterDescent(true)));
-      foot.append(el('span', 'gh-note', '[ Six ranks down. Everything you hold rides on each one. ]'));
-      if (!g.keyToday) foot.append(el('span', 'gh-note dim', '[ Close today and the System cuts you another. ]'));
-    } else {
-      foot.append(el('span', 'gh-shut', `[ ${g.why || 'The Gate is shut.'} ]`));
-    }
-  }
-  gh.append(reads, core, foot);
-  hallWin.append(gh);
-
-  if (gateFlash) {
-    const s = el('div', 'status ' + (gateFlash.kind === 'err' ? 'err' : 'ok'), gateFlash.text);
-    s.style.cssText = 'margin:0 26px 22px';
-    hallWin.append(s);
-  }
-  root.append(hallWin);
-  gateHall = mountGateHall(canvas, { sealed: sealed && !inside });
-
-  if (!g) return;
-
-  // ---- the ladder: what each rank would hand over right now ----
-  const two = el('div', 'row2');
-  const lad = mkWin('grow');
-  // inside a red gate the ladder IS the red one; outside, the red prices ride
-  // alongside the ordinary ones so everybody knows what the 5% is worth
-  const inRed = inside && g.run.red;
-  const L = inside ? g.run : g;
-  lad.append(winHead('[ Six ranks down ]', inRed
-    ? 'YOU ARE IN A RED GATE · THESE ARE ITS ODDS AND ITS PRICES'
-    : 'WALK OUT WHENEVER YOU LIKE WITH THE SHARE YOUR DEPTH ALLOWS'));
-  const lede = el('span', 'lede', 'Each rank is less likely to let you through than the last. Fail one and the Hoard keeps everything you were holding. The S rank takes the Hoard entire.');
-  lede.style.cssText = 'display:block;margin-top:10px;max-width:62ch';
-  lad.append(lede);
-  const ladder = el('div', 'gl' + (inRed ? ' red' : ''));
-  g.ranks.forEach((rank, i) => {
-    const row = el('div', 'gl-step');
-    const claim = L.claim[i];
-    const whole = L.share[i] === null;
-    if (inside && i < g.run.floor) row.classList.add('cleared');
-    else if (inside && i === g.run.floor) row.classList.add('next');
-    if (!claim) row.classList.add('dry');
-    row.append(svgPlate(rank, i >= 4 ? METALS[0] : i >= 2 ? METALS[1] : 'plain'));
-    const t = el('div', 'gl-t');
-    t.append(el('span', 'gl-r', `${rank} RANK`));
-    t.append(el('span', 'gl-o', `${Math.round(L.survive[i] * 100)}% through · ${Math.round(L.survive.slice(0, i + 1).reduce((a, b) => a * b, 1) * 1000) / 10}% from the door`));
-    row.append(t);
-    row.append(el('span', 'lead'));
-    if (!inside && g.red) {
-      const alt = el('span', 'gl-red', whole ? 'ALL' : String(g.red.claim[i]));
-      alt.title = 'what a red gate pays at this rank';
-      row.append(alt);
-    }
-    row.append(el('span', 'gl-p', claim ? String(claim) : '--'));
-    if (whole) row.append(el('span', 'gl-v', 'THE HOARD'));
-    ladder.append(row);
-  });
-  lad.append(ladder);
-  if (!inside && g.red) {
-    const key = el('span', 'fine', `The red column is what a red gate pays at that rank. One key in ${Math.round(1 / g.red.chance)} opens one, and in there every rank keeps one more passage of ${g.doors} shut.`);
-    key.style.cssText = 'display:block;margin-top:14px';
-    lad.append(key);
-  }
-  two.append(lad);
-
-  // ---- the terms, in the group's own words ----
-  const terms = mkWin('side wide');
-  terms.append(winHead('[ The terms ]'));
-  const rows = [
-    ['A DAY CLOSED · ONE KEY CUT', '+1 KEY', ''],
-    ['KEYS THE SYSTEM WILL HOLD FOR YOU', String(g.keysMax), ''],
-    ['THE HOARD, EVERY NIGHT', '+1 LINK', ''],
-    ['EVERY DAY SOMEBODY LET GO', '+1 LINK', ''],
-    ['A RANK THAT TURNS YOU AWAY', 'THE HOARD KEEPS IT', ''],
-  ];
-  if (g.red) rows.push([`A KEY THAT OPENS A RED GATE`, `1 IN ${Math.round(1 / g.red.chance)}`, 'red']);
-  for (const [what, amt, cls] of rows) {
-    const r = el('div', 'rule' + (cls ? ' ' + cls : ''));
-    r.append(el('span', 'dia'), el('span', null, what), el('span', 'lead'), el('span', 'amt', amt));
-    terms.append(r);
-  }
-  const fine = el('span', 'fine', 'The Gate costs training and never touches what you have saved: a key cannot be bought and cannot be traded. Everything it pays comes out of the Hoard, red gates included, and the Hoard is fed by the group. Train well as a group and the Gate stays poor.');
-  fine.style.cssText = 'display:block;margin-top:16px';
-  terms.append(fine);
-  two.append(terms);
-  root.append(two);
-}
-
-// opens the full-screen descent; `fresh` spends a key first
-async function enterDescent(fresh = false) {
-  if (gateBusy) return;
-  gateBusy = true;
-  try {
-    if (fresh) {
-      const res = await api.gateEnter();
-      state.gate = res;
-    }
-    const g = state.gate;
-    if (!g || !g.run) { gateFlash = { kind: 'err', text: '[ The Gate did not open. ]' }; renderGate(); return; }
-    openDescent({
-      gate: g,
-      descend: (door, floor) => api.gateDescend(door, floor),
-      extract: () => api.gateExtract(),
-      onEnd: (res) => {
-        if (res) {
-          state.gate = res;
-          const which = res.redGate ? 'RED GATE' : 'GATE';
-          gateFlash = res.taken !== undefined
-            ? { kind: 'ok', text: res.cleared
-              ? `[ ${which} // S RANK. The Hoard left with you: ${res.taken} ${res.taken === 1 ? 'link' : 'links'}. ]`
-              : `[ ${which} // Out of the ${res.rank} rank with ${res.taken} ${res.taken === 1 ? 'link' : 'links'}. ]` }
-            : { kind: 'err', text: `[ ${which} // The ${res.rank} rank did not let you through. ]` };
-        }
-        loadVault();
-        loadGate();
-      },
-    });
-  } catch (e) {
-    if (handleApiError(e)) return;
-    gateFlash = { kind: 'err', text: '[ ' + e.message + ' ]' };
-    await loadGate(false);
-    renderGate();
-  } finally {
-    gateBusy = false;
-  }
-}
-
 // ---------- rest days: the permit calendar ----------
 // Up to 2 days a week without losing the streak. Scheduled strictly before
 // the day starts (group time), so today cannot be toggled: this guards
@@ -2834,7 +2588,6 @@ function renderTrialAdminWindow() {
 function renderAdmin() {
   const root = $('view-admin');
   root.replaceChildren();
-  if (!state.gate) loadGate(false).then(() => { if (state.tab === 'admin') renderAdmin(); });
 
   // ---- the playlist of the week: drop the JSON, name the week, publish ----
   const win = mkWin();
@@ -2988,69 +2741,7 @@ function renderAdmin() {
 
   root.append(renderTrialAdminWindow());
   root.append(renderAdminRestWindow());
-  root.append(renderGateAdminWindow());
   root.append(renderRosterWindow());
-}
-
-// The Red Gate's admin levers: seal it for everyone, set the Hoard, feed it
-// by hand, and cut yourself a key. The last three are for testing.
-let gateAdminFlash = null;
-function renderGateAdminWindow() {
-  const win = mkWin('gate-admin');
-  win.append(winHead('[ The Red Gate ]', 'KEYS FROM CLOSED DAYS · SEE THE_GATE.MD'));
-  const g = state.gate;
-  const status = el('div', 'quest-line', g
-    ? `[ Hoard: ${g.hoard} ${g.hoard === 1 ? 'link' : 'links'} · one key per closed day, ${g.keysMax} held at most · everything it pays comes out of the Hoard ]`
-    : '[ Reading the Gate... ]');
-  status.style.cssText = 'display:block;margin-top:8px';
-  win.append(status);
-
-  const form = el('div', 'rest-form');
-  const potIn = el('input', 'inp date');
-  potIn.type = 'number';
-  potIn.min = '0';
-  potIn.value = g ? String(g.hoard) : '0';
-  const msg = el('div', 'status');
-  msg.hidden = true;
-  const say = (t, c) => { msg.textContent = t; msg.className = 'status ' + c; msg.hidden = false; };
-  if (gateAdminFlash) { say(gateAdminFlash, 'ok'); gateAdminFlash = null; }
-  const act = (btn, fn) => btn.addEventListener('click', async () => {
-    btn.disabled = true;
-    try {
-      gateAdminFlash = await fn();
-      await loadGate(false);
-      renderAdmin();
-    } catch (e) {
-      if (handleApiError(e)) return;
-      say('[ ' + e.message + ' ]', 'err');
-      btn.disabled = false;
-    }
-  });
-  const setPot = el('button', 'btn ghost', 'Set the Hoard');
-  act(setPot, async () => { const r = await api.setGate({ hoard: Number(potIn.value) }); return `[ Hoard set to ${r.hoard}. ]`; });
-  const feed = el('button', 'btn ghost', 'Feed it now');
-  act(feed, async () => {
-    const r = await api.setGate({ feed: true });
-    return r.fed ? `[ Fed ${r.fed.fed} for ${r.fed.date}: 1 plus ${r.fed.missed} missed. Hoard ${r.hoard}. ]` : `[ Already fed for yesterday. Hoard ${r.hoard}. ]`;
-  });
-  const cutKey = el('button', 'btn ghost', 'Cut me a key');
-  act(cutKey, async () => { await api.setGate({ keyFor: state.user.uid }); return '[ Key cut. ]'; });
-  const seal = el('button', 'btn ghost', 'Seal the Gate');
-  act(seal, async () => { const r = await api.setGate({ closed: true }); return r.closed ? '[ Sealed. Nobody can enter. ]' : '[ Open. ]'; });
-  const open = el('button', 'btn ghost', 'Open the Gate');
-  act(open, async () => { const r = await api.setGate({ closed: false }); return r.closed ? '[ Sealed. ]' : '[ Open again. ]'; });
-  // the reveal is yours to time: while this is on, the Gate plays but says
-  // nothing in the channel, not a deep run and not the digest line
-  const hush = el('button', 'btn ghost', 'Keep it quiet');
-  act(hush, async () => { const r = await api.setGate({ quiet: true }); return r.quiet ? '[ Quiet. The Gate says nothing in the channel. ]' : '[ Talking. ]'; });
-  const talk = el('button', 'btn ghost', 'Let it talk');
-  act(talk, async () => { const r = await api.setGate({ quiet: false }); return r.quiet ? '[ Still quiet. ]' : '[ The Gate talks again: deep runs and the digest line. ]'; });
-  form.append(el('span', 'rest-dash', 'hoard'), potIn, setPot, feed, cutKey, seal, open, hush, talk);
-  win.append(form, msg);
-  const fine = el('span', 'fine', 'The Hoard eats at the 03:30 sweep: one link for the day plus one for every player who let it go. Everything the Gate pays comes out of it, so the link supply grows by exactly that and no more, and a group that trains well keeps the Gate poor. Seal it if it ever stops being fun. While it is kept quiet the Gate runs normally but never posts: no deep run, no Hoard line in the digest. Setting the Hoard, feeding it early and cutting keys are for testing.');
-  fine.style.cssText = 'display:block;margin-top:14px';
-  win.append(fine);
-  return win;
 }
 
 // Rest days handed out by the admin (per Rauder, 2026-09-15): any player,
