@@ -2234,10 +2234,16 @@ async function generateCoachLines(env, body) {
       // generous limit: with thinking models the reasoning eats the budget before the text,
       // 300 tokens used to cut the reply off mid-sentence (a pitfall known from AimSama)
       max_tokens: 6000,
-      // the ~4.3k-token prompt is identical in every call and dominates the bill:
-      // prompt caching makes repeat reads ~10x cheaper (2026-09-05, cost review:
-      // 900 calls in 11 days, nearly all of the $7.82 was this prompt re-sent raw)
-      system: [{ type: 'text', text: COACH_PROMPT, cache_control: { type: 'ephemeral' } }],
+      // The ~4.3k-token prompt is identical in every call and dominates the
+      // bill, so it is cached. The TTL is the part that decides whether that
+      // helps: a write costs more than sending it raw, a read costs a tenth,
+      // and the cache only pays once calls land inside the window. At the
+      // default five minutes and one call every twelve minutes, roughly half
+      // of them missed and paid 1.25x for a write, which is worse than not
+      // caching at all. An hour covers the real gaps between players, and it
+      // matters more now that the client stopped re-asking after every run
+      // (cost review 2026-09-23).
+      system: [{ type: 'text', text: COACH_PROMPT, cache_control: { type: 'ephemeral', ttl: '1h' } }],
       messages: [{ role: 'user', content: 'Diagnosis:\n' + JSON.stringify({ rustyDays: body.rustyDays || null, niches: body.niches }) }],
     }),
   });
@@ -2246,6 +2252,18 @@ async function generateCoachLines(env, body) {
     return null;
   }
   const data = await res.json();
+  // What every cost question has had to be answered by arithmetic until now.
+  // Four numbers, each billed at its own rate: fresh input, the cache write
+  // (1.25x for five minutes, 2x for an hour), the cache read (0.1x) and the
+  // output. Observability is on, so this is readable with `wrangler tail`.
+  const u = data.usage || {};
+  console.log('coach usage', JSON.stringify({
+    in: u.input_tokens || 0,
+    cacheWrite: u.cache_creation_input_tokens || 0,
+    cacheRead: u.cache_read_input_tokens || 0,
+    out: u.output_tokens || 0,
+    stop: data.stop_reason || null,
+  }));
   const text = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n');
   const lines = text.split('\n').map((l) => l.trim()).filter((l) => /^\[(CLICKING|TRACKING|SWITCHING)\]/.test(l)).slice(0, 3);
   return lines.length ? lines : null;

@@ -53,7 +53,9 @@ export const state = {
   statsDate: null,       // which day the tab is viewing (null = today)
   playedDates: [],       // dates that have runs, newest first
   coachLines: null,
-  coachHash: null,
+  coachHash: null,       // guards the redraw: model lines plus the tracking line
+  coachModelLines: null, // what the model last returned, kept to re-dress for free
+  coachModelHash: null,  // and the diagnosis it answered, the only paid cache key
   coachError: null,
   restDates: [],        // scheduled rest days (dates)
   restFree: [],         // of those, the ones that cost no quota (admin-granted, shield-absorbed)
@@ -416,16 +418,32 @@ async function maybeCoach() {
   let hh = 5381;
   const hsrc = recent.map((h) => h.lines.join('|')).join('#');
   for (let i = 0; i < hsrc.length; i++) hh = ((hh << 5) + hh + hsrc.charCodeAt(i)) >>> 0;
-  const fullHash = r.stateHash + '-a' + hh.toString(36);
+  const modelHash = r.stateHash + '-a' + hh.toString(36);
 
-  if (fullHash === state.coachHash && state.coachLines) return;
+  // The tracking line is built on this machine from the doctrine and costs
+  // nothing, but it rotates as the session's scenario pool grows. It gates the
+  // REDRAW and never the paid call: it used to sit in the same hash as the
+  // model's, so picking up a new tracking scenario bought a fresh set of lines
+  // the model could not have written differently.
+  const trackingLine = buildTrackingLine(r);
+  const renderHash = modelHash + '|t:' + (trackingLine || '');
+  if (renderHash === state.coachHash && state.coachLines) return;
+
+  // the diagnosis has not moved, only the tracking line: re-dress what we
+  // already hold instead of going near the network
+  if (modelHash === state.coachModelHash && state.coachModelLines) {
+    state.coachLines = trackingLine ? [...state.coachModelLines, trackingLine] : [...state.coachModelLines];
+    state.coachHash = renderHash;
+    state.coachError = null;
+    if (state.tab === 'stats') renderStats();
+    return;
+  }
+
   try {
     const payload = coachPayload(r);
-    payload.stateHash = fullHash;
+    payload.stateHash = modelHash;
     payload.date = r.today; // the server rejects pre-join dates
     payload.recentAdvice = recent.map((h) => ({ date: h.date, lines: h.lines }));
-    // tracking does not go to the model: the client builds its line itself from the doctrine
-    const trackingLine = buildTrackingLine(r);
     payload.niches = payload.niches.filter((n) => n.niche !== 'tracking');
     // the last tip for each niche, for the "do not repeat yourself" rule
     const lastLines = recent[0] ? recent[0].lines : [];
@@ -434,15 +452,19 @@ async function maybeCoach() {
       if (prev) n.lastAdvice = prev;
     }
 
-    let lines = [];
+    let modelLines = [];
     if (payload.niches.length) {
       const res = await api.postCoach(payload);
-      lines = res.lines || [];
+      modelLines = res.lines || [];
     }
-    if (trackingLine) lines = [...lines, trackingLine];
+    const lines = trackingLine ? [...modelLines, trackingLine] : [...modelLines];
 
+    // held apart from the rendered set, so a tracking rotation can be re-dressed
+    // without asking anything of the model again
+    state.coachModelLines = modelLines;
+    state.coachModelHash = modelHash;
     state.coachLines = lines;
-    state.coachHash = fullHash;
+    state.coachHash = renderHash;
     state.coachError = null;
     // remember what was advised for this day (the day's latest version wins)
     const next = history.filter((h) => h.date !== r.today);

@@ -185,14 +185,30 @@ export function buildDailyReport(allRuns, today) {
   return report;
 }
 
-// State hash: codes + deltas coarsened to 5%. While the hash stays the same,
-// no new coach text is generated, the answer comes from the cache.
+// The MODEL hash. This is the only thing that decides whether a paid call
+// happens, so nothing belongs in it that cannot change the advice.
+//
+// What the coach actually answers on is the DIAGNOSIS: the codes, the scenario
+// the assignment is anchored on, and roughly how far off the day is. What used
+// to be in here as well was the evidence (paceRatio to two decimals,
+// chokeExcessPp, fadePp) and the list of tracking scenarios. Those are not
+// diagnosis. The three evidence numbers shifted after literally every
+// completed run, and tracking is filtered out of the payload before it is
+// sent, so it could never change a single word the model wrote.
+//
+// The bill said it plainly (cost review 2026-09-23): 1631 calls in 14 days
+// across 13 players, about nine per player per day, for a diagnosis that
+// changes once or twice. Almost every one of those re-sent the same 4300-token
+// prompt to buy back nearly the same three lines.
+//
+// scoreDelta stays, in 10% steps, so a day that slides from slightly off to
+// badly off can still earn a fresh answer.
 function hashReport(report) {
-  const bucket = (v) => (v == null ? 'x' : Math.round(v * 20));
-  const src = report.niches.map((n) => n.niche === 'tracking'
-    ? `tracking:${n.scenarios.map((s) => s.name).sort().join(',')}`
-    : `${n.niche}:${n.codes.join('+')}:${bucket(n.scoreDelta)}:${bucket(n.accDelta)}:${n.worst ? n.worst.name : ''}:${n.aspects ? [n.aspects.paceRatio, n.aspects.chokeExcessPp, n.aspects.fadePp].join(',') : ''}`
-  ).join('|') + (report.rusty ? `|rust${report.gapDays}` : '');
+  const step = (v) => (v == null ? 'x' : Math.round(v * 10));
+  const src = report.niches
+    .filter((n) => n.niche !== 'tracking')
+    .map((n) => `${n.niche}:${n.codes.join('+')}:${n.worst ? n.worst.name : ''}:${step(n.scoreDelta)}`)
+    .join('|') + (report.rusty ? `|rust${report.gapDays}` : '');
   let h = 5381;
   for (let i = 0; i < src.length; i++) h = ((h << 5) + h + src.charCodeAt(i)) >>> 0;
   return h.toString(36) + '-' + src.length;
