@@ -1883,6 +1883,45 @@ async function handleApi(request, env, url, cors, ctx) {
     return json({ ok: true, userId: uid, displayName: profile.displayName || 'unknown', dates, granted: vault.grantedDays, changed }, 200, cors);
   }
 
+  // Forgive a day that was missed by a hair. Rauder's call, and it has to do
+  // more than flip a flag: a day that never closed also never forged its
+  // chain, so the partner who did hold their end is still owed the link. This
+  // writes the record and then runs the REAL chain check for that date, which
+  // pays what the day owes exactly once, through the same marker the live path
+  // uses, and quietly, because the day is already over.
+  //
+  // It refuses a day the player has no record for. Closing a day nobody
+  // played is not forgiveness, it is invention, and the guard has already
+  // earned its keep: the first attempt at this named the wrong date.
+  if (path === '/api/admin/close-day' && request.method === 'POST') {
+    if (!user.admin) return json({ error: 'Admin only' }, 403, cors);
+    const body = (await request.json().catch(() => null)) || {};
+    const uid = String(body.userId || '');
+    const date = String(body.date || '');
+    if (!/^\d{1,25}$/.test(uid)) return json({ error: 'userId is required' }, 400, cors);
+    if (!isDate(date)) return json({ error: 'date must be YYYY-MM-DD' }, 400, cors);
+    const today = groupDate(env);
+    if (date > today) return json({ error: 'That day has not happened yet' }, 400, cors);
+    const profile = await env.KOVA.get(`user:${uid}`, 'json');
+    if (!profile) return json({ error: 'No such player' }, 400, cors);
+
+    const key = `completion:${uid}:${date}`;
+    const was = await env.KOVA.get(key, 'json');
+    if (!was) return json({ error: 'No record for that day: nothing to close' }, 400, cors);
+    if (was.done) return json({ ok: true, already: true, date, record: was }, 200, cors);
+
+    const required = was.requiredRuns || 30;
+    const rec = {
+      completedRuns: Math.max(was.completedRuns || 0, required),
+      requiredRuns: required,
+      done: true,
+      completedAt: was.completedAt || Date.now(),
+    };
+    await env.KOVA.put(key, JSON.stringify(rec), { metadata: { c: rec.completedRuns, r: rec.requiredRuns, d: true } });
+    if (ctx) ctx.waitUntil(chainRecheckAfterRest(env, uid, [date], today));
+    return json({ ok: true, userId: uid, displayName: profile.displayName || 'unknown', date, was, record: rec }, 200, cors);
+  }
+
   // Roster Protocol: who is out, who is on final notice, and the way back
   if (path === '/api/admin/roster' && request.method === 'GET') {
     if (!user.admin) return json({ error: 'Admin only' }, 403, cors);

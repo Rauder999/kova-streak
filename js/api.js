@@ -68,6 +68,8 @@ export const setTrial = (body) => call('/api/admin/trial', { method: 'POST', bod
 export const getAdminRest = () => call('/api/admin/rest');
 // body: { userId, on, and one of date | dates | from+to }
 export const setAdminRest = (body) => call('/api/admin/rest', { method: 'POST', body });
+// forgive a day that fell short: marks it done and re-runs that day's chain
+export const closeAdminDay = (body) => call('/api/admin/close-day', { method: 'POST', body });
 export const resolveTrialNow = () => call('/api/admin/resolve-trial', { method: 'POST' });
 export const getVault = () => call('/api/vault');
 export const buyVault = (item) => call('/api/vault', { method: 'POST', body: { item } });

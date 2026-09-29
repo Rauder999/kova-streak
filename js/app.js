@@ -2836,6 +2836,28 @@ function renderAdminRestWindow() {
     const take = el('button', 'btn ghost', 'Withdraw');
     act(take, false);
     form.append(give, take);
+
+    // Forgiving a day that fell a run or two short. It is not a rest day: the
+    // day counts as played, and the chain it never forged is re-run so the
+    // partner who did hold their end finally collects. Uses the FROM date, and
+    // refuses a day the player has no runs on at all.
+    const close = el('button', 'btn ghost', 'Close the FROM day');
+    close.addEventListener('click', async () => {
+      close.disabled = true;
+      const name = who.options[who.selectedIndex] ? who.options[who.selectedIndex].textContent : 'the player';
+      try {
+        const res = await api.closeAdminDay({ userId: who.value, date: from.value });
+        adminRestFlash = res.already
+          ? `[ ${name}: ${monthDayShort(from.value)} was already closed ]`
+          : `[ ${name}: ${monthDayShort(from.value)} closed at ${res.record.completedRuns}/${res.record.requiredRuns}, was ${res.was.completedRuns}. The day's chain has been re-run. ]`;
+        renderAdmin();
+      } catch (e) {
+        if (handleApiError(e)) return;
+        say('[ ' + e.message + ' ]', 'err');
+        close.disabled = false;
+      }
+    });
+    form.append(close);
     body.append(form, msg);
 
     // ---- who is off, and when ----
