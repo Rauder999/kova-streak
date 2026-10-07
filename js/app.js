@@ -2662,10 +2662,22 @@ function renderAdmin() {
 
   let parsed = null;
   const say = (text, cls) => { msg.textContent = text; msg.className = 'status ' + cls; msg.hidden = false; };
+  // KovaaK's does not write these files in one encoding. The ones saved from
+  // the editor are plain UTF-8, but a playlist that came through the in-game
+  // share arrives as UTF-16 LE with a byte order mark, and file.text() always
+  // decodes as UTF-8, so that one came back as mojibake and threw on parse
+  // (Rauder, 2026-10-06, week 5). Read the bytes and let the mark decide.
+  const decodeByBom = (buf) => {
+    const b = new Uint8Array(buf);
+    if (b[0] === 0xFF && b[1] === 0xFE) return new TextDecoder('utf-16le').decode(buf.slice(2));
+    if (b[0] === 0xFE && b[1] === 0xFF) return new TextDecoder('utf-16be').decode(buf.slice(2));
+    if (b[0] === 0xEF && b[1] === 0xBB && b[2] === 0xBF) return new TextDecoder('utf-8').decode(buf.slice(3));
+    return new TextDecoder('utf-8').decode(buf);
+  };
   const readFile = async (file) => {
     if (!file) return;
     try {
-      const json = JSON.parse(await file.text());
+      const json = JSON.parse(decodeByBom(await file.arrayBuffer()));
       const list = json.scenarioList;
       if (!Array.isArray(list) || !list.length) throw new Error('scenarioList is missing or empty');
       parsed = {
