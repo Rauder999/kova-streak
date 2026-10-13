@@ -4,3 +4,7 @@ worker/.dev.vars
 .DS_Store
 *.log
 __pycache__/
+
+# local scratch: the stand's shim, one-off previews, and the KV backups
+# taken before hand edits to production. Never meant for the repo.
+_*
