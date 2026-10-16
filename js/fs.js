@@ -58,6 +58,12 @@ export async function countRunsAroundMidnight(handle, today, prevDate) {
   const grace = new Map();
   const cur = new Map();
   let scanned = 0;
+  // The date on the newest file in the folder. A folder can be connected,
+  // readable and full of history while KovaaK's has quietly stopped writing to
+  // it (Statistics Export switched off, or the game running on another
+  // machine). Nothing else on this screen can tell that apart from a rest day,
+  // so the newest file's date is the one fact that gives it away.
+  let newest = null;
   const bump = (m, k) => m.set(k, (m.get(k) || 0) + 1);
   for await (const entry of handle.values()) {
     if (entry.kind !== 'file') continue;
@@ -66,12 +72,13 @@ export async function countRunsAroundMidnight(handle, today, prevDate) {
     scanned++;
     const parsed = parseStatsFileName(name);
     if (!parsed) continue;
+    if (!newest || parsed.date > newest) newest = parsed.date;
     if (parsed.date === prevDate) bump(prev, parsed.scenario);
     else if (parsed.date === today) {
       bump(Number(parsed.time.slice(0, 2)) < GRACE_HOURS ? grace : cur, parsed.scenario);
     }
   }
-  return { prev, grace, cur, scanned };
+  return { prev, grace, cur, scanned, newest };
 }
 
 // Grace window (per Pasha, 2026-08-28; widened 2026-09-15): the day's gate

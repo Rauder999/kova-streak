@@ -225,6 +225,8 @@ button:disabled { cursor: default; }
 .notice { padding: 12px 16px; border: 1px solid var(--line-1); border-left: 2px solid var(--accent); background: rgba(16, 20, 27, 0.88); font-family: var(--font-mono); font-size: 12px; letter-spacing: .04em; line-height: 1.6; color: var(--text-1); }
 .notice.error { border-left-color: var(--bad); color: var(--bad); }
 .notice.ok { border-left-color: var(--ok); color: var(--ok); }
+/* something is wrong but nothing is broken: the folder reads, the game is not writing */
+.notice.warn { border-left-color: var(--warn); color: var(--warn); }
 .notice .btn { margin-top: 10px; }
 .warn { padding: 14px 16px; border: 1px solid var(--line-1); border-left: 2px solid var(--bad); background: rgba(229, 72, 77, 0.05); font-family: var(--font-ui); font-size: 13px; color: var(--text-1); line-height: 1.55; }
 .warn::before { content: 'WARNING: '; font-weight: 600; color: var(--text-0); }

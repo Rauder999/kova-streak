@@ -268,12 +268,13 @@ async function tick() {
     }
 
     const prevDate = prevDateOf(state.date);
-    const { prev, grace, cur, scanned } = await countRunsAroundMidnight(state.handle, state.date, prevDate);
+    const { prev, grace, cur, scanned, newest } = await countRunsAroundMidnight(state.handle, state.date, prevDate);
     // night runs close yesterday even from zero, unless yesterday was a scheduled rest day
     const split = applyGraceWindow(state.playlist.scenarios, prev, grace, cur, prevScenariosFor(prevDate),
       { prevRest: state.restDates.includes(prevDate) });
     state.progress = split.todayProgress;
     state.progress.scanned = scanned;
+    state.progress.newest = newest;
     state.graceUsed = split.graceUsed;
     // yesterday's progress is posted only if anything was played at all (before midnight
     // or in the grace window): covers the grace top-up, a night session that started
@@ -871,6 +872,20 @@ export function renderToday() {
     rebtn.addEventListener('click', connectFolder);
     warn.append(rebtn);
     root.append(warn);
+  }
+
+  // The silent failure the warning above cannot see: the folder is connected
+  // and full of history, but KovaaK's has stopped writing to it. The day then
+  // reads 0 with no explanation, and it looks exactly like a rest day, which
+  // is how a member lost four days before anyone worked out why (2026-10-16).
+  // The newest file's date is what gives it away, so say it out loud and put
+  // the way to re-pick the folder within reach, which it otherwise is not.
+  if (p.scanned > 0 && p.completedRuns === 0 && p.newest && p.newest < state.date) {
+    const stale = notice(`Nothing has been credited today, and the newest KovaaK's file in the connected folder is from ${longDay(p.newest)}. The folder is being read (${p.scanned} files), so the game is not writing new ones: check that Statistics Export is "Always" in KovaaK's settings, Misc tab, and that this is the PC you play on.`, 'warn');
+    const rebtn = el('button', 'btn ghost', 'Pick a different folder');
+    rebtn.addEventListener('click', connectFolder);
+    stale.append(rebtn);
+    root.append(stale);
   }
 
   // ---- the daily quest window ----
