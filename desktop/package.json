@@ -1,0 +1,52 @@
+{
+  "name": "kova-streak-desktop",
+  "version": "0.1.0",
+  "description": "Kova Streak desktop app: finds KovaaK's by itself, counts in the tray, updates silently.",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "sync": "node sync.mjs",
+    "start": "npm run sync && electron .",
+    "dist": "npm run sync && electron-builder --win --publish never",
+    "release": "npm run sync && electron-builder --win --publish always"
+  },
+  "build": {
+    "appId": "com.codebreakers.kovastreak",
+    "productName": "Kova Streak",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "kovaaks.js",
+      "server.js",
+      "renderer/**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "artifactName": "KovaStreak-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "deleteAppDataOnUninstall": false
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Rauder999",
+        "repo": "kova-streak"
+      }
+    ]
+  },
+  "devDependencies": {
+    "electron": "^45.4.1",
+    "electron-builder": "^26.18.0"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.11"
+  }
+}

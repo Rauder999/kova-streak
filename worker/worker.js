@@ -11,10 +11,20 @@
 import { initWasm, Resvg } from '@resvg/resvg-wasm';
 import resvgWasm from './node_modules/@resvg/resvg-wasm/index_bg.wasm';
 
+// Both the CORS allowance and the post-login bounce target are taken from this
+// list, so an origin missing here fails silently as a blocked response rather
+// than an error anyone can read. 8080 is the local dev stand. The 7384 block
+// is the desktop app: it serves the same UI from loopback so that the page has
+// a real origin to be whitelisted, and it tries the ports in order when one is
+// busy (see desktop/server.js). Discord never sees any of these - its redirect
+// URI is always the worker's own /auth/callback.
 const ALLOWED_ORIGINS = [
   'https://rauder999.github.io',
   'http://localhost:8080',
   'http://127.0.0.1:8080',
+  'http://127.0.0.1:7384',
+  'http://127.0.0.1:7385',
+  'http://127.0.0.1:7386',
 ];
 
 const SESSION_DAYS = 60;

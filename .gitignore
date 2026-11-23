@@ -8,3 +8,8 @@ __pycache__/
 # local scratch: the stand's shim, one-off previews, and the KV backups
 # taken before hand edits to production. Never meant for the repo.
 _*
+
+# desktop build: the renderer is a copy of the site made by sync.mjs,
+# and dist/ is the installer output
+desktop/renderer/
+desktop/dist/

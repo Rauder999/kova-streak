@@ -9,17 +9,56 @@ import { kvGet, kvSet, kvDel, putParsedRuns, getParsedFileNames } from './db.js'
 
 const HANDLE_KEY = 'statsDirHandle';
 
+// The desktop build hands the page a native bridge (desktop/preload.js) that
+// speaks the only two primitives this module needs: list the file names, read
+// one file. Everything below then works the same on both, and the browser path
+// is untouched - no bridge, no change. On the desktop the folder is FOUND
+// rather than picked, so there is no handle to store and no permission to
+// re-grant, which is the entire class of "it stopped seeing my folder".
+const native = () => (typeof window !== 'undefined' && window.kova && window.kova.desktop ? window.kova : null);
+
+// Stands in for a FileSystemDirectoryHandle on the desktop. It carries no
+// path: the main process knows where the folder is, the page never needs to.
+const NATIVE_HANDLE = { native: true };
+const isNative = (handle) => !!(handle && handle.native);
+
+async function statsFileNames(handle) {
+  if (isNative(handle)) return native().listStatsFiles();
+  const out = [];
+  for await (const entry of handle.values()) {
+    if (entry.kind === 'file' && entry.name.endsWith('.csv')) out.push(entry.name);
+  }
+  return out;
+}
+
+async function readStatsText(handle, name) {
+  if (isNative(handle)) return native().readStatsFile(name);
+  const fh = await handle.getFileHandle(name);
+  return (await fh.getFile()).text();
+}
+
 export function fsSupported() {
-  return typeof window.showDirectoryPicker === 'function';
+  return !!native() || typeof window.showDirectoryPicker === 'function';
 }
 
 export async function pickStatsFolder() {
+  const n = native();
+  if (n) {
+    const r = await n.pickGameFolder();
+    if (!r.found) throw new Error(r.canceled ? 'Cancelled' : 'KovaaK\'s is not in that folder');
+    return NATIVE_HANDLE;
+  }
   const handle = await window.showDirectoryPicker({ id: 'kovaaks-stats', mode: 'read' });
   await kvSet(HANDLE_KEY, handle);
   return handle;
 }
 
 export async function getStoredFolder() {
+  const n = native();
+  if (n) {
+    const s = await n.status();
+    return s.found ? NATIVE_HANDLE : null;
+  }
   try {
     return (await kvGet(HANDLE_KEY)) || null;
   } catch {
@@ -28,6 +67,7 @@ export async function getStoredFolder() {
 }
 
 export async function forgetFolder() {
+  if (native()) return; // nothing was stored: the folder is found every launch
   await kvDel(HANDLE_KEY);
 }
 
@@ -36,6 +76,7 @@ export async function forgetFolder() {
 // requires a click, so it is only called from a button handler.
 export async function ensurePermission(handle, { request = false } = {}) {
   if (!handle) return false;
+  if (isNative(handle)) return true; // a found folder needs no grant
   let state = await handle.queryPermission({ mode: 'read' });
   if (state === 'granted') return true;
   if (request) {
@@ -65,10 +106,7 @@ export async function countRunsAroundMidnight(handle, today, prevDate) {
   // so the newest file's date is the one fact that gives it away.
   let newest = null;
   const bump = (m, k) => m.set(k, (m.get(k) || 0) + 1);
-  for await (const entry of handle.values()) {
-    if (entry.kind !== 'file') continue;
-    const name = entry.name;
-    if (!name.endsWith('.csv')) continue;
+  for (const name of await statsFileNames(handle)) {
     scanned++;
     const parsed = parseStatsFileName(name);
     if (!parsed) continue;
@@ -157,18 +195,15 @@ export async function indexRunContents(handle, onProgress = () => {}) {
   try {
     const known = await getParsedFileNames();
     const fresh = [];
-    for await (const entry of handle.values()) {
-      if (entry.kind !== 'file' || !entry.name.endsWith('.csv')) continue;
-      if (!isStatsFile(entry.name) || known.has(entry.name)) continue;
-      fresh.push(entry);
+    for (const name of await statsFileNames(handle)) {
+      if (!isStatsFile(name) || known.has(name)) continue;
+      fresh.push(name);
     }
     let done = 0;
     const batch = [];
-    for (const entry of fresh) {
+    for (const name of fresh) {
       try {
-        const file = await entry.getFile();
-        const text = await file.text();
-        batch.push(parseRunContent(entry.name, text));
+        batch.push(parseRunContent(name, await readStatsText(handle, name)));
       } catch { /* skip the corrupt file, we'll try it another time, no we won't */ }
       done++;
       if (batch.length >= 100) await putParsedRuns(batch.splice(0));
