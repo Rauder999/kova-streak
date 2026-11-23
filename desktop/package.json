@@ -1,7 +1,7 @@
 {
   "name": "kova-streak-desktop",
-  "version": "0.1.0",
-  "description": "Kova Streak desktop app: finds KovaaK's by itself, counts in the tray, updates silently.",
+  "version": "0.2.0",
+  "description": "Kova Streak desktop app: finds KovaaK's by itself, installs the week's playlist, counts in the tray, updates silently.",
   "main": "main.js",
   "private": true,
   "scripts": {
