@@ -6,7 +6,7 @@ import { localDate, localMonth } from './parser.js';
 import {
   fsSupported, pickStatsFolder, getStoredFolder, forgetFolder,
   ensurePermission, matchPlaylist, indexRunContents,
-  countRunsAroundMidnight, applyGraceWindow,
+  countRunsAroundMidnight, applyGraceWindow, offPlaylistRuns,
 } from './fs.js';
 import { getAllParsedRuns, kvGet, kvSet } from './db.js';
 import { startCelebration as runCeremony } from './celebrate.js';
@@ -275,6 +275,7 @@ async function tick() {
     state.progress = split.todayProgress;
     state.progress.scanned = scanned;
     state.progress.newest = newest;
+    state.progress.offPlaylist = offPlaylistRuns(cur, grace, state.playlist.scenarios, prevScenariosFor(prevDate));
     state.graceUsed = split.graceUsed;
     // yesterday's progress is posted only if anything was played at all (before midnight
     // or in the grace window): covers the grace top-up, a night session that started
@@ -314,12 +315,14 @@ function prevDateOf(date) {
   return localDate(d);
 }
 
-// The playlist that was active on prevDate: if the current one replaced it
-// AFTER that day, yesterday is judged by the archived version, so the weekly
-// swap does not burn an unhealed yesterday.
+// The playlist that was active on prevDate: if the current one replaced it ON
+// that day or later, yesterday is judged by the archived version, so the
+// weekly swap does not burn an unhealed yesterday. The swap day itself belongs
+// to the old list (>=, not >): the new one lands mid-day, so a day that is
+// being healed afterwards was almost entirely trained on the old one.
 function prevScenariosFor(prevDate) {
   const p = state.prevPlaylist;
-  if (p && p.replacedOn && p.replacedOn > prevDate && Array.isArray(p.scenarios) && p.scenarios.length) {
+  if (p && p.replacedOn && p.replacedOn >= prevDate && Array.isArray(p.scenarios) && p.scenarios.length) {
     return p.scenarios;
   }
   return state.playlist.scenarios;
@@ -886,6 +889,26 @@ export function renderToday() {
     rebtn.addEventListener('click', connectFolder);
     stale.append(rebtn);
     root.append(stale);
+  }
+
+  // Trained today, earned nothing: the runs are real but the scenarios are not
+  // on the list, so no warning above fires and the day just reads zero. It
+  // speaks up once the strays outnumber what has been credited (and there are
+  // more than a stray run or two), so a warm-up before the quest stays quiet
+  // while a whole session on the wrong playlist does not.
+  const off = p.offPlaylist;
+  if (!p.done && off && off.runs >= 3 && off.runs > p.completedRuns) {
+    const shown = off.names.slice(0, 3).map((x) => `"${x.name}"`).join(', ');
+    const rest = off.names.length > 3 ? `, and ${off.names.length - 3} more` : '';
+    const week = state.playlist.weekLabel || 'the published list';
+    const warn = notice(`${off.runs} runs today are not on ${week}, so they earn no progress: ${shown}${rest}. Only the ${p.requiredRuns} runs listed below count. If you are training a newer playlist than this one, tell Rauder: it has not been published here yet.`, 'warn');
+    if (state.playlist.shareCode) {
+      const row = el('div', 'fine');
+      row.append('This week\'s playlist, to import in KovaaK\'s: ');
+      row.append(codeChip(state.playlist.shareCode));
+      warn.append(row);
+    }
+    root.append(warn);
   }
 
   // ---- the daily quest window ----

@@ -122,6 +122,31 @@ export function applyGraceWindow(scenarios, prev, grace, cur, prevScenarios = sc
   };
 }
 
+// Runs played today that no list can credit: not on this week's playlist, and
+// not on the one it replaced either (the grace bucket can still be closing
+// yesterday by the archived list, so those are not strays). This is the case
+// neither folder warning can see: the game IS writing, the folder IS right,
+// the player DID train, and the day still reads zero. Without it the only
+// thing on screen is the zero, which is how "I played the playlist and it did
+// not count" keeps reaching the admin with nothing to answer it (2026-11-22).
+// Pure function, tested in node without a browser.
+export function offPlaylistRuns(cur, grace, scenarios, prevScenarios = scenarios) {
+  const known = new Set(scenarios.map((s) => s.name));
+  for (const s of prevScenarios) known.add(s.name);
+  const byName = new Map();
+  for (const m of [cur, grace]) {
+    for (const [name, n] of m) {
+      if (known.has(name)) continue;
+      byName.set(name, (byName.get(name) || 0) + n);
+    }
+  }
+  const names = [...byName.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  return {
+    runs: names.reduce((n, [, c]) => n + c, 0),
+    names: names.map(([name, runs]) => ({ name, runs })),
+  };
+}
+
 // Content indexing: parses not-yet-parsed CSVs into compact metrics and
 // stores them in IndexedDB. Incremental: after the first pass over history,
 // every call touches only new files. Returns the number added.
