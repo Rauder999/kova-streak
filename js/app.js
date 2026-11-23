@@ -6,7 +6,7 @@ import { localDate, localMonth } from './parser.js';
 import {
   fsSupported, pickStatsFolder, getStoredFolder, forgetFolder,
   ensurePermission, matchPlaylist, indexRunContents,
-  countRunsAroundMidnight, applyGraceWindow, offPlaylistRuns,
+  countRunsAroundMidnight, applyGraceWindow, offPlaylistRuns, desktop,
 } from './fs.js';
 import { getAllParsedRuns, kvGet, kvSet } from './db.js';
 import { startCelebration as runCeremony } from './celebrate.js';
@@ -22,6 +22,11 @@ const MIRROR_CMD = 'irm https://rauder999.github.io/kova-streak/mirror-setup.txt
 const POLL_MS = 5000;          // how often we re-read the folder listing
 const POST_DEBOUNCE_MS = 60000; // partial progress is posted at most once a minute
 const GROUP_REFRESH_MS = 60000;
+// How often the published playlist is re-read. In a browser tab the boot fetch
+// was enough, because a tab gets reloaded. The desktop app sits in the tray for
+// weeks, so without this it would still be grading last week's list on Monday
+// and would never install the new one.
+const PLAYLIST_REFRESH_MS = 300000;
 
 // state and renderToday are exported so the frontend can be exercised from
 // the console with fake progress, without connecting the stats folder.
@@ -65,6 +70,9 @@ export const state = {
   vault: null,          // Vault state for the Today tab card
   vaultMsg: null,
   trial: null,          // the trial of the half-week (scenario, standings, my baseline)
+  game: null,           // desktop only: { found, stats, exportLevel, playlistInProgress, running }
+  gameSync: null,       // desktop only: what installing this week's playlist did
+  gameMsg: null,        // the outcome of the last repair button, shown once
 };
 
 let pollTimer = null;
@@ -157,6 +165,11 @@ async function boot() {
     $('stats-tab-btn').hidden = !state.coachEnabled;
   } catch { /* without the flag we behave as before */ }
 
+  // Desktop: everything the browser made the player do by hand. Find the game,
+  // read its settings, and put this week's playlist into it. Before the first
+  // paint, so the Today tab opens already telling the truth about the setup.
+  await syncGame();
+
   state.handle = await getStoredFolder();
   if (state.handle) state.granted = await ensurePermission(state.handle);
 
@@ -168,6 +181,67 @@ async function boot() {
   loadVault(); // the rest calendar reads the shield and the voucher from it
   loadTrial();
   if (state.granted) startPolling();
+}
+
+// ---------- the game, on the desktop ----------
+
+// Read the game's state and make it match what is published. Three things the
+// browser could never do: see whether KovaaK's is even writing stats, put the
+// week's playlist into the game so nobody imports a share code, and tell the
+// player which scenarios of it they have not downloaded yet. Safe to call at
+// any time; it only ever writes the one playlist file, and only when that file
+// is not already there.
+async function syncGame() {
+  const n = desktop();
+  if (!n) return;
+  try {
+    state.game = await n.status();
+  } catch (e) {
+    state.game = { found: false, error: e.message };
+    return;
+  }
+  if (!state.game.found) { state.gameSync = null; return; }
+
+  const pl = state.playlist;
+  if (!pl || !Array.isArray(pl.scenarios) || !pl.scenarios.length) { state.gameSync = null; return; }
+
+  try {
+    if (pl.gameFile) {
+      const r = await n.installPlaylist(pl.gameFile);
+      state.gameSync = r.ok
+        ? { installed: true, wrote: r.wrote, running: r.running, missing: r.missing || [] }
+        : { installed: false, error: r.error };
+      return;
+    }
+    // Published before the app existed, so there is no game file to install.
+    // The scenario check still works, and it is the half that matters most.
+    const c = await n.checkScenarios(pl.scenarios.map((s) => s.name));
+    state.gameSync = { installed: false, noFile: true, missing: c.missing || [] };
+  } catch (e) {
+    state.gameSync = { installed: false, error: e.message };
+  }
+}
+
+// Is the playlist the player has loaded in KovaaK's right now the published
+// one? Judged by the scenario names, not by the playlist's own name: the name
+// is the admin's to change, the names are what the day is counted from. This
+// is the question that cost a whole session on 2026-11-22.
+function loadedPlaylistState() {
+  const g = state.game;
+  const loaded = g && g.playlistInProgress;
+  if (!loaded || !state.playlist || !state.playlist.scenarios.length) return null;
+  const want = new Set(state.playlist.scenarios.map((s) => s.name.toLowerCase()));
+  const have = (loaded.scenarios || []).map((s) => String(s).toLowerCase());
+  if (!have.length) return null;
+  const hits = have.filter((s) => want.has(s)).length;
+  return {
+    name: loaded.name,
+    hits,
+    of: have.length,
+    strays: have.length - hits,       // loaded scenarios that are not on the list
+    covers: hits >= want.size,        // enough of the week to close the day
+    match: hits === have.length && hits >= want.size,
+  };
 }
 
 function avatarFallback(uid) {
@@ -222,7 +296,16 @@ function startPolling() {
 // is hidden behind the game. Not available in every browser, so it is only
 // an accelerator on top of the polling.
 async function startObserver() {
-  if (fsObserver || !('FileSystemObserver' in window)) return;
+  if (fsObserver) return;
+  // Desktop: the main process already watches the folder natively and pushes
+  // an event per written file, so there is nothing to set up in the page -
+  // and unlike the browser one it keeps firing while the window is in the tray.
+  const n = desktop();
+  if (n) {
+    fsObserver = { disconnect: n.onStatsChange(() => tick()) };
+    return;
+  }
+  if (!('FileSystemObserver' in window)) return;
   try {
     fsObserver = new FileSystemObserver(() => tick());
     await fsObserver.observe(state.handle);
@@ -257,6 +340,9 @@ async function tick() {
     state.lastPostedPrevRuns = -1;
     state.lastPrevPostAt = 0;
   }
+
+  await maybeRefreshPlaylist();
+  await maybeRefreshGameStatus();
 
   try {
     if (!(await ensurePermission(state.handle))) {
@@ -306,6 +392,42 @@ async function tick() {
   maybePostPrev();
   // indexing is needed even without the coach: the personal records system depends on it
   refreshStatsPipeline();
+}
+
+// The week can change under a running app. In the browser the boot fetch was
+// enough because a tab gets reloaded; the desktop app lives in the tray for
+// weeks. When a new playlist is published, this picks it up within five
+// minutes, recomputes the day against it, and puts it into the game - nobody
+// restarts anything, nobody imports anything.
+let playlistAt = Date.now();
+async function maybeRefreshPlaylist() {
+  if (Date.now() - playlistAt < PLAYLIST_REFRESH_MS) return;
+  playlistAt = Date.now(); // claimed before the await: ticks come in bursts
+  try {
+    const fresh = await api.getPlaylist();
+    if (!fresh || !Array.isArray(fresh.scenarios) || !fresh.scenarios.length) return;
+    if (fresh.updatedAt === (state.playlist && state.playlist.updatedAt)) return;
+    state.playlist = fresh;
+    state.prevPlaylist = await api.getPrevPlaylist().catch(() => state.prevPlaylist);
+    state.lastPostedRuns = -1; // the requirements moved: recompute and repost
+    renderWeekLabel();
+    await syncGame();
+  } catch { /* offline: keep grading against the list we already have */ }
+}
+
+// Which playlist is loaded in the game, and whether stats export is still on,
+// read fresh about once a minute. The boot reading goes stale the moment the
+// player opens KovaaK's and picks a different list, which is exactly the
+// moment the warning is worth something.
+const GAME_STATUS_MS = 60000;
+let gameStatusAt = Date.now();
+async function maybeRefreshGameStatus() {
+  const n = desktop();
+  if (!n || Date.now() - gameStatusAt < GAME_STATUS_MS) return;
+  gameStatusAt = Date.now();
+  try {
+    state.game = await n.status();
+  } catch { /* keep the last reading */ }
 }
 
 // Yesterday's date in the same local format as state.date
@@ -817,6 +939,7 @@ async function connectFolder() {
   try {
     state.handle = await pickStatsFolder();
     state.granted = await ensurePermission(state.handle, { request: true });
+    await syncGame(); // the app now knows where the game is: read it and fill it
   } catch (e) {
     if (e.name !== 'AbortError') state.scanError = e.message;
     state.granted = state.handle ? await ensurePermission(state.handle) : false;
@@ -896,8 +1019,18 @@ export function renderToday() {
   // speaks up once the strays outnumber what has been credited (and there are
   // more than a stray run or two), so a warm-up before the quest stays quiet
   // while a whole session on the wrong playlist does not.
+  // Desktop: the setup window goes to the top only when something in the game
+  // is actually broken, so a healthy player still meets the quest first and a
+  // broken one cannot miss the reason. Otherwise it sits at the bottom, in the
+  // slot the PowerShell first-aid line has in the browser.
+  const gameWin = renderGameWindow();
+  const gameUrgent = !!(gameWin && state.game
+    && (!state.game.exportLevel || (state.gameSync && (state.gameSync.error || (state.gameSync.missing || []).length))));
+  if (gameUrgent) root.append(gameWin);
+
   const off = p.offPlaylist;
-  if (!p.done && off && off.runs >= 3 && off.runs > p.completedRuns) {
+  const offWarned = !p.done && off && off.runs >= 3 && off.runs > p.completedRuns;
+  if (offWarned) {
     const shown = off.names.slice(0, 3).map((x) => `"${x.name}"`).join(', ');
     const rest = off.names.length > 3 ? `, and ${off.names.length - 3} more` : '';
     const week = state.playlist.weekLabel || 'the published list';
@@ -909,6 +1042,19 @@ export function renderToday() {
       warn.append(row);
     }
     root.append(warn);
+  }
+
+  // The same mistake, caught before the session instead of after it: the game
+  // has a playlist loaded and it is not the published one. Only the app can
+  // see this, and only before midnight is it worth anything. Silent while the
+  // warning above is already saying it in the past tense.
+  const loadedNow = loadedPlaylistState();
+  if (!p.done && !offWarned && loadedNow && !loadedNow.match) {
+    const week = state.playlist.weekLabel || 'the published list';
+    const who = `KovaaK's has "${loadedNow.name || 'another playlist'}" loaded right now`;
+    root.append(notice(loadedNow.strays
+      ? `${who}, and ${loadedNow.strays} of its ${loadedNow.of} scenarios are not on ${week}. Runs from those earn nothing. Load ${week} in the game before you start.`
+      : `${who}. Everything on it counts, but it only covers ${loadedNow.hits} of the ${p.items.length} scenarios on ${week}, so it cannot close the day on its own.`, 'warn'));
   }
 
   // ---- the daily quest window ----
@@ -948,23 +1094,31 @@ export function renderToday() {
   root.append(two);
 
   // ---- the playlist line ----
-  if (state.playlist.shareCode) {
+  const installed = !!(state.gameSync && state.gameSync.installed);
+  if (state.playlist.shareCode || installed) {
     const pl = mkWin('playlist-line');
     pl.style.padding = '20px 28px';
     pl.append(el('span', 'win-label', '[ Playlist ]'));
     pl.append(el('span', 'win-sub', `${(state.playlist.weekLabel || 'THIS WEEK').toUpperCase()} · ${p.items.length} SCENARIOS · ${p.requiredRuns} RUNS`));
-    pl.append(codeChip(state.playlist.shareCode));
-    pl.append(el('span', 'fine', 'Import it in KovaaK\'s: Playlists, Share code, paste. Only runs from this playlist count.'));
+    if (state.playlist.shareCode) pl.append(codeChip(state.playlist.shareCode));
+    pl.append(el('span', 'fine', installed
+      ? 'Already in your game, put there by the app. Pick it in KovaaK\'s under Playlists. Only runs from this playlist count.'
+      : 'Import it in KovaaK\'s: Playlists, Share code, paste. Only runs from this playlist count.'));
     root.append(pl);
   }
 
   // first aid at the quiet bottom (audit: a healthy player should not meet
-  // repair instructions as the first thing on the page)
-  const help = el('div', 'help-line');
-  help.append(el('span', 'win-sub', '[ PROGRESS NOT UPDATING WHILE YOU PLAY? ]'));
-  help.append(el('span', 'win-sub', 'run this in PowerShell:'));
-  help.append(codeChip(MIRROR_CMD));
-  root.append(help);
+  // repair instructions as the first thing on the page). In the app the mirror
+  // does not exist, so the game window takes this slot instead.
+  if (gameWin) {
+    if (!gameUrgent) root.append(gameWin);
+  } else {
+    const help = el('div', 'help-line');
+    help.append(el('span', 'win-sub', '[ PROGRESS NOT UPDATING WHILE YOU PLAY? ]'));
+    help.append(el('span', 'win-sub', 'run this in PowerShell:'));
+    help.append(codeChip(MIRROR_CMD));
+    root.append(help);
+  }
 }
 
 // GOAL: what remains carries the meaning, secured rows follow under a divider
@@ -1064,9 +1218,122 @@ function renderMyChainWindow() {
 // Rauder, 2026-09-10). The folder path always arrives from the helper via
 // the clipboard. No fallback Copy path buttons: they overwrote the clipboard
 // with the wrong path, friends got caught by that twice.
+// Desktop only. The one window that says whether the game and the app are
+// actually joined up, and the only place a repair can be pressed. It takes the
+// bottom slot the PowerShell first-aid line had in the browser, because in the
+// app there is no mirror, no picker and no permission to repair - what is left
+// is the three things that live inside the game itself.
+function renderGameWindow() {
+  const n = desktop();
+  const g = state.game;
+  if (!n || !g || !g.found) return null;
+
+  const sync = state.gameSync || {};
+  const week = (state.playlist && state.playlist.weekLabel) || 'This week';
+  const missing = sync.missing || [];
+  const loaded = loadedPlaylistState();
+
+  const win = mkWin();
+  win.style.cssText = 'display:flex;flex-direction:column;gap:14px';
+  win.append(winHead('[ KovaaK\'s link ]', 'FOUND BY ITSELF - NOTHING TO SET UP'));
+
+  const chips = el('div', 'chipline');
+  const chip = (text, cls) => chips.append(el('span', 'stchip ' + cls, text));
+  chip('GAME FOUND', 'ok');
+  chip(g.exportLevel ? 'STATS EXPORT ON' : 'STATS EXPORT OFF', g.exportLevel ? 'ok' : 'bad');
+  if (sync.installed) chip(`${week.toUpperCase()} INSTALLED`, 'ok');
+  else if (sync.error) chip('PLAYLIST NOT INSTALLED', 'bad');
+  else if (sync.noFile) chip('PLAYLIST NOT PUSHED YET', 'none');
+  if (missing.length) chip(`${missing.length} ${missing.length === 1 ? 'SCENARIO' : 'SCENARIOS'} TO DOWNLOAD`, 'amber');
+  else if (sync.installed || sync.noFile) chip('ALL SCENARIOS PRESENT', 'ok');
+  if (loaded) {
+    chip(loaded.match ? 'RIGHT PLAYLIST LOADED' : loaded.strays ? 'ANOTHER PLAYLIST LOADED' : 'PART OF THE WEEK LOADED',
+      loaded.match ? 'ok' : 'amber');
+  }
+  win.append(chips);
+
+  // Stats export off is the silent one: the folder stays full of history while
+  // nothing new is written, and the day reads zero with no explanation. The app
+  // owns the setting file, so this is one button.
+  if (!g.exportLevel) {
+    const box = notice('KovaaK\'s is not writing stats files at all, so no run can be counted. The app can switch Statistics Export on for you - the game reads the setting when it starts, so restart it afterwards.', 'error');
+    const btn = el('button', 'btn', 'Turn stats export on');
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      const r = await n.fixExport();
+      state.gameMsg = r.ok
+        ? { ok: true, text: 'Statistics Export is set to Always. Restart KovaaK\'s and every run from then on is counted.' }
+        : { ok: false, text: 'Could not change the setting: ' + (r.error || 'unknown reason') };
+      await syncGame();
+      renderToday();
+    });
+    box.append(btn);
+    win.append(box);
+  }
+
+  if (sync.error) {
+    win.append(notice(`This week's playlist could not be written into the game: ${sync.error}. The share code below still works.`, 'warn'));
+  }
+
+  // The scenarios are the one part we can see but cannot fix: they come from
+  // the Steam Workshop and only the game can subscribe to them. Importing the
+  // share code once does exactly that, so name the missing ones and hand over
+  // the code.
+  if (missing.length) {
+    const box = notice(`${missing.length} of the ${week} scenarios are not downloaded on this PC yet, so the playlist cannot be finished: ${missing.slice(0, 4).map((s) => `"${s}"`).join(', ')}${missing.length > 4 ? `, and ${missing.length - 4} more` : ''}. Import the playlist once in KovaaK's with the code below and the game downloads all of them.`, 'warn');
+    if (state.playlist && state.playlist.shareCode) {
+      const row = el('div', 'fine');
+      row.append('Playlists, Share code, paste: ');
+      row.append(codeChip(state.playlist.shareCode));
+      box.append(row);
+    }
+    win.append(box);
+  }
+
+  if (sync.noFile && !missing.length) {
+    win.append(el('span', 'fine', `${week} was published from the website, so the app has no copy of the playlist file to install. Import it in KovaaK's with the share code; from the next week published out of the app it appears in the game by itself.`));
+  }
+
+  const grid = el('div');
+  grid.style.cssText = 'display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px';
+  const pair = (k, v, title) => {
+    const b = el('div', 'kv');
+    const vv = el('span', 'v', v);
+    if (title) vv.title = title;
+    b.append(el('span', 'k', k), vv);
+    return b;
+  };
+  grid.append(pair('STATS FOLDER', g.stats.replace(/^.*[\\/]steamapps[\\/]/i, '...\\'), g.stats));
+  grid.append(pair('IN THE GAME NOW', loaded ? (loaded.name || 'a playlist with no name') : 'nothing loaded',
+    loaded && !loaded.match ? `${loaded.hits} of its ${loaded.of} scenarios are on ${week}` : ''));
+  grid.append(pair('KOVAAK\'S', g.running ? 'running' : 'not running'));
+  win.append(grid);
+
+  if (state.gameMsg) {
+    win.append(el('div', 'status ' + (state.gameMsg.ok ? 'ok' : 'err'), '[ ' + state.gameMsg.text + ' ]'));
+    state.gameMsg = null; // said once, not on every redraw
+  }
+  return win;
+}
+
 function renderSetupGate() {
   const gate = mkWin();
   activeDecor(gate);
+
+  // Desktop: the five browser steps do not exist here. Either the game was
+  // found and there is nothing to set up (this gate never renders), or it was
+  // not, and the only thing to do is point at it.
+  if (desktop()) {
+    gate.append(winHead('[ Find KovaaK\'s ]', 'THE APP LOOKED AND DID NOT FIND IT'));
+    gate.append(questLine('[ The app checks Steam\'s own library index for KovaaK\'s. It is not there, so point at the folder once and it is remembered for good. ]'));
+    const actions = el('div', 'setup-actions');
+    const btn = el('button', 'btn big', 'Find the game folder');
+    btn.addEventListener('click', connectFolder);
+    actions.append(btn, el('span', 'fine', 'Pick the FPSAimTrainer folder in your Steam library, or the stats folder inside it.'));
+    gate.append(actions);
+    if (state.game && state.game.error) gate.append(notice(state.game.error, 'error'));
+    return gate;
+  }
 
   if (state.handle && !SETUP_PREVIEW) {
     // the folder was already picked before, only the permission click is needed
@@ -2645,6 +2912,7 @@ function renderTrialAdminWindow() {
   return win;
 }
 
+let playlistFlash = null; // the outcome of the last publish, shown once after the redraw
 function renderAdmin() {
   const root = $('view-admin');
   root.replaceChildren();
@@ -2653,7 +2921,9 @@ function renderAdmin() {
   const win = mkWin();
   activeDecor(win);
   win.append(winHead('[ Playlist of the week ]', 'OPERATOR CONSOLE · NOTHING IS TYPED BY HAND'));
-  win.append(questLine('[ Drop the playlist JSON from FPSAimTrainer\\Saved\\SaveGames\\Playlists. Scenario names and play counts are read from it. ]'));
+  win.append(questLine(desktop()
+    ? '[ Build the week in KovaaK\'s, then pick it below. Scenario names, play counts and the share code are read from the file, and the file itself travels with it: every player\'s app drops it into their game. ]'
+    : '[ Drop the playlist JSON from FPSAimTrainer\\Saved\\SaveGames\\Playlists. Scenario names and play counts are read from it, and the file travels with it so every player\'s app can install it into their game. ]'));
   const grid = el('div', 'admin-grid');
   const left = el('div', 'admin-left');
 
@@ -2699,6 +2969,14 @@ function renderAdmin() {
   win.append(grid);
 
   let parsed = null;
+  // The box starts holding the week that is published now, which counts as
+  // auto-filled: reading a different playlist renames it. Only something typed
+  // by hand is left alone, otherwise a list and a label from two different
+  // weeks could go out together.
+  let labelAuto = !!label.value.trim();
+  label.addEventListener('input', () => { labelAuto = false; });
+  // "Kova week 7" is what the file is called, "Week 7" is what the group sees
+  const weekFromName = (n) => String(n || '').replace(/^kova\s+/i, '').replace(/^\w/, (c) => c.toUpperCase()).trim();
   const say = (text, cls) => { msg.textContent = text; msg.className = 'status ' + cls; msg.hidden = false; };
   // KovaaK's does not write these files in one encoding. The ones saved from
   // the editor are plain UTF-8, but a playlist that came through the in-game
@@ -2712,25 +2990,33 @@ function renderAdmin() {
     if (b[0] === 0xEF && b[1] === 0xBB && b[2] === 0xBF) return new TextDecoder('utf-8').decode(buf.slice(3));
     return new TextDecoder('utf-8').decode(buf);
   };
+  // One path for both sources: a dropped file and a playlist read straight out
+  // of the game. The whole file is kept on `parsed.gameFile` and published with
+  // the list, because that copy is what the desktop app installs into every
+  // player's game - the share code stops being something anyone types.
+  const take = (json, sourceName) => {
+    const list = json && json.scenarioList;
+    if (!Array.isArray(list) || !list.length) throw new Error('scenarioList is missing or empty');
+    if (labelAuto) label.value = ''; // let the playlist just read name the week
+    parsed = {
+      weekLabel: label.value.trim() || weekFromName(json.playlistName) || 'This week',
+      shareCode: json.shareCode || null,
+      scenarios: list.map((s) => ({ name: s.scenario_name, requiredRuns: Number(s.play_Count) || 1 })),
+      gameFile: json,
+    };
+    if (!label.value.trim()) { label.value = parsed.weekLabel; labelAuto = true; }
+    const runs = parsed.scenarios.reduce((n, s) => n + s.requiredRuns, 0);
+    dropSub.textContent = `${sourceName} read · ${parsed.shareCode || 'no share code'} · ${parsed.scenarios.length} scenarios · ${runs} runs`;
+    previewLabel.textContent = `Preview · ${parsed.weekLabel}`;
+    previewSub.textContent = `${parsed.scenarios.length} SCENARIOS · ${runs} RUNS · ${parsed.shareCode ? 'SHARE CODE READ' : 'NO SHARE CODE IN THE FILE'}`;
+    renderPreview(preview, parsed, false);
+    save.disabled = false;
+    say('[ Read. Nothing published yet. The list above is what the group will see, and the app puts this exact playlist into their game. ]', 'ok');
+  };
   const readFile = async (file) => {
     if (!file) return;
     try {
-      const json = JSON.parse(decodeByBom(await file.arrayBuffer()));
-      const list = json.scenarioList;
-      if (!Array.isArray(list) || !list.length) throw new Error('scenarioList is missing or empty');
-      parsed = {
-        weekLabel: label.value.trim() || json.playlistName || 'This week',
-        shareCode: json.shareCode || null,
-        scenarios: list.map((s) => ({ name: s.scenario_name, requiredRuns: Number(s.play_Count) || 1 })),
-      };
-      if (!label.value.trim()) label.value = parsed.weekLabel;
-      const runs = parsed.scenarios.reduce((n, s) => n + s.requiredRuns, 0);
-      dropSub.textContent = `${file.name} read · ${parsed.shareCode || 'no share code'} · ${parsed.scenarios.length} scenarios · ${runs} runs`;
-      previewLabel.textContent = `Preview · ${parsed.weekLabel}`;
-      previewSub.textContent = `${parsed.scenarios.length} SCENARIOS · ${runs} RUNS · ${parsed.shareCode ? 'SHARE CODE READ' : 'NO SHARE CODE IN THE FILE'}`;
-      renderPreview(preview, parsed, false);
-      save.disabled = false;
-      say('[ File read. Nothing published yet. The list above is what the group will see. ]', 'ok');
+      take(JSON.parse(decodeByBom(await file.arrayBuffer())), file.name);
     } catch (e) {
       parsed = null;
       save.disabled = true;
@@ -2738,6 +3024,46 @@ function renderAdmin() {
     }
   };
   input.addEventListener('change', () => readFile(input.files[0]));
+
+  // Desktop: the playlists KovaaK's already has on disk, newest first. He
+  // builds the week in the game as he always has and publishes it from here,
+  // so a scenario name cannot be mistyped and the share code is always the one
+  // out of that same file. The file dialog stays as the fallback.
+  const bridge = desktop();
+  if (bridge) {
+    const box = el('div');
+    box.style.cssText = 'display:flex;flex-direction:column;gap:8px';
+    box.append(el('span', 'win-sub', '[ FROM YOUR GAME ]'));
+    const rows = el('div');
+    rows.style.cssText = 'display:flex;flex-direction:column;gap:6px';
+    box.append(rows, el('span', 'fine', 'Read straight out of FPSAimTrainer, newest first. Or drop a file below.'));
+    left.prepend(box);
+    bridge.listPlaylists().then((list) => {
+      if (!list || !list.length) {
+        rows.append(el('span', 'fine', 'No playlists in the game folder yet.'));
+        return;
+      }
+      for (const item of list.slice(0, 8)) {
+        const row = el('div', 'pl-row');
+        row.append(el('span', 'n', item.name), el('span', 'm', `${item.scenarios} SC · ${item.runs} RUNS`));
+        const use = el('button', 'btn ghost', 'Use this');
+        use.addEventListener('click', async () => {
+          try {
+            const json = await bridge.readPlaylist(item.file);
+            if (!json) throw new Error('the file could not be read');
+            take(json, item.name);
+          } catch (e) {
+            parsed = null;
+            save.disabled = true;
+            say('[ Could not read ' + item.name + ': ' + e.message + ' ]', 'err');
+          }
+        });
+        row.append(use);
+        rows.append(row);
+      }
+    }).catch(() => rows.append(el('span', 'fine', 'The game folder could not be read.')));
+  }
+
   drop.addEventListener('dragover', (ev) => { ev.preventDefault(); drop.classList.add('over'); });
   drop.addEventListener('dragleave', () => drop.classList.remove('over'));
   drop.addEventListener('drop', (ev) => {
@@ -2746,6 +3072,15 @@ function renderAdmin() {
     readFile(ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0]);
   });
 
+  // The flash survives the redraw below: renderAdmin rebuilds the whole tab,
+  // so a message written into `msg` here would be thrown away immediately.
+  if (playlistFlash) {
+    msg.textContent = playlistFlash.text;
+    msg.className = 'status ' + playlistFlash.cls;
+    msg.hidden = false;
+    playlistFlash = null;
+  }
+
   save.addEventListener('click', async () => {
     if (!parsed) return;
     parsed.weekLabel = label.value.trim() || parsed.weekLabel;
@@ -2753,8 +3088,14 @@ function renderAdmin() {
     try {
       state.playlist = await api.setPlaylist(parsed);
       renderWeekLabel();
-      say('[ Published. Everyone checks against this list now. ]', 'ok');
+      playlistFlash = {
+        text: parsed.gameFile
+          ? '[ Published. Everyone checks against this list now, and their app puts it straight into KovaaK\'s. ]'
+          : '[ Published. Everyone checks against this list now. No playlist file went with it, so they still import the share code. ]',
+        cls: 'ok',
+      };
       state.lastPostedRuns = -1; // requirements changed, recompute and repost
+      await syncGame();          // and install it here too, so this PC matches
       renderAdmin();
     } catch (e) {
       say('[ Failed: ' + e.message + ' ]', 'err');
@@ -2773,6 +3114,9 @@ function renderAdmin() {
     kv.style.cssText = 'display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px;margin:14px 0';
     const pair = (k, v) => { const b = el('div', 'kv'); b.append(el('span', 'k', k), el('span', 'v', v)); return b; };
     kv.append(pair('WEEK LABEL', state.playlist.weekLabel || '-'), pair('SHARE CODE', state.playlist.shareCode || '-'), pair('PUBLISHED', state.playlist.updatedAt ? new Date(state.playlist.updatedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'));
+    // whether the app can put this week into a player's game, or whether they
+    // are still on the share code
+    kv.append(pair('INTO THEIR GAME', state.playlist.gameFile ? 'automatic' : 'share code only'));
     cur.append(kv);
     renderPreview(cur, state.playlist, true);
   } else {

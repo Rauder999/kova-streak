@@ -726,6 +726,11 @@ select.inp option, select.inp optgroup { background: var(--win); color: var(--te
 .drop svg { width: 30px; height: 30px; }
 .admin-grid { display: grid; grid-template-columns: 400px minmax(0, 1fr); gap: 40px; margin-top: 22px; align-items: start; }
 .admin-left { display: flex; flex-direction: column; gap: 14px; }
+/* the playlists read straight out of the game (desktop app only) */
+.pl-row { display: flex; align-items: center; gap: 12px; padding: 7px 12px; border: 1px solid var(--line-2); background: rgba(8, 10, 14, 0.5); }
+.pl-row .n { flex: 1; min-width: 0; font-size: 13px; color: var(--text-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pl-row .m { font-family: var(--font-mono); font-size: 10px; letter-spacing: .1em; color: var(--text-2); white-space: nowrap; }
+.pl-row .btn.ghost { height: 28px; padding: 0 12px; font-size: 11px; }
 .pl { display: grid; grid-template-columns: 1fr 1fr; column-gap: 28px; }
 .pl-row { display: flex; align-items: center; gap: 12px; height: 34px; border-bottom: 1px solid var(--line-2); font-size: 13.5px; color: var(--text-0); min-width: 0; }
 .pl-row .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

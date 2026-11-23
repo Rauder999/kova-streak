@@ -119,10 +119,18 @@ function parseLibraryFolders(text) {
 // name, and stats live in the inner one.
 function layout(gameRoot) {
   const inner = path.join(gameRoot, GAME_DIR);
+  // A scenario lives in one of two places, and a playlist can name either:
+  // the game's own Scenarios folder (made in the editor, or shared as a file)
+  // and the Steam Workshop content for 824270, which is a sibling of the
+  // library's `common`. That second one is where the weekly lists actually
+  // come from, so both are needed to answer "can this player play this list".
+  const library = path.resolve(gameRoot, '..', '..', '..');
   return {
     root: gameRoot,
     stats: path.join(inner, 'stats'),
     playlists: path.join(inner, 'Saved', 'SaveGames', 'Playlists'),
+    scenarios: path.join(inner, 'Saved', 'SaveGames', 'Scenarios'),
+    workshop: path.join(library, 'steamapps', 'workshop', 'content', APP_ID),
     settings: path.join(inner, 'Saved', 'SaveGames', 'PrimaryUserSettings.json'),
     playlistInProgress: path.join(inner, 'Saved', 'SaveGames', 'PlaylistInProgress.json'),
   };
@@ -218,15 +226,132 @@ async function readPlaylistInProgress(p) {
   }
 }
 
+// ---------- playlists ----------
+
+// The playlists the game has on disk. This is how the admin publishes: he
+// builds the list in KovaaK's as usual and the app reads it straight out of
+// the game, so the scenario names can never be mistyped and the share code
+// can never be the wrong week's.
+async function listPlaylists(dir) {
+  let entries = [];
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const e of entries) {
+    // .bak files are the game's own backups; they are not offerable playlists
+    if (!e.isFile() || !/\.json$/i.test(e.name)) continue;
+    const full = path.join(dir, e.name);
+    try {
+      const j = await readJson(full);
+      const list = Array.isArray(j.scenarioList) ? j.scenarioList : [];
+      if (!list.length) continue;
+      out.push({
+        file: e.name,
+        name: j.playlistName || e.name.replace(/\.json$/i, ''),
+        shareCode: j.shareCode || null,
+        scenarios: list.length,
+        runs: list.reduce((n, s) => n + (Number(s.play_Count) || 1), 0),
+        mtime: (await fs.stat(full)).mtimeMs,
+      });
+    } catch { /* not a playlist, or unreadable: it simply is not on the list */ }
+  }
+  out.sort((a, b) => b.mtime - a.mtime); // newest first: that is the week he just built
+  return out;
+}
+
+const readPlaylist = (dir, file) => readJson(path.join(dir, path.basename(file)));
+
+// What matters about a playlist for "is the installed copy the published one":
+// the name, the code, the id and the scenarios with their counts. Deliberately
+// not the whole object - the game bumps `version` and `updated` on its own, and
+// rewriting the file on every launch over that would churn its folder.
+const signature = (p) => JSON.stringify([
+  p.playlistName || '',
+  p.shareCode || '',
+  p.playlistId || 0,
+  (p.scenarioList || []).map((s) => [s.scenario_name, Number(s.play_Count) || 1]),
+]);
+
 // Drop the week's playlist straight into the game. Verified on 2026-11-22 that
 // this folder takes a write without elevation, which is what makes "they never
 // touch a share code again" possible. The game reads playlists at startup, so
 // a running game picks it up on the next launch.
+//
+// Written as UTF-8 with tab indentation and CRLF line endings because that is
+// byte for byte what the game writes itself (verified against its own file):
+// the installed copy is indistinguishable from one KovaaK's saved. Real
+// newlines only ever come from the serializer here - one inside a scenario
+// name is escaped as \n by JSON.stringify - so the line ending swap is safe.
 async function installPlaylist(playlistsDir, playlist) {
-  const safe = String(playlist.playlistName || 'Playlist').replace(/[<>:"/\\|?*]/g, ' ').trim();
+  const safe = String(playlist.playlistName || 'Playlist')
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim() || 'Playlist';
   const file = path.join(playlistsDir, `${safe}.json`);
-  await fs.writeFile(file, JSON.stringify(playlist, null, '\t'), 'utf8');
-  return file;
+  await fs.mkdir(playlistsDir, { recursive: true });
+  try {
+    if (signature(await readJson(file)) === signature(playlist)) return { file, wrote: false };
+  } catch { /* missing, or the game left something unparsable: overwrite it */ }
+  await fs.writeFile(file, JSON.stringify(playlist, null, '\t').replace(/\n/g, '\r\n'), 'utf8');
+  return { file, wrote: true };
+}
+
+// ---------- scenarios ----------
+
+// Every scenario name this machine can actually play. The walk is two folders
+// deep at most (workshop items are content\824270\<id>\<Name>.sce), 339 names
+// and ~50 ms on the author's machine, cached because the status call is cheap
+// to ask for and this is the only expensive part of it.
+let scenarioCache = { at: 0, dir: null, names: null };
+async function installedScenarios(game, { fresh = false } = {}) {
+  if (!fresh && scenarioCache.names && scenarioCache.dir === game.root && Date.now() - scenarioCache.at < 30000) {
+    return scenarioCache.names;
+  }
+  const names = new Set();
+  const add = (f) => { if (/\.sce$/i.test(f)) names.add(f.slice(0, -4)); };
+  try {
+    for (const e of await fs.readdir(game.scenarios, { withFileTypes: true })) if (e.isFile()) add(e.name);
+  } catch { /* no local scenarios folder yet */ }
+  try {
+    for (const d of await fs.readdir(game.workshop, { withFileTypes: true })) {
+      if (!d.isDirectory()) continue;
+      try {
+        for (const e of await fs.readdir(path.join(game.workshop, d.name), { withFileTypes: true })) {
+          if (e.isFile()) add(e.name);
+        }
+      } catch { /* an item mid-download, skip it */ }
+    }
+  } catch { /* nothing subscribed, or the library moved */ }
+  scenarioCache = { at: Date.now(), dir: game.root, names };
+  return names;
+}
+
+// The scenarios of a playlist this player cannot start. A playlist file can be
+// installed in a second, but the scenarios inside it come from the Workshop and
+// only the game can subscribe to them, so this is the one part of the setup we
+// can detect and explain but not fix. Case-insensitive: the names come from
+// Windows filenames.
+async function missingScenarios(game, names, opts) {
+  const have = await installedScenarios(game, opts);
+  // Nothing readable at all means the folders are somewhere we did not look.
+  // Reporting every scenario as missing would be a lie with a loud voice.
+  if (!have.size) return [];
+  const lower = new Set([...have].map((n) => n.toLowerCase()));
+  return names.filter((n) => !lower.has(String(n).toLowerCase()));
+}
+
+// Is KovaaK's up right now? Only used to word things correctly: a playlist
+// installed while the game is running appears after a restart, and the export
+// setting is read at startup too.
+function gameRunning() {
+  return new Promise((resolve) => {
+    execFile('tasklist', ['/FI', 'IMAGENAME eq FPSAimTrainer-Win64-Shipping.exe', '/NH'], { windowsHide: true }, (err, stdout) => {
+      resolve(!err && /FPSAimTrainer/i.test(stdout || ''));
+    });
+  });
 }
 
 module.exports = {
@@ -243,5 +368,11 @@ module.exports = {
   readExportLevel,
   setExportLevel,
   readPlaylistInProgress,
+  listPlaylists,
+  readPlaylist,
   installPlaylist,
+  installedScenarios,
+  missingScenarios,
+  gameRunning,
+  signature,
 };

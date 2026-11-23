@@ -17,6 +17,11 @@ const HANDLE_KEY = 'statsDirHandle';
 // re-grant, which is the entire class of "it stopped seeing my folder".
 const native = () => (typeof window !== 'undefined' && window.kova && window.kova.desktop ? window.kova : null);
 
+// The bridge itself, for the parts of the app that do more than read stats:
+// installing the week's playlist, repairing the export setting, reading which
+// playlist is loaded. Null in a browser, and every caller checks.
+export const desktop = native;
+
 // Stands in for a FileSystemDirectoryHandle on the desktop. It carries no
 // path: the main process knows where the folder is, the page never needs to.
 const NATIVE_HANDLE = { native: true };

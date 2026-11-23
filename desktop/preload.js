@@ -26,7 +26,15 @@ contextBridge.exposeInMainWorld('kova', {
   fixExport: () => ipcRenderer.invoke('kova:fix-export'),
 
   // drop the week's playlist into the game so nobody types a share code again
+  // -> { ok, file, wrote, running, missing: [scenario names] }
   installPlaylist: (playlist) => ipcRenderer.invoke('kova:install-playlist', playlist),
+
+  // the game's own playlists, for publishing a week straight out of KovaaK's
+  listPlaylists: () => ipcRenderer.invoke('kova:playlists'),
+  readPlaylist: (file) => ipcRenderer.invoke('kova:read-playlist', file),
+
+  // which of these scenarios this PC cannot play (not subscribed on Workshop)
+  checkScenarios: (names) => ipcRenderer.invoke('kova:check-scenarios', names),
 
   // fires when KovaaK's writes a new stats file: no polling, no browser
   // throttling, and it works while the window is hidden in the tray

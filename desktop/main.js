@@ -79,6 +79,9 @@ ipcMain.handle('kova:status', async () => {
     // like a rest day until someone works out why
     exportLevel: await kovaaks.readExportLevel(game.settings),
     playlistInProgress: await kovaaks.readPlaylistInProgress(game.playlistInProgress),
+    // both the export setting and the playlist folder are read by the game at
+    // startup, so whether it is up right now decides how we word a fix
+    running: await kovaaks.gameRunning(),
   };
 });
 
@@ -106,13 +109,48 @@ ipcMain.handle('kova:fix-export', async () => {
   }
 });
 
+// Put the week's playlist in the game. The reply carries the scenario check
+// too, because the two questions are always asked together: the playlist file
+// is ours to write, the scenarios inside it are the Workshop's to deliver.
 ipcMain.handle('kova:install-playlist', async (_e, playlist) => {
-  if (!game) return { ok: false };
+  if (!game) return { ok: false, error: 'KovaaK\'s was not found on this PC' };
+  if (!playlist || !Array.isArray(playlist.scenarioList) || !playlist.scenarioList.length) {
+    return { ok: false, error: 'That playlist has no scenarios in it' };
+  }
   try {
-    return { ok: true, file: await kovaaks.installPlaylist(game.playlists, playlist) };
+    const { file, wrote } = await kovaaks.installPlaylist(game.playlists, playlist);
+    return {
+      ok: true,
+      file,
+      wrote,
+      running: await kovaaks.gameRunning(),
+      missing: await kovaaks.missingScenarios(game, playlist.scenarioList.map((s) => s.scenario_name), { fresh: wrote }),
+    };
   } catch (e) {
     return { ok: false, error: e.message };
   }
+});
+
+// The playlists KovaaK's has on disk: how the admin publishes a week without
+// hunting for a file, and without a share code ever being typed.
+ipcMain.handle('kova:playlists', async () => (game ? kovaaks.listPlaylists(game.playlists) : []));
+ipcMain.handle('kova:read-playlist', async (_e, file) => {
+  if (!game) return null;
+  try {
+    return await kovaaks.readPlaylist(game.playlists, file);
+  } catch {
+    return null;
+  }
+});
+
+// Which of these scenario names this PC cannot play. Answered from the
+// Workshop content and the game's own Scenarios folder.
+ipcMain.handle('kova:check-scenarios', async (_e, names) => {
+  if (!game || !Array.isArray(names)) return { missing: [], known: 0 };
+  return {
+    missing: await kovaaks.missingScenarios(game, names),
+    known: (await kovaaks.installedScenarios(game)).size,
+  };
 });
 
 ipcMain.handle('kova:version', () => app.getVersion());

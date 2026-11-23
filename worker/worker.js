@@ -1414,15 +1414,36 @@ async function handleApi(request, env, url, cors, ctx) {
     if (!body || !Array.isArray(body.scenarios) || !body.scenarios.length) {
       return json({ error: 'scenarios is required' }, 400, cors);
     }
-    const scenarios = body.scenarios
+
+    // The game's own playlist file, kept verbatim so the desktop app can put
+    // it straight into KovaaK's (2026-11-23). This is what ends share codes:
+    // the player never imports anything, the week simply appears in the game.
+    // When it is here it is also the ONLY source for the scenario list, so the
+    // list people are graded against and the list in their game cannot drift.
+    let gameFile = null;
+    if (body.gameFile && typeof body.gameFile === 'object') {
+      const gf = body.gameFile;
+      const list = Array.isArray(gf.scenarioList) ? gf.scenarioList : null;
+      if (!list || !list.length || !list.every((s) => s && typeof s.scenario_name === 'string' && s.scenario_name.trim())) {
+        return json({ error: 'gameFile has no usable scenarioList' }, 400, cors);
+      }
+      if (JSON.stringify(gf).length > 64 * 1024) return json({ error: 'gameFile is too big' }, 400, cors);
+      gameFile = gf;
+    }
+
+    const source = gameFile
+      ? gameFile.scenarioList.map((s) => ({ name: s.scenario_name, requiredRuns: Number(s.play_Count) || 1 }))
+      : body.scenarios;
+    const scenarios = source
       .filter((s) => s && typeof s.name === 'string' && s.name.trim())
       .map((s) => ({ name: s.name.trim(), requiredRuns: Math.max(1, Math.min(50, Number(s.requiredRuns) || 1)) }));
     if (!scenarios.length) return json({ error: 'No usable scenarios' }, 400, cors);
 
     const playlist = {
       weekLabel: String(body.weekLabel || 'This week').slice(0, 60),
-      shareCode: body.shareCode ? String(body.shareCode).slice(0, 100) : null,
+      shareCode: (gameFile && gameFile.shareCode) || (body.shareCode ? String(body.shareCode).slice(0, 100) : null),
       scenarios,
+      gameFile,
       updatedAt: Date.now(),
       updatedBy: user.name,
     };
@@ -1431,7 +1452,9 @@ async function handleApi(request, env, url, cors, ctx) {
     // does not burn the previous day (files stop matching the new list).
     const old = await env.KOVA.get('playlist:current', 'json');
     if (old && Array.isArray(old.scenarios) && old.scenarios.length) {
-      await env.KOVA.put('playlist:prev', JSON.stringify({ ...old, replacedOn: groupDate(env) }));
+      // without its game file: the archive exists to grade an unhealed
+      // yesterday, and nothing should ever install last week into the game
+      await env.KOVA.put('playlist:prev', JSON.stringify({ ...old, gameFile: null, replacedOn: groupDate(env) }));
     }
     await env.KOVA.put('playlist:current', JSON.stringify(playlist));
     // the trial does not ride the publish any more: the admin picks a
